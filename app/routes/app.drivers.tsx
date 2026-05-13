@@ -10,6 +10,7 @@ import {
   TextField,
   Badge,
   Avatar,
+  Checkbox,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 
@@ -106,13 +107,18 @@ export default function Drivers() {
               <TextField label="Driver name" autoComplete="off" />
               <TextField label="Phone number" type="tel" autoComplete="off" />
             </FormLayout.Group>
-            <TextField label="Email address" type="email" autoComplete="off" />
-            <TextField label="Photo URL" type="url" autoComplete="off" />
+            <FormLayout.Group>
+              <TextField label="Email address" type="email" autoComplete="off" />
+              <TextField label="Driver photo URL" type="url" autoComplete="off" />
+            </FormLayout.Group>
             <FormLayout.Group>
               <TextField label="Vehicle name" autoComplete="off" />
               <TextField label="Vehicle registration" autoComplete="off" />
             </FormLayout.Group>
-            <TextField label="Vehicle type" autoComplete="off" />
+            <FormLayout.Group>
+              <TextField label="Vehicle type" autoComplete="off" />
+              <Checkbox label="Active" checked={true} onChange={() => {}} />
+            </FormLayout.Group>
             <FormLayout.Group>
               <TextField label="Fuel card number" autoComplete="off" helpText="Admin only" />
               <TextField label="Fuel card provider" autoComplete="off" helpText="Admin only" />
@@ -122,7 +128,6 @@ export default function Drivers() {
               <TextField label="End address" autoComplete="off" multiline={2} />
             </FormLayout.Group>
             <TextField label="Driver notes" autoComplete="off" multiline={3} />
-            <Badge tone="success">Active</Badge>
           </FormLayout>
         </Modal.Section>
       </Modal>
