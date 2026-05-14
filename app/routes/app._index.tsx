@@ -1,3 +1,6 @@
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -9,9 +12,12 @@ import {
   Button,
   Icon,
   Badge,
+  ResourceList,
+  ResourceItem,
+  EmptyState,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -30,6 +36,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { authenticate } from "../shopify.server";
+import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
+
 interface Stop {
   id: string;
   orderNumber: string;
@@ -38,6 +47,13 @@ interface Stop {
   eta: string;
   isLocked: boolean;
 }
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  const orders = await getDeliveryOrders(admin);
+
+  return json({ orders });
+};
 
 function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: (id: string) => void; onToggleLock: (id: string) => void }) {
   const {
@@ -66,10 +82,10 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
             </div>
             <BlockStack gap="050">
               <Text as="span" variant="bodyMd" fontWeight="bold">
-                #{stop.orderNumber} - {stop.customerName}
+                {stop.orderNumber} · {stop.customerName}
               </Text>
               <Text as="span" variant="bodySm" tone="subdued">
-                {stop.postcode} • ETA: {stop.eta}
+                {stop.postcode || "No postcode"} · ETA: {stop.eta}
               </Text>
             </BlockStack>
           </InlineStack>
@@ -93,12 +109,22 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
   );
 }
 
+function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number): Stop {
+  return {
+    id: order.id,
+    orderNumber: order.name,
+    customerName: order.customerName,
+    postcode: order.postcode || "",
+    eta: `${String(5 + stopNumber).padStart(2, "0")}:00`,
+    isLocked: false,
+  };
+}
+
 export default function OrdersMap() {
-  const [stops, setStops] = useState<Stop[]>([
-    { id: "1", orderNumber: "1001", customerName: "John Doe", postcode: "TQ12 2SN", eta: "09:00", isLocked: false },
-    { id: "2", orderNumber: "1002", customerName: "Jane Smith", postcode: "EX1 1AA", eta: "09:45", isLocked: false },
-    { id: "3", orderNumber: "1003", customerName: "Bob Brown", postcode: "PL1 1BB", eta: "10:30", isLocked: true },
-  ]);
+  const { orders } = useLoaderData<typeof loader>();
+  const [stops, setStops] = useState<Stop[]>([]);
+
+  const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -120,6 +146,16 @@ export default function OrdersMap() {
     }
   };
 
+  const toggleOrder = (order: DeliveryOrder) => {
+    setStops((currentStops) => {
+      if (currentStops.some((stop) => stop.id === order.id)) {
+        return currentStops.filter((stop) => stop.id !== order.id);
+      }
+
+      return [...currentStops, deliveryOrderToStop(order, currentStops.length + 1)];
+    });
+  };
+
   const removeStop = (id: string) => {
     setStops(stops.filter((s) => s.id !== id));
   };
@@ -133,30 +169,91 @@ export default function OrdersMap() {
       <Layout>
         <Layout.Section>
           <LegacyCard>
-            <Box
-              minHeight="600px"
-              background="bg-surface-secondary"
-              padding="0"
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "600px" }}>
-                <BlockStack align="center" gap="200">
-                  <Text as="p" variant="bodyLg" tone="subdued">UK Map Placeholder</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">Interactive map with pins will be implemented here.</Text>
+            <Box padding="400" borderBlockEndWidth="025" borderColor="border">
+              <InlineStack align="space-between">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Showing Rapid Delivery, Free Rapid Delivery and Local Delivery orders from the last 7 working days.
+                  </Text>
                 </BlockStack>
-              </div>
+                <Badge tone="info">{orders.length} orders</Badge>
+              </InlineStack>
+            </Box>
+
+            <Box minHeight="420px" background="bg-surface-secondary" padding="400">
+              <BlockStack gap="300">
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Map pins will appear here after getAddress.io is connected. For now, click orders below to build a route.
+                </Text>
+
+                {orders.length === 0 ? (
+                  <EmptyState
+                    heading="No matching delivery orders found"
+                    image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                  >
+                    <p>No orders matched the current delivery filters.</p>
+                  </EmptyState>
+                ) : (
+                  <ResourceList
+                    resourceName={{ singular: "order", plural: "orders" }}
+                    items={orders}
+                    renderItem={(order) => {
+                      const selected = selectedIds.has(order.id);
+
+                      return (
+                        <ResourceItem
+                          id={order.id}
+                          accessibilityLabel={`Select ${order.name}`}
+                          onClick={() => toggleOrder(order)}
+                        >
+                          <Box
+                            padding="300"
+                            borderColor={selected ? "border-info" : "border"}
+                            borderWidth="025"
+                            borderRadius="200"
+                            background={selected ? "bg-surface-info" : "bg-surface"}
+                          >
+                            <InlineStack align="space-between">
+                              <BlockStack gap="050">
+                                <Text as="h3" variant="bodyMd" fontWeight="bold">
+                                  {order.name} · {order.customerName}
+                                </Text>
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  {order.postcode || "No postcode"} · {order.shippingMethod || "No shipping method"}
+                                </Text>
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  {order.addressSummary}
+                                </Text>
+                              </BlockStack>
+                              <BlockStack gap="100" align="end">
+                                <Badge tone={order.addressStatus === "READY" ? "success" : "warning"}>
+                                  {order.addressStatus === "READY" ? "Ready" : order.addressStatus === "NEEDS_ADDRESS" ? "Needs address" : "Needs location check"}
+                                </Badge>
+                                {selected ? <Badge tone="info">Selected</Badge> : null}
+                              </BlockStack>
+                            </InlineStack>
+                          </Box>
+                        </ResourceItem>
+                      );
+                    }}
+                  />
+                )}
+              </BlockStack>
             </Box>
           </LegacyCard>
         </Layout.Section>
+
         <Layout.Section variant="oneThird">
           <LegacyCard title="Current Route" actions={[{ content: "Optimise", onAction: () => {} }]}>
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="100">
                 <InlineStack align="space-between">
                   <Text as="span" variant="bodySm">Stops: {stops.length}</Text>
-                  <Text as="span" variant="bodySm">Mileage: 45 miles</Text>
+                  <Text as="span" variant="bodySm">Mileage: pending</Text>
                 </InlineStack>
                 <InlineStack align="space-between">
-                  <Text as="span" variant="bodySm">Time: 2h 15m</Text>
+                  <Text as="span" variant="bodySm">Time: pending</Text>
                   <Badge tone="info">Draft</Badge>
                 </InlineStack>
               </BlockStack>
@@ -173,7 +270,7 @@ export default function OrdersMap() {
               </SortableContext>
             </DndContext>
             <Box padding="300">
-              <Button fullWidth variant="primary">Save Draft Route</Button>
+              <Button fullWidth variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
             </Box>
           </LegacyCard>
         </Layout.Section>
