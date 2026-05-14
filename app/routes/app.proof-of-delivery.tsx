@@ -18,6 +18,7 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 
+import { markStopFailedDelivery } from "../lib/failedDelivery.server";
 import { listStopsForProofOfDelivery, saveProofOfDelivery } from "../lib/proofOfDelivery.server";
 import { authenticate } from "../shopify.server";
 
@@ -31,7 +32,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = String(formData.get("intent") || "deliver");
   const stopId = String(formData.get("stopId") || "").trim();
+
+  if (intent === "failedDelivery") {
+    const reason = String(formData.get("failedReason") || "").trim();
+    const note = String(formData.get("failedNote") || "").trim();
+
+    try {
+      await markStopFailedDelivery({
+        admin,
+        stopId,
+        reason,
+        note,
+      });
+
+      return redirect("/app/proof-of-delivery");
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Failed delivery update failed." }, { status: 400 });
+    }
+  }
+
   const proofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
   const deliveryNote = String(formData.get("deliveryNote") || "").trim();
   const safePlaceNote = String(formData.get("safePlaceNote") || "").trim();
@@ -69,6 +90,8 @@ export default function ProofOfDelivery() {
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
+  const [failedReason, setFailedReason] = useState("");
+  const [failedNote, setFailedNote] = useState("");
 
   const stopOptions = stops.map((stop) => {
     const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
@@ -95,6 +118,7 @@ export default function ProofOfDelivery() {
               ) : null}
 
               <Form method="post">
+                <input type="hidden" name="intent" value="deliver" />
                 <FormLayout>
                   <Select
                     label="Stop"
@@ -141,6 +165,45 @@ export default function ProofOfDelivery() {
             </BlockStack>
           </LegacyCard>
 
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Mark failed delivery</Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Use this when the driver could not complete the delivery. A reason is required and the linked Shopify order will be tagged.
+              </Text>
+              <Form method="post">
+                <input type="hidden" name="intent" value="failedDelivery" />
+                <FormLayout>
+                  <Select
+                    label="Stop"
+                    name="stopId"
+                    options={stopOptions}
+                    value={selectedStopId}
+                    onChange={setSelectedStopId}
+                    disabled={stopOptions.length === 0}
+                  />
+                  <TextField
+                    label="Failed delivery reason"
+                    name="failedReason"
+                    value={failedReason}
+                    onChange={setFailedReason}
+                    autoComplete="off"
+                    helpText="Example, customer not home, access blocked, wrong address, no safe location."
+                  />
+                  <TextField
+                    label="Failed delivery note"
+                    name="failedNote"
+                    value={failedNote}
+                    onChange={setFailedNote}
+                    autoComplete="off"
+                    multiline={3}
+                  />
+                  <Button submit tone="critical" disabled={!selectedStopId || !failedReason}>Mark failed delivery</Button>
+                </FormLayout>
+              </Form>
+            </BlockStack>
+          </LegacyCard>
+
           <LegacyCard title="Active route stops">
             <ResourceList
               resourceName={{ singular: "stop", plural: "stops" }}
@@ -156,7 +219,7 @@ export default function ProofOfDelivery() {
                       <Text as="p" variant="bodySm" tone="subdued">
                         {formatDate(stop.route.date)} · Driver: {stop.route.driver?.name || "No driver"} · {stop.deliveryGroup?.postcode || "No postcode"}
                       </Text>
-                      <Badge tone={stop.status === "DELIVERED" ? "success" : "info"}>{stop.status}</Badge>
+                      <Badge tone={stop.status === "FAILED" ? "critical" : "info"}>{stop.status}</Badge>
                     </BlockStack>
                   </ResourceItem>
                 );
