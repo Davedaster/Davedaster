@@ -19,6 +19,7 @@ import { useState } from "react";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -42,7 +43,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const routeId = params.routeId;
 
   if (!routeId) {
@@ -53,8 +54,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const intent = String(formData.get("intent") || "");
 
   if (intent === "publish") {
-    await publishRoute(routeId);
-    return redirect(`/app/routes/${routeId}`);
+    try {
+      await publishRoute(routeId);
+      await tagPublishedRouteOrders(admin, routeId);
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Route publishing failed." }, { status: 400 });
+    }
   }
 
   if (intent === "rename") {
@@ -109,17 +115,6 @@ function formatDate(value: string | Date) {
     day: "2-digit",
     month: "short",
     year: "numeric",
-  }).format(new Date(value));
-}
-
-function formatTime(value: string | Date | null) {
-  if (!value) {
-    return "Pending";
-  }
-
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
   }).format(new Date(value));
 }
 
