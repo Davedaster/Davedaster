@@ -7,11 +7,22 @@ export type AddressLookupResult = {
   source: "getaddress" | "manual" | "none";
 };
 
+type ExpandedAddress = {
+  formatted_address?: string[];
+  line_1?: string;
+  line_2?: string;
+  line_3?: string;
+  line_4?: string;
+  locality?: string;
+  town_or_city?: string;
+  county?: string;
+};
+
 type GetAddressFindResponse = {
   postcode?: string;
   latitude?: number;
   longitude?: number;
-  addresses?: string[];
+  addresses?: Array<string | ExpandedAddress>;
 };
 
 function normalisePostcode(postcode: string | null | undefined) {
@@ -20,6 +31,32 @@ function normalisePostcode(postcode: string | null | undefined) {
 
 function normaliseText(value: string | null | undefined) {
   return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function formatExpandedAddress(address: ExpandedAddress) {
+  if (Array.isArray(address.formatted_address)) {
+    return address.formatted_address.filter(Boolean).join(", ");
+  }
+
+  return [
+    address.line_1,
+    address.line_2,
+    address.line_3,
+    address.line_4,
+    address.locality,
+    address.town_or_city,
+    address.county,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function formatGetAddressResult(address: string | ExpandedAddress) {
+  if (typeof address === "string") {
+    return address;
+  }
+
+  return formatExpandedAddress(address);
 }
 
 function scoreAddress(address: string, searchText: string) {
@@ -33,13 +70,19 @@ function scoreAddress(address: string, searchText: string) {
   return terms.reduce((score, term) => addressText.includes(term) ? score + 1 : score, 0);
 }
 
-function pickBestAddress(addresses: string[], searchText: string) {
+function pickBestAddress(addresses: Array<string | ExpandedAddress>, searchText: string) {
   if (!addresses.length) {
     return null;
   }
 
   return addresses
-    .map((address) => ({ address, score: scoreAddress(address, searchText) }))
+    .map((address) => {
+      const formattedAddress = formatGetAddressResult(address);
+      return {
+        address: formattedAddress,
+        score: scoreAddress(formattedAddress, searchText),
+      };
+    })
     .sort((a, b) => b.score - a.score)[0];
 }
 
@@ -76,9 +119,10 @@ export async function lookupAddress(postcode: string | null, searchText: string)
   const payload = await response.json() as GetAddressFindResponse;
   const addresses = payload.addresses || [];
   const bestMatch = pickBestAddress(addresses, searchText);
+  const firstAddress = addresses[0] ? formatGetAddressResult(addresses[0]) : null;
 
   return {
-    formattedAddress: bestMatch?.address || addresses[0] || searchText || cleanPostcode,
+    formattedAddress: bestMatch?.address || firstAddress || searchText || cleanPostcode,
     postcode: payload.postcode || postcode || "",
     latitude: payload.latitude ?? null,
     longitude: payload.longitude ?? null,
