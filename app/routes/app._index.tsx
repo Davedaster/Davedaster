@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { Form, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -13,6 +13,7 @@ import {
   Icon,
   Badge,
   EmptyState,
+  TextField,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
 import { useMemo, useState } from "react";
@@ -34,6 +35,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { createRouteDraft } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
 
@@ -58,6 +60,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const orders = await getDeliveryOrders(admin);
 
   return json({ orders, addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY) });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const routeName = String(formData.get("routeName") || "").trim();
+  const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  if (!selectedOrderIds.length) {
+    return json({ ok: false, error: "Select at least one order before saving a draft route." }, { status: 400 });
+  }
+
+  const orders = await getDeliveryOrders(admin);
+  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  const selectedOrders = selectedOrderIds
+    .map((id) => ordersById.get(id))
+    .filter((order): order is DeliveryOrder => Boolean(order));
+
+  if (!selectedOrders.length) {
+    return json({ ok: false, error: "Selected orders could not be found." }, { status: 400 });
+  }
+
+  await createRouteDraft({ orders: selectedOrders, routeName });
+
+  return redirect("/app/routes");
 };
 
 function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: (id: string) => void; onToggleLock: (id: string) => void }) {
@@ -123,14 +153,6 @@ function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number): Stop {
     eta: `${String(5 + stopNumber).padStart(2, "0")}:00`,
     isLocked: false,
   };
-}
-
-function addressTone(status: DeliveryOrder["addressStatus"], confidence: DeliveryOrder["addressConfidence"]) {
-  if (status === "READY" && confidence === "HIGH") {
-    return "success" as const;
-  }
-
-  return "warning" as const;
 }
 
 function addressLabel(order: DeliveryOrder) {
@@ -246,24 +268,9 @@ function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryO
           aria-hidden="true"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         >
-          <path
-            d="M52 4 C42 10 39 22 41 32 C31 36 30 50 37 59 C29 65 31 79 41 84 C52 90 66 84 68 72 C78 66 78 51 69 44 C72 31 66 15 52 4 Z"
-            fill="#eef7ef"
-            stroke="#b7d7c2"
-            strokeWidth="1"
-          />
-          <path
-            d="M46 54 C38 59 38 72 47 76 C56 80 65 74 64 64 C63 55 54 50 46 54 Z"
-            fill="#e5f4e9"
-            stroke="#b7d7c2"
-            strokeWidth="0.8"
-          />
-          <path
-            d="M43 78 C36 81 33 90 40 94 C48 98 57 93 55 85 C54 79 49 76 43 78 Z"
-            fill="#e5f4e9"
-            stroke="#b7d7c2"
-            strokeWidth="0.8"
-          />
+          <path d="M52 4 C42 10 39 22 41 32 C31 36 30 50 37 59 C29 65 31 79 41 84 C52 90 66 84 68 72 C78 66 78 51 69 44 C72 31 66 15 52 4 Z" fill="#eef7ef" stroke="#b7d7c2" strokeWidth="1" />
+          <path d="M46 54 C38 59 38 72 47 76 C56 80 65 74 64 64 C63 55 54 50 46 54 Z" fill="#e5f4e9" stroke="#b7d7c2" strokeWidth="0.8" />
+          <path d="M43 78 C36 81 33 90 40 94 C48 98 57 93 55 85 C54 79 49 76 43 78 Z" fill="#e5f4e9" stroke="#b7d7c2" strokeWidth="0.8" />
         </svg>
 
         <div style={{ position: "absolute", inset: 16 }}>
@@ -305,8 +312,10 @@ function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryO
 export default function OrdersMap() {
   const { orders, addressLookupEnabled } = useLoaderData<typeof loader>();
   const [stops, setStops] = useState<Stop[]>([]);
+  const [routeName, setRouteName] = useState("");
 
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
+  const selectedOrderIds = stops.map((stop) => stop.id).join(",");
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -413,7 +422,20 @@ export default function OrdersMap() {
               </SortableContext>
             </DndContext>
             <Box padding="300">
-              <Button fullWidth variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
+              <Form method="post">
+                <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
+                <BlockStack gap="300">
+                  <TextField
+                    label="Draft route name, optional"
+                    name="routeName"
+                    value={routeName}
+                    onChange={setRouteName}
+                    autoComplete="off"
+                    placeholder="Example, Chris, North Route"
+                  />
+                  <Button fullWidth submit variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
+                </BlockStack>
+              </Form>
             </Box>
           </LegacyCard>
         </Layout.Section>
