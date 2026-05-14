@@ -1,5 +1,12 @@
-import { Page, Layout, LegacyCard, Text, BlockStack, Badge, Divider } from "@shopify/polaris";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+import { Page, Layout, LegacyCard, Text, BlockStack, Badge, Divider, InlineStack } from "@shopify/polaris";
 
+import {
+  isResendEnabled,
+  isTwilioEnabled,
+} from "../lib/notificationSenders.server";
 import {
   buildBookedSlotMessage,
   buildDelayMessage,
@@ -7,6 +14,7 @@ import {
   buildNextDropTrackingMessage,
   buildOutForDeliveryMessage,
 } from "../lib/notificationTemplates.server";
+import { authenticate } from "../shopify.server";
 
 const previewInput = {
   customerName: "Chris",
@@ -53,7 +61,18 @@ const previews = [
   },
 ];
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+
+  return json({
+    twilioEnabled: isTwilioEnabled(),
+    resendEnabled: isResendEnabled(),
+  });
+};
+
 export default function Notifications() {
+  const { twilioEnabled, resendEnabled } = useLoaderData<typeof loader>();
+
   return (
     <Page title="Notifications">
       <Layout>
@@ -62,8 +81,16 @@ export default function Notifications() {
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Customer message templates</Text>
               <Text as="p" variant="bodyMd" tone="subdued">
-                These are preview templates only. Sending through Twilio and Resend will be added in a later milestone.
+                Twilio and Resend sender helpers are now ready. Actual route message sending will stay behind a manual Send notifications button in a later milestone.
               </Text>
+              <InlineStack gap="200">
+                <Badge tone={twilioEnabled ? "success" : "warning"}>
+                  Twilio {twilioEnabled ? "enabled" : "not set up"}
+                </Badge>
+                <Badge tone={resendEnabled ? "success" : "warning"}>
+                  Resend {resendEnabled ? "enabled" : "not set up"}
+                </Badge>
+              </InlineStack>
             </BlockStack>
           </LegacyCard>
 
