@@ -1,4 +1,12 @@
 import prisma from "../db.server";
+import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
+
+type ShopifyAdmin = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<Response>;
+};
 
 function isValidProofPhotoUrl(value: string) {
   try {
@@ -41,6 +49,7 @@ export async function listStopsForProofOfDelivery() {
 }
 
 export async function saveProofOfDelivery(input: {
+  admin: ShopifyAdmin;
   stopId: string;
   proofPhotoUrl: string;
   deliveryNote?: string | null;
@@ -59,11 +68,15 @@ export async function saveProofOfDelivery(input: {
           stops: true,
         },
       },
-      deliveryGroup: true,
+      deliveryGroup: {
+        include: {
+          orders: true,
+        },
+      },
     },
   });
 
-  if (!stop || !stop.deliveryGroupId) {
+  if (!stop || !stop.deliveryGroupId || !stop.deliveryGroup) {
     throw new Error("Stop not found.");
   }
 
@@ -77,6 +90,13 @@ export async function saveProofOfDelivery(input: {
 
   if (!isValidProofPhotoUrl(proofPhotoUrl)) {
     throw new Error("Proof photo link must be a valid web address.");
+  }
+
+  const shopifyResults = [];
+
+  for (const order of stop.deliveryGroup.orders) {
+    const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
+    shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
   }
 
   await prisma.$transaction(async (tx) => {
@@ -113,7 +133,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with proof photo`,
+            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}`,
           },
         },
       },
