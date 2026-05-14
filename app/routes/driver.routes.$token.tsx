@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 
-import { buildWazeUrl } from "../lib/waze.server";
+import { buildWazeUrl } from "../lib/waze";
 import { canStartDriverRoute, getDriverRouteByToken, startDriverRouteFromToken } from "../lib/driverRouteAccess.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 
@@ -73,10 +73,6 @@ function formatSlot(estimatedArrival: string | Date | null) {
 
 function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
-}
-
-function copyAddressScript(address: string) {
-  return `navigator.clipboard.writeText(${JSON.stringify(address)}); this.innerText='Address copied'; setTimeout(() => this.innerText='Copy address', 1200);`;
 }
 
 export default function DriverRoutePage() {
