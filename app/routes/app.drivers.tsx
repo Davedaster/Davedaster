@@ -12,10 +12,11 @@ import {
   TextField,
   Badge,
   Avatar,
-  Checkbox,
   Button,
   BlockStack,
+  Select,
 } from "@shopify/polaris";
+import { useState } from "react";
 
 import { createDriver, listDrivers } from "../lib/drivers.server";
 import { authenticate } from "../shopify.server";
@@ -49,7 +50,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     startAddress: String(formData.get("startAddress") || "").trim(),
     endAddress: String(formData.get("endAddress") || "").trim(),
     notes: String(formData.get("notes") || "").trim(),
-    isActive: formData.get("isActive") === "on",
+    isActive: String(formData.get("isActive") || "true") === "true",
   });
 
   return redirect("/app/drivers");
@@ -57,6 +58,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function Drivers() {
   const { drivers } = useLoaderData<typeof loader>();
+  const [activeStatus, setActiveStatus] = useState("true");
 
   const resourceName = {
     singular: "driver",
@@ -118,7 +120,16 @@ export default function Drivers() {
                   <TextField label="Start address" name="startAddress" autoComplete="off" multiline={2} />
                   <TextField label="End address" name="endAddress" autoComplete="off" multiline={2} />
                   <TextField label="Driver notes" name="notes" autoComplete="off" multiline={3} />
-                  <Checkbox label="Active" name="isActive" checked />
+                  <Select
+                    label="Status"
+                    name="isActive"
+                    options={[
+                      { label: "Active", value: "true" },
+                      { label: "Inactive", value: "false" },
+                    ]}
+                    value={activeStatus}
+                    onChange={setActiveStatus}
+                  />
                   <Button submit variant="primary">Save driver</Button>
                 </FormLayout>
               </BlockStack>
