@@ -66,8 +66,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "sendNotifications") {
     try {
-      const result = await sendBookedSlotNotifications(routeId);
-      return json({ ok: true, message: `${result.smsSent} SMS sent, ${result.emailsSent} emails sent, ${result.skipped} orders skipped.` });
+      await sendBookedSlotNotifications(routeId);
+      return redirect(`/app/routes/${routeId}`);
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
     }
@@ -227,10 +227,6 @@ export default function RouteDetails() {
 
               {actionData && "error" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
-              ) : null}
-
-              {actionData && "message" in actionData ? (
-                <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text>
               ) : null}
 
               {!routexlEnabled ? (
