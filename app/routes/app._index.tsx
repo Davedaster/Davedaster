@@ -129,6 +129,10 @@ function addressTone(status: DeliveryOrder["addressStatus"], confidence: Deliver
 }
 
 function addressLabel(order: DeliveryOrder) {
+  if (order.hasManualOverride) {
+    return "Manual address";
+  }
+
   if (order.addressStatus === "NEEDS_ADDRESS") {
     return "Needs address";
   }
@@ -256,6 +260,11 @@ export default function OrdersMap() {
                                 {order.formattedAddress ? (
                                   <Text as="p" variant="bodySm" tone="subdued">
                                     Matched address: {order.formattedAddress}
+                                  </Text>
+                                ) : null}
+                                {order.hasManualOverride ? (
+                                  <Text as="p" variant="bodySm" tone="success">
+                                    Manual override: {order.manualAddress}
                                   </Text>
                                 ) : null}
                                 <Text as="p" variant="bodySm" tone="subdued">

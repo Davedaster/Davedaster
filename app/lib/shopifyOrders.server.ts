@@ -1,3 +1,5 @@
+import type { AddressOverride } from "@prisma/client";
+import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
 import { getLastWorkingDaysStart } from "./workingDays.server";
 
@@ -86,6 +88,9 @@ export type DeliveryOrder = {
   latitude: number | null;
   longitude: number | null;
   lineItemSummary: string;
+  hasManualOverride: boolean;
+  manualAddress: string | null;
+  manualAddressNotes: string | null;
 };
 
 const INCLUDED_SHIPPING_TERMS = [
@@ -184,6 +189,26 @@ function hasWeakAddress(order: ShopifyOrderNode) {
   return !address.address1 || !address.zip;
 }
 
+function applyOverride(order: DeliveryOrder, override: AddressOverride | undefined): DeliveryOrder {
+  if (!override) {
+    return order;
+  }
+
+  return {
+    ...order,
+    postcode: override.postcode || order.postcode,
+    addressSummary: override.manualAddress,
+    formattedAddress: override.manualAddress,
+    addressStatus: override.addressStatus === "READY" ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: override.addressStatus === "READY" ? "HIGH" : "LOW",
+    latitude: override.latitude,
+    longitude: override.longitude,
+    hasManualOverride: true,
+    manualAddress: override.manualAddress,
+    manualAddressNotes: override.notes,
+  };
+}
+
 export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
   const shippingMethod = shippingTitle(order);
   const items = lineItems(order);
@@ -200,7 +225,7 @@ export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
   return includesAny(shippingMethod, INCLUDED_SHIPPING_TERMS);
 }
 
-export async function toDeliveryOrder(order: ShopifyOrderNode): Promise<DeliveryOrder> {
+export async function toDeliveryOrder(order: ShopifyOrderNode, override?: AddressOverride): Promise<DeliveryOrder> {
   const items = lineItems(order);
   const hasPanel = items.some(isPanelLineItem);
   const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
@@ -208,13 +233,13 @@ export async function toDeliveryOrder(order: ShopifyOrderNode): Promise<Delivery
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const weakAddress = hasWeakAddress(order);
   const addressSummary = formatAddress(order);
-  const lookup = hasDeliveryAddress
+  const lookup = hasDeliveryAddress && !override
     ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary)
     : null;
 
   const lookupNeedsCheck = lookup ? lookup.confidence === "LOW" || !lookup.latitude || !lookup.longitude : false;
 
-  return {
+  const deliveryOrder: DeliveryOrder = {
     id: order.id,
     name: order.name,
     createdAt: order.createdAt,
@@ -239,7 +264,12 @@ export async function toDeliveryOrder(order: ShopifyOrderNode): Promise<Delivery
     latitude: lookup?.latitude || null,
     longitude: lookup?.longitude || null,
     lineItemSummary: items.map((item) => item.title).join(", "),
+    hasManualOverride: false,
+    manualAddress: null,
+    manualAddressNotes: null,
   };
+
+  return applyOverride(deliveryOrder, override);
 }
 
 const DELIVERY_ORDERS_QUERY = `#graphql
@@ -311,6 +341,7 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
 
   const orders = payload.data?.orders?.edges.map((edge) => edge.node) || [];
   const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
+  const overrides = await getAddressOverridesByOrderId();
 
-  return Promise.all(filteredOrders.map(toDeliveryOrder));
+  return Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
 }

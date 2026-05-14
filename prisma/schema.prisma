@@ -116,6 +116,20 @@ model OrderStop {
   updatedAt         DateTime @updatedAt
 }
 
+model AddressOverride {
+  id                 String   @id @default(cuid())
+  shopifyOrderId      String   @unique
+  shopifyOrderName    String?
+  manualAddress       String
+  postcode            String?
+  latitude            Float?
+  longitude           Float?
+  notes               String?
+  addressStatus       String   @default("READY") // READY, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
 model AreaFilter {
   id                String   @id @default(cuid())
   name              String   // Northern, Central, etc.
