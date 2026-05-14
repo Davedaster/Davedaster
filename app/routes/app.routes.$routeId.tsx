@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, useActionData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -17,7 +17,7 @@ import {
 import { useState } from "react";
 
 import { listActiveDrivers } from "../lib/drivers.server";
-import { assignDriverToRoute, getRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { assignDriverToRoute, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -37,7 +37,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route, drivers });
+  return json({ route, drivers, routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD) });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -73,6 +73,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/routes/${routeId}`);
   }
 
+  if (intent === "optimise") {
+    try {
+      await optimiseRoute(routeId);
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Route optimisation failed." }, { status: 400 });
+    }
+  }
+
   return redirect(`/app/routes/${routeId}`);
 };
 
@@ -97,7 +106,8 @@ function statusTone(status: string) {
 }
 
 export default function RouteDetails() {
-  const { route, drivers } = useLoaderData<typeof loader>();
+  const { route, drivers, routexlEnabled } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const [routeName, setRouteName] = useState(route.name);
   const [driverId, setDriverId] = useState(route.driverId || "");
   const canPublish = route.status === "DRAFT";
@@ -158,9 +168,22 @@ export default function RouteDetails() {
                   <Text as="p" variant="bodySm" tone="subdued">
                     Driver: {route.driver?.name || "No driver assigned"}
                   </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Distance: {route.totalMileage ? `${route.totalMileage.toFixed(1)} km` : "Pending"} · Time: {route.totalDuration ? `${route.totalDuration} minutes` : "Pending"}
+                  </Text>
                 </BlockStack>
                 <Badge tone={statusTone(route.status)}>{route.status}</Badge>
               </InlineStack>
+
+              {actionData && "error" in actionData ? (
+                <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
+              ) : null}
+
+              {!routexlEnabled ? (
+                <Text as="p" variant="bodySm" tone="critical">
+                  RouteXL is not enabled yet. Add ROUTEXL_USERNAME and ROUTEXL_PASSWORD to the app environment before optimising live routes.
+                </Text>
+              ) : null}
 
               {canRename ? (
                 <Form method="post">
@@ -191,6 +214,13 @@ export default function RouteDetails() {
                   <Button submit>Save driver</Button>
                 </InlineStack>
               </Form>
+
+              <InlineStack gap="200">
+                <Form method="post">
+                  <input type="hidden" name="intent" value="optimise" />
+                  <Button submit disabled={!routexlEnabled || route.stops.length === 0}>Optimise with RouteXL</Button>
+                </Form>
+              </InlineStack>
 
               <Form id="publish-route-form" method="post">
                 <input type="hidden" name="intent" value="publish" />
