@@ -20,6 +20,11 @@ export async function listDriverRoutes() {
           deliveryGroup: {
             include: {
               orders: true,
+              proofPhotos: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
             },
           },
         },
@@ -46,6 +51,11 @@ export async function getDriverRoute(routeId: string) {
           deliveryGroup: {
             include: {
               orders: true,
+              proofPhotos: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
             },
           },
         },

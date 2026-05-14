@@ -98,10 +98,20 @@ model DeliveryGroup {
   stops             Stop[]
   orders            OrderStop[]
   proofPhotoUrl     String?
+  proofPhotos       ProofPhoto[]
   deliveryNote      String?
   safePlaceNote     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+model ProofPhoto {
+  id                String   @id @default(cuid())
+  deliveryGroupId   String
+  deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  url               String
+  label             String?
+  createdAt         DateTime @default(now())
 }
 
 model OrderStop {

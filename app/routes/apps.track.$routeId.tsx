@@ -57,6 +57,11 @@ export default function CustomerTrackingPage() {
   const { route, stop, deliveryGroup, order, isNextDrop } = tracking;
   const slot = formatSlot(stop.estimatedArrival);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
+  const proofPhotos = deliveryGroup.proofPhotos?.length
+    ? deliveryGroup.proofPhotos
+    : deliveryGroup.proofPhotoUrl
+      ? [{ id: "primary", url: deliveryGroup.proofPhotoUrl, label: "Proof photo" }]
+      : [];
 
   return (
     <main style={{ minHeight: "100vh", background: "#f4f7fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
@@ -110,10 +115,16 @@ export default function CustomerTrackingPage() {
               <p style={{ margin: 0, color: "#667085" }}>Our own team will bring your order to a room of your choice where access allows.</p>
             </div>
 
-            {showProof && deliveryGroup.proofPhotoUrl ? (
+            {showProof && proofPhotos.length ? (
               <div style={{ marginTop: 18 }}>
                 <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Proof of delivery</h3>
-                <a href={deliveryGroup.proofPhotoUrl} target="_blank" rel="noreferrer" style={{ color: "#509AE6", fontWeight: 700 }}>View delivery photo</a>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {proofPhotos.map((photo, index) => (
+                    <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{ color: "#509AE6", fontWeight: 700 }}>
+                      View {photo.label || `delivery photo ${index + 1}`}
+                    </a>
+                  ))}
+                </div>
               </div>
             ) : null}
           </aside>
