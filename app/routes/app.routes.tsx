@@ -32,6 +32,18 @@ function formatDate(value: string | Date) {
   }).format(new Date(value));
 }
 
+function statusTone(status: string) {
+  if (status === "DRAFT") {
+    return "info" as const;
+  }
+
+  if (status === "PUBLISHED") {
+    return "success" as const;
+  }
+
+  return "attention" as const;
+}
+
 export default function Routes() {
   const { routes } = useLoaderData<typeof loader>();
 
@@ -52,7 +64,11 @@ export default function Routes() {
                 resourceName={{ singular: "route", plural: "routes" }}
                 items={routes}
                 renderItem={(route) => (
-                  <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`}>
+                  <ResourceItem
+                    id={route.id}
+                    url={`/app/routes/${route.id}`}
+                    accessibilityLabel={`View ${route.name}`}
+                  >
                     <InlineStack align="space-between">
                       <BlockStack gap="100">
                         <Text as="h3" variant="bodyMd" fontWeight="bold">
@@ -68,7 +84,7 @@ export default function Routes() {
                             .join(" · ")}
                         </Text>
                       </BlockStack>
-                      <Badge tone={route.status === "DRAFT" ? "info" : "success"}>{route.status}</Badge>
+                      <Badge tone={statusTone(route.status)}>{route.status}</Badge>
                     </InlineStack>
                   </ResourceItem>
                 )}
