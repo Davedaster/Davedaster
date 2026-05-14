@@ -1,5 +1,11 @@
-import type { AdminApiContext } from "@shopify/shopify-app-remix/server";
 import { getLastWorkingDaysStart } from "./workingDays.server";
+
+type ShopifyAdmin = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<Response>;
+};
 
 type ShopifyLineItem = {
   title: string;
@@ -47,6 +53,15 @@ type ShopifyOrderNode = {
       node: ShopifyLineItem;
     }>;
   };
+};
+
+type DeliveryOrdersPayload = {
+  data?: {
+    orders?: {
+      edges: Array<{ node: ShopifyOrderNode }>;
+    };
+  };
+  errors?: Array<{ message: string }>;
 };
 
 export type DeliveryOrder = {
@@ -266,16 +281,20 @@ const DELIVERY_ORDERS_QUERY = `#graphql
   }
 `;
 
-export async function getDeliveryOrders(admin: AdminApiContext) {
+export async function getDeliveryOrders(admin: ShopifyAdmin) {
   const startDate = getLastWorkingDaysStart(7);
   const query = `created_at:>=${startDate.toISOString().slice(0, 10)}`;
 
   const response = await admin.graphql(DELIVERY_ORDERS_QUERY, {
     variables: { query },
   });
-  const payload = await response.json();
+  const payload = await response.json() as DeliveryOrdersPayload;
 
-  const orders = payload.data.orders.edges.map((edge: { node: ShopifyOrderNode }) => edge.node);
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join(", "));
+  }
+
+  const orders = payload.data?.orders?.edges.map((edge) => edge.node) || [];
 
   return orders
     .filter(shouldShowOnDeliveryMap)
