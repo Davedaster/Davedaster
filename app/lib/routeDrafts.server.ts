@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { buildEtaSlots } from "./etaSlots.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
 import { buildRouteXLLocation, optimiseLocations } from "./routexl.server";
 
@@ -296,6 +297,39 @@ export async function optimiseRoute(routeId: string) {
           create: {
             action: "RouteXL optimised",
             details: `RouteXL returned ${optimised.totalDistanceKm ?? 0} km and ${optimised.totalDurationMinutes ?? 0} minutes`,
+          },
+        },
+      },
+    });
+  });
+
+  return getRoute(routeId);
+}
+
+export async function calculateEtaSlots(routeId: string, startTime: string, stopMinutes: number, slotMinutes: number) {
+  const route = await getRoute(routeId);
+
+  if (!route) {
+    throw new Error("Route not found.");
+  }
+
+  const etaSlots = buildEtaSlots(route.stops, route.date, startTime, stopMinutes, slotMinutes);
+
+  await prisma.$transaction(async (tx) => {
+    for (const etaSlot of etaSlots) {
+      await tx.stop.update({
+        where: { id: etaSlot.stopId },
+        data: { estimatedArrival: etaSlot.estimatedArrival },
+      });
+    }
+
+    await tx.route.update({
+      where: { id: routeId },
+      data: {
+        history: {
+          create: {
+            action: "ETA slots calculated",
+            details: `Start ${startTime}, ${stopMinutes} minutes per stop, ${slotMinutes} minute customer slots`,
           },
         },
       },
