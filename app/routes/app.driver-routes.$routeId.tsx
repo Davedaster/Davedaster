@@ -76,6 +76,44 @@ function statusTone(status: string) {
   return "info" as const;
 }
 
+function buildWazeUrl(stop: {
+  deliveryGroup?: {
+    latitude?: number | null;
+    longitude?: number | null;
+    address?: string | null;
+    formattedAddress?: string | null;
+    postcode?: string | null;
+  } | null;
+}) {
+  const group = stop.deliveryGroup;
+
+  if (!group) {
+    return null;
+  }
+
+  if (typeof group.latitude === "number" && typeof group.longitude === "number") {
+    return `https://waze.com/ul?ll=${group.latitude},${group.longitude}&navigate=yes`;
+  }
+
+  const query = [group.address, group.formattedAddress, group.postcode]
+    .filter(Boolean)
+    .join(", ");
+
+  if (!query) {
+    return null;
+  }
+
+  return `https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`;
+}
+
+function tidyPhone(phone?: string | null) {
+  if (!phone) {
+    return null;
+  }
+
+  return phone.replace(/[^+\d]/g, "");
+}
+
 export default function DriverRouteDetails() {
   const { route } = useLoaderData<typeof loader>();
 
@@ -83,7 +121,9 @@ export default function DriverRouteDetails() {
     const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
     const customerNames = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "No customer name";
     const address = stop.deliveryGroup?.address || stop.deliveryGroup?.formattedAddress || "No address";
-    const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || "No phone";
+    const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || null;
+    const cleanedPhone = tidyPhone(phone);
+    const wazeUrl = buildWazeUrl(stop);
 
     return [
       String(stop.orderIndex),
@@ -91,9 +131,21 @@ export default function DriverRouteDetails() {
       customerNames,
       address,
       stop.deliveryGroup?.postcode || "No postcode",
-      phone,
+      phone || "No phone",
       formatSlot(stop.estimatedArrival),
       <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>,
+      <InlineStack gap="200">
+        {wazeUrl ? (
+          <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>
+            Open Waze
+          </Button>
+        ) : null}
+        {cleanedPhone ? (
+          <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>
+            Call customer
+          </Button>
+        ) : null}
+      </InlineStack>,
     ];
   });
 
@@ -129,8 +181,8 @@ export default function DriverRouteDetails() {
 
           <LegacyCard title="Stops">
             <DataTable
-              columnContentTypes={["numeric", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Stop", "Orders", "Customer", "Address", "Postcode", "Phone", "ETA slot", "Status"]}
+              columnContentTypes={["numeric", "text", "text", "text", "text", "text", "text", "text", "text"]}
+              headings={["Stop", "Orders", "Customer", "Address", "Postcode", "Phone", "ETA slot", "Status", "Actions"]}
               rows={rows}
             />
           </LegacyCard>
