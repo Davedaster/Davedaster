@@ -18,6 +18,12 @@ function isValidProofPhotoUrl(value: string) {
   }
 }
 
+function normaliseProofPhotoUrls(value: string | string[]) {
+  const urls = Array.isArray(value) ? value : [value];
+
+  return urls.map((url) => url.trim()).filter(Boolean);
+}
+
 export async function listStopsForProofOfDelivery() {
   return prisma.stop.findMany({
     where: {
@@ -43,6 +49,7 @@ export async function listStopsForProofOfDelivery() {
       deliveryGroup: {
         include: {
           orders: true,
+          proofPhotos: true,
         },
       },
     },
@@ -52,12 +59,13 @@ export async function listStopsForProofOfDelivery() {
 export async function saveProofOfDelivery(input: {
   admin: ShopifyAdmin;
   stopId: string;
-  proofPhotoUrl: string;
+  proofPhotoUrl: string | string[];
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
 }) {
-  const proofPhotoUrl = input.proofPhotoUrl.trim();
+  const proofPhotoUrls = normaliseProofPhotoUrls(input.proofPhotoUrl);
+  const primaryProofPhotoUrl = proofPhotoUrls[0];
 
   const stop = await prisma.stop.findUnique({
     where: {
@@ -89,12 +97,14 @@ export async function saveProofOfDelivery(input: {
     throw new Error("This stop has already been marked failed.");
   }
 
-  if (!proofPhotoUrl) {
+  if (!proofPhotoUrls.length || !primaryProofPhotoUrl) {
     throw new Error("Proof photo link is required before marking delivered.");
   }
 
-  if (!isValidProofPhotoUrl(proofPhotoUrl)) {
-    throw new Error("Proof photo link must be a valid web address.");
+  for (const proofPhotoUrl of proofPhotoUrls) {
+    if (!isValidProofPhotoUrl(proofPhotoUrl)) {
+      throw new Error("Every proof photo link must be a valid web address.");
+    }
   }
 
   const shopifyResults = [];
@@ -106,7 +116,7 @@ export async function saveProofOfDelivery(input: {
 
   const notificationResult = await sendDeliveryCompleteNotifications({
     routeName: stop.route.name,
-    proofPhotoUrl,
+    proofPhotoUrl: primaryProofPhotoUrl,
     orders: stop.deliveryGroup.orders,
   });
   const notificationErrorDetails = notificationResult.errors.length
@@ -119,7 +129,13 @@ export async function saveProofOfDelivery(input: {
         id: stop.deliveryGroupId!,
       },
       data: {
-        proofPhotoUrl,
+        proofPhotoUrl: primaryProofPhotoUrl,
+        proofPhotos: {
+          create: proofPhotoUrls.map((url, index) => ({
+            url,
+            label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
+          })),
+        },
         deliveryNote: input.deliveryNote?.trim() || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
       },
@@ -147,7 +163,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
