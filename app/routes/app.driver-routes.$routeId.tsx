@@ -7,10 +7,11 @@ import {
   LegacyCard,
   Text,
   BlockStack,
-  DataTable,
   Badge,
   Button,
   InlineStack,
+  Box,
+  Divider,
 } from "@shopify/polaris";
 
 import { formatEtaSlot } from "../lib/etaSlots.server";
@@ -116,38 +117,9 @@ function tidyPhone(phone?: string | null) {
 
 export default function DriverRouteDetails() {
   const { route } = useLoaderData<typeof loader>();
-
-  const rows = route.stops.map((stop) => {
-    const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
-    const customerNames = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "No customer name";
-    const address = stop.deliveryGroup?.address || stop.deliveryGroup?.formattedAddress || "No address";
-    const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || null;
-    const cleanedPhone = tidyPhone(phone);
-    const wazeUrl = buildWazeUrl(stop);
-
-    return [
-      String(stop.orderIndex),
-      orders,
-      customerNames,
-      address,
-      stop.deliveryGroup?.postcode || "No postcode",
-      phone || "No phone",
-      formatSlot(stop.estimatedArrival),
-      <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>,
-      <InlineStack gap="200">
-        {wazeUrl ? (
-          <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>
-            Open Waze
-          </Button>
-        ) : null}
-        {cleanedPhone ? (
-          <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>
-            Call customer
-          </Button>
-        ) : null}
-      </InlineStack>,
-    ];
-  });
+  const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
+  const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
+  const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
 
   return (
     <Page
@@ -165,7 +137,7 @@ export default function DriverRouteDetails() {
                     {formatDate(route.date)} · Driver: {route.driver?.name || "No driver assigned"}
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    {route.stops.length} stops · Status: {route.status}
+                    {route.stops.length} stops · {pendingStops} pending · {deliveredStops} delivered · {failedStops} failed
                   </Text>
                 </BlockStack>
                 {route.status !== "OUT_FOR_DELIVERY" ? (
@@ -179,13 +151,70 @@ export default function DriverRouteDetails() {
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Stops">
-            <DataTable
-              columnContentTypes={["numeric", "text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Stop", "Orders", "Customer", "Address", "Postcode", "Phone", "ETA slot", "Status", "Actions"]}
-              rows={rows}
-            />
-          </LegacyCard>
+          <BlockStack gap="300">
+            {route.stops.map((stop) => {
+              const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
+              const customerNames = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "No customer name";
+              const address = stop.deliveryGroup?.address || stop.deliveryGroup?.formattedAddress || "No address";
+              const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || null;
+              const cleanedPhone = tidyPhone(phone);
+              const wazeUrl = buildWazeUrl(stop);
+
+              return (
+                <LegacyCard key={stop.id} sectioned>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="start">
+                      <BlockStack gap="100">
+                        <Text as="h3" variant="headingMd">Stop {stop.orderIndex}</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">Orders: {orders}</Text>
+                      </BlockStack>
+                      <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>
+                    </InlineStack>
+
+                    <Divider />
+
+                    <Box>
+                      <BlockStack gap="200">
+                        <BlockStack gap="050">
+                          <Text as="p" variant="bodySm" tone="subdued">Customer</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">{customerNames}</Text>
+                        </BlockStack>
+
+                        <BlockStack gap="050">
+                          <Text as="p" variant="bodySm" tone="subdued">Address</Text>
+                          <Text as="p" variant="bodyMd">{address}</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">{stop.deliveryGroup?.postcode || "No postcode"}</Text>
+                        </BlockStack>
+
+                        <BlockStack gap="050">
+                          <Text as="p" variant="bodySm" tone="subdued">ETA slot</Text>
+                          <Text as="p" variant="bodyMd" fontWeight="bold">{formatSlot(stop.estimatedArrival)}</Text>
+                        </BlockStack>
+
+                        <BlockStack gap="050">
+                          <Text as="p" variant="bodySm" tone="subdued">Phone</Text>
+                          <Text as="p" variant="bodyMd">{phone || "No phone"}</Text>
+                        </BlockStack>
+                      </BlockStack>
+                    </Box>
+
+                    <InlineStack gap="200">
+                      {wazeUrl ? (
+                        <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>
+                          Open Waze
+                        </Button>
+                      ) : null}
+                      {cleanedPhone ? (
+                        <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>
+                          Call customer
+                        </Button>
+                      ) : null}
+                    </InlineStack>
+                  </BlockStack>
+                </LegacyCard>
+              );
+            })}
+          </BlockStack>
         </Layout.Section>
       </Layout>
     </Page>
