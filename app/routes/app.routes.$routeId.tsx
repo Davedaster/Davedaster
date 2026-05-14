@@ -12,10 +12,12 @@ import {
   Button,
   DataTable,
   TextField,
+  Select,
 } from "@shopify/polaris";
 import { useState } from "react";
 
-import { getRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { listActiveDrivers } from "../lib/drivers.server";
+import { assignDriverToRoute, getRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -26,13 +28,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  const route = await getRoute(routeId);
+  const [route, drivers] = await Promise.all([
+    getRoute(routeId),
+    listActiveDrivers(),
+  ]);
 
   if (!route) {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route });
+  return json({ route, drivers });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -61,6 +66,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/routes/${routeId}`);
   }
 
+  if (intent === "assignDriver") {
+    const driverIdValue = String(formData.get("driverId") || "").trim();
+    await assignDriverToRoute(routeId, driverIdValue || null);
+
+    return redirect(`/app/routes/${routeId}`);
+  }
+
   return redirect(`/app/routes/${routeId}`);
 };
 
@@ -85,10 +97,19 @@ function statusTone(status: string) {
 }
 
 export default function RouteDetails() {
-  const { route } = useLoaderData<typeof loader>();
+  const { route, drivers } = useLoaderData<typeof loader>();
   const [routeName, setRouteName] = useState(route.name);
+  const [driverId, setDriverId] = useState(route.driverId || "");
   const canPublish = route.status === "DRAFT";
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
+
+  const driverOptions = [
+    { label: "No driver assigned", value: "" },
+    ...drivers.map((driver) => ({
+      label: `${driver.name}${driver.vehicleName ? `, ${driver.vehicleName}` : ""}${driver.vehicleRegistration ? `, ${driver.vehicleRegistration}` : ""}`,
+      value: driver.id,
+    })),
+  ];
 
   const stopRows = route.stops.map((stop) => {
     const deliveryGroup = stop.deliveryGroup;
@@ -134,6 +155,9 @@ export default function RouteDetails() {
                   <Text as="p" variant="bodySm" tone="subdued">
                     {formatDate(route.date)} · {route.stops.length} stops
                   </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Driver: {route.driver?.name || "No driver assigned"}
+                  </Text>
                 </BlockStack>
                 <Badge tone={statusTone(route.status)}>{route.status}</Badge>
               </InlineStack>
@@ -153,6 +177,20 @@ export default function RouteDetails() {
                   </InlineStack>
                 </Form>
               ) : null}
+
+              <Form method="post">
+                <input type="hidden" name="intent" value="assignDriver" />
+                <InlineStack gap="200" blockAlign="end">
+                  <Select
+                    label="Driver"
+                    name="driverId"
+                    options={driverOptions}
+                    value={driverId}
+                    onChange={setDriverId}
+                  />
+                  <Button submit>Save driver</Button>
+                </InlineStack>
+              </Form>
 
               <Form id="publish-route-form" method="post">
                 <input type="hidden" name="intent" value="publish" />

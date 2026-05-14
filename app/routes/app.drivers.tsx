@@ -1,3 +1,6 @@
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { Form, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -5,35 +8,57 @@ import {
   ResourceList,
   ResourceItem,
   Text,
-  Modal,
   FormLayout,
   TextField,
   Badge,
   Avatar,
-  Checkbox,
+  Button,
+  BlockStack,
+  Select,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState } from "react";
+
+import { createDriver, listDrivers } from "../lib/drivers.server";
+import { authenticate } from "../shopify.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  const drivers = await listDrivers();
+
+  return json({ drivers });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  await authenticate.admin(request);
+  const formData = await request.formData();
+  const name = String(formData.get("name") || "").trim();
+
+  if (!name) {
+    return json({ ok: false, error: "Driver name is required." }, { status: 400 });
+  }
+
+  await createDriver({
+    name,
+    phoneNumber: String(formData.get("phoneNumber") || "").trim(),
+    email: String(formData.get("email") || "").trim(),
+    photoUrl: String(formData.get("photoUrl") || "").trim(),
+    vehicleName: String(formData.get("vehicleName") || "").trim(),
+    vehicleRegistration: String(formData.get("vehicleRegistration") || "").trim(),
+    vehicleType: String(formData.get("vehicleType") || "").trim(),
+    fuelCardNumber: String(formData.get("fuelCardNumber") || "").trim(),
+    fuelCardProvider: String(formData.get("fuelCardProvider") || "").trim(),
+    startAddress: String(formData.get("startAddress") || "").trim(),
+    endAddress: String(formData.get("endAddress") || "").trim(),
+    notes: String(formData.get("notes") || "").trim(),
+    isActive: String(formData.get("isActive") || "true") === "true",
+  });
+
+  return redirect("/app/drivers");
+};
 
 export default function Drivers() {
-  const [active, setActive] = useState(false);
-  const [drivers] = useState([
-    {
-      id: "1",
-      name: "Chris",
-      vehicleName: "Ford Transit",
-      vehicleRegistration: "AB12 CDE",
-      isActive: true,
-    },
-    {
-      id: "2",
-      name: "Dave",
-      vehicleName: "Mercedes Sprinter",
-      vehicleRegistration: "FG34 HIJ",
-      isActive: true,
-    },
-  ]);
-
-  const toggleModal = useCallback(() => setActive((active) => !active), []);
+  const { drivers } = useLoaderData<typeof loader>();
+  const [activeStatus, setActiveStatus] = useState("true");
 
   const resourceName = {
     singular: "driver",
@@ -41,29 +66,22 @@ export default function Drivers() {
   };
 
   return (
-    <Page
-      title="Drivers"
-      primaryAction={{
-        content: "Add Driver",
-        onAction: toggleModal,
-      }}
-    >
+    <Page title="Drivers">
       <Layout>
         <Layout.Section>
-          <LegacyCard>
+          <LegacyCard title="Driver profiles">
             <ResourceList
               resourceName={resourceName}
               items={drivers}
               renderItem={(item) => {
-                const { id, name, vehicleName, vehicleRegistration, isActive } = item;
-                const media = <Avatar customer name={name} />;
+                const { id, name, photoUrl, vehicleName, vehicleRegistration, isActive } = item;
+                const media = <Avatar customer name={name} source={photoUrl || undefined} />;
 
                 return (
                   <ResourceItem
                     id={id}
                     media={media}
                     accessibilityLabel={`View details for ${name}`}
-                    onClick={() => {}}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
@@ -71,7 +89,7 @@ export default function Drivers() {
                           {name}
                         </Text>
                         <div>
-                          {vehicleName} ({vehicleRegistration})
+                          {vehicleName || "No vehicle"}{vehicleRegistration ? ` (${vehicleRegistration})` : ""}
                         </div>
                       </div>
                       <Badge tone={isActive ? "success" : "info"}>
@@ -84,53 +102,41 @@ export default function Drivers() {
             />
           </LegacyCard>
         </Layout.Section>
-      </Layout>
 
-      <Modal
-        open={active}
-        onClose={toggleModal}
-        title="Add Driver"
-        primaryAction={{
-          content: "Save",
-          onAction: toggleModal,
-        }}
-        secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: toggleModal,
-          },
-        ]}
-      >
-        <Modal.Section>
-          <FormLayout>
-            <FormLayout.Group>
-              <TextField label="Driver name" autoComplete="off" />
-              <TextField label="Phone number" type="tel" autoComplete="off" />
-            </FormLayout.Group>
-            <FormLayout.Group>
-              <TextField label="Email address" type="email" autoComplete="off" />
-              <TextField label="Driver photo URL" type="url" autoComplete="off" />
-            </FormLayout.Group>
-            <FormLayout.Group>
-              <TextField label="Vehicle name" autoComplete="off" />
-              <TextField label="Vehicle registration" autoComplete="off" />
-            </FormLayout.Group>
-            <FormLayout.Group>
-              <TextField label="Vehicle type" autoComplete="off" />
-              <Checkbox label="Active" checked={true} onChange={() => {}} />
-            </FormLayout.Group>
-            <FormLayout.Group>
-              <TextField label="Fuel card number" autoComplete="off" helpText="Admin only" />
-              <TextField label="Fuel card provider" autoComplete="off" helpText="Admin only" />
-            </FormLayout.Group>
-            <FormLayout.Group>
-              <TextField label="Start address" autoComplete="off" multiline={2} />
-              <TextField label="End address" autoComplete="off" multiline={2} />
-            </FormLayout.Group>
-            <TextField label="Driver notes" autoComplete="off" multiline={3} />
-          </FormLayout>
-        </Modal.Section>
-      </Modal>
+        <Layout.Section variant="oneThird">
+          <LegacyCard title="Add driver" sectioned>
+            <Form method="post">
+              <BlockStack gap="300">
+                <FormLayout>
+                  <TextField label="Driver name" name="name" autoComplete="off" />
+                  <TextField label="Phone number" name="phoneNumber" type="tel" autoComplete="off" />
+                  <TextField label="Email address" name="email" type="email" autoComplete="off" />
+                  <TextField label="Driver photo URL" name="photoUrl" type="url" autoComplete="off" />
+                  <TextField label="Vehicle name" name="vehicleName" autoComplete="off" />
+                  <TextField label="Vehicle registration" name="vehicleRegistration" autoComplete="off" />
+                  <TextField label="Vehicle type" name="vehicleType" autoComplete="off" />
+                  <TextField label="Fuel card number" name="fuelCardNumber" autoComplete="off" helpText="Admin only" />
+                  <TextField label="Fuel card provider" name="fuelCardProvider" autoComplete="off" helpText="Admin only" />
+                  <TextField label="Start address" name="startAddress" autoComplete="off" multiline={2} />
+                  <TextField label="End address" name="endAddress" autoComplete="off" multiline={2} />
+                  <TextField label="Driver notes" name="notes" autoComplete="off" multiline={3} />
+                  <Select
+                    label="Status"
+                    name="isActive"
+                    options={[
+                      { label: "Active", value: "true" },
+                      { label: "Inactive", value: "false" },
+                    ]}
+                    value={activeStatus}
+                    onChange={setActiveStatus}
+                  />
+                  <Button submit variant="primary">Save driver</Button>
+                </FormLayout>
+              </BlockStack>
+            </Form>
+          </LegacyCard>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }
