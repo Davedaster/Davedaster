@@ -26,6 +26,7 @@ function formatDate(value: Date | string) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/London",
   }).format(new Date(value));
 }
 
@@ -37,6 +38,16 @@ function formatTime(value: Date | string | null | undefined) {
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/London",
+  }).format(new Date(value));
+}
+
+function dateKey(value: Date | string) {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Europe/London",
   }).format(new Date(value));
 }
 
@@ -120,11 +131,7 @@ export async function getDriverRouteByToken(token: string) {
 }
 
 export function canStartDriverRoute(routeDate: Date | string, now = new Date()) {
-  const planned = new Date(routeDate);
-
-  return planned.getFullYear() === now.getFullYear()
-    && planned.getMonth() === now.getMonth()
-    && planned.getDate() === now.getDate();
+  return dateKey(routeDate) === dateKey(now);
 }
 
 export async function startDriverRouteFromToken(token: string) {
@@ -134,12 +141,12 @@ export async function startDriverRouteFromToken(token: string) {
     throw new Error("Driver route not found.");
   }
 
-  if (!canStartDriverRoute(route.date)) {
-    throw new Error("This route can only be started on the planned route date.");
+  if (route.status === "OUT_FOR_DELIVERY" || route.status === "COMPLETED") {
+    return route;
   }
 
-  if (route.status === "OUT_FOR_DELIVERY") {
-    return route;
+  if (!canStartDriverRoute(route.date)) {
+    throw new Error("This route can only be started on the planned route date.");
   }
 
   return prisma.route.update({
