@@ -1,10 +1,12 @@
 import prisma from "../db.server";
 
+const DRIVER_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
+
 export async function listDriverRoutes() {
   return prisma.route.findMany({
     where: {
       status: {
-        in: ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"],
+        in: DRIVER_ROUTE_STATUSES,
       },
     },
     orderBy: [
@@ -30,9 +32,12 @@ export async function listDriverRoutes() {
 }
 
 export async function getDriverRoute(routeId: string) {
-  return prisma.route.findUnique({
+  return prisma.route.findFirst({
     where: {
       id: routeId,
+      status: {
+        in: DRIVER_ROUTE_STATUSES,
+      },
     },
     include: {
       driver: true,
@@ -53,6 +58,16 @@ export async function getDriverRoute(routeId: string) {
 }
 
 export async function startDriverRoute(routeId: string) {
+  const route = await getDriverRoute(routeId);
+
+  if (!route) {
+    throw new Error("Route not found.");
+  }
+
+  if (route.status === "OUT_FOR_DELIVERY") {
+    return route;
+  }
+
   return prisma.route.update({
     where: {
       id: routeId,
