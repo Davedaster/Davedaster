@@ -17,6 +17,7 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 
+import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { markStopFailedDelivery } from "../lib/failedDelivery.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getDriverRoute, startDriverRoute } from "../lib/driverRoutes.server";
@@ -67,7 +68,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
       return redirect(`/app/driver-routes/${routeId}`);
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Proof photo delete failed." }, { status: 400 });
+      return json({ ok: false, error: error instanceof Error ? error.message : "Proof photo remove failed." }, { status: 400 });
     }
   }
 
@@ -188,40 +189,6 @@ function tidyPhone(phone?: string | null) {
   }
 
   return phone.replace(/[^+\d]/g, "");
-}
-
-function ProofPhotoGallery({ proofPhotos }: { proofPhotos: Array<{ id: string; url: string; label?: string | null }> }) {
-  if (!proofPhotos.length) {
-    return null;
-  }
-
-  return (
-    <BlockStack gap="200">
-      <Text as="p" variant="bodySm" tone="subdued">Proof photos</Text>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 12 }}>
-        {proofPhotos.map((photo, index) => (
-          <div key={photo.id} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 8, background: "#ffffff" }}>
-            <a href={photo.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none" }}>
-              <img
-                src={photo.url}
-                alt={photo.label || `Proof photo ${index + 1}`}
-                style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 8, display: "block" }}
-              />
-            </a>
-            <Text as="p" variant="bodySm">{photo.label || `Proof photo ${index + 1}`}</Text>
-            <InlineStack gap="100">
-              <Button size="slim" url={photo.url} target="_blank">Open</Button>
-              <Form method="post">
-                <input type="hidden" name="intent" value="deleteProofPhoto" />
-                <input type="hidden" name="proofPhotoId" value={photo.id} />
-                <Button submit size="slim" tone="critical">Delete</Button>
-              </Form>
-            </InlineStack>
-          </div>
-        ))}
-      </div>
-    </BlockStack>
-  );
 }
 
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
