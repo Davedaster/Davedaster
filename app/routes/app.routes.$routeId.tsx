@@ -19,6 +19,7 @@ import { useState } from "react";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
@@ -60,6 +61,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect(`/app/routes/${routeId}`);
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Route publishing failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "sendNotifications") {
+    try {
+      const result = await sendBookedSlotNotifications(routeId);
+      return json({ ok: true, message: `${result.smsSent} SMS sent, ${result.emailsSent} emails sent, ${result.skipped} orders skipped.` });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
     }
   }
 
@@ -123,7 +133,7 @@ function statusTone(status: string) {
     return "info" as const;
   }
 
-  if (status === "PUBLISHED") {
+  if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") {
     return "success" as const;
   }
 
@@ -139,6 +149,7 @@ export default function RouteDetails() {
   const [stopMinutes, setStopMinutes] = useState("10");
   const [slotMinutes, setSlotMinutes] = useState("60");
   const canPublish = route.status === "DRAFT";
+  const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
 
   const driverOptions = [
@@ -187,6 +198,12 @@ export default function RouteDetails() {
         disabled: route.stops.length === 0,
         onAction: () => document.getElementById("publish-route-form")?.requestSubmit(),
       } : undefined}
+      secondaryActions={canSendNotifications ? [
+        {
+          content: "Send notifications",
+          onAction: () => document.getElementById("send-notifications-form")?.requestSubmit(),
+        },
+      ] : undefined}
     >
       <Layout>
         <Layout.Section>
@@ -210,6 +227,10 @@ export default function RouteDetails() {
 
               {actionData && "error" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
+              ) : null}
+
+              {actionData && "message" in actionData ? (
+                <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text>
               ) : null}
 
               {!routexlEnabled ? (
@@ -288,6 +309,10 @@ export default function RouteDetails() {
 
               <Form id="publish-route-form" method="post">
                 <input type="hidden" name="intent" value="publish" />
+              </Form>
+
+              <Form id="send-notifications-form" method="post">
+                <input type="hidden" name="intent" value="sendNotifications" />
               </Form>
             </BlockStack>
           </LegacyCard>
