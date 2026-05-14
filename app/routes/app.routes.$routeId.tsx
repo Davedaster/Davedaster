@@ -16,6 +16,7 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 
+import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
@@ -70,6 +71,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect(`/app/routes/${routeId}`);
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "sendDriverRouteLink") {
+    try {
+      await sendDriverRouteLink({ routeId, request });
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Driver route link failed." }, { status: 400 });
     }
   }
 
@@ -151,6 +161,7 @@ export default function RouteDetails() {
   const canPublish = route.status === "DRAFT";
   const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
+  const canSendDriverRouteLink = route.status !== "DRAFT" && Boolean(route.driverId);
 
   const driverOptions = [
     { label: "No driver assigned", value: "" },
@@ -269,6 +280,10 @@ export default function RouteDetails() {
                 <Form method="post">
                   <input type="hidden" name="intent" value="optimise" />
                   <Button submit disabled={!routexlEnabled || route.stops.length === 0}>Optimise with RouteXL</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sendDriverRouteLink" />
+                  <Button submit disabled={!canSendDriverRouteLink}>Send driver route link</Button>
                 </Form>
               </InlineStack>
 
