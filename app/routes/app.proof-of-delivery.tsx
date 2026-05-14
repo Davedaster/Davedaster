@@ -29,7 +29,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const stopId = String(formData.get("stopId") || "").trim();
   const proofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
@@ -39,6 +39,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     await saveProofOfDelivery({
+      admin,
       stopId,
       proofPhotoUrl,
       deliveryNote,
@@ -134,7 +135,7 @@ export default function ProofOfDelivery() {
                     autoComplete="off"
                     multiline={2}
                   />
-                  <Button submit variant="primary" disabled={!selectedStopId || !proofPhotoUrl}>Mark delivered</Button>
+                  <Button submit variant="primary" disabled={!selectedStopId || !proofPhotoUrl}>Mark delivered and fulfil Shopify order</Button>
                 </FormLayout>
               </Form>
             </BlockStack>
