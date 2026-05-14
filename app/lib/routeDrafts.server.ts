@@ -33,6 +33,14 @@ function buildRouteName(orders: DeliveryOrder[], routeName?: string) {
   return `Draft route ${date} ${orders.length} stops`;
 }
 
+function routeXLStopKey(stopId: string) {
+  return `STOP_${stopId}`;
+}
+
+function extractRouteXLStopKey(waypointName: string) {
+  return waypointName.split(",")[0]?.trim() || waypointName.trim();
+}
+
 export async function createRouteDraft(input: CreateRouteDraftInput) {
   const name = buildRouteName(input.orders, input.routeName);
 
@@ -228,6 +236,10 @@ export async function optimiseRoute(routeId: string) {
     throw new Error("Every stop needs latitude and longitude before RouteXL can optimise the route.");
   }
 
+  const stopByRouteXLKey = new Map(
+    optimisableStops.map((stop) => [routeXLStopKey(stop.id), stop]),
+  );
+
   const locations = [
     buildRouteXLLocation(
       DEFAULT_SHOP_LOCATION.name,
@@ -238,9 +250,8 @@ export async function optimiseRoute(routeId: string) {
     ),
     ...optimisableStops.map((stop) => {
       const group = stop.deliveryGroup!;
-      const orders = group.orders.map((order) => order.shopifyOrderNumber).join(", ");
       return buildRouteXLLocation(
-        orders || `Stop ${stop.orderIndex}`,
+        routeXLStopKey(stop.id),
         group.address,
         group.latitude!,
         group.longitude!,
@@ -257,14 +268,16 @@ export async function optimiseRoute(routeId: string) {
   ];
 
   const optimised = await optimiseLocations(locations);
-  const orderedNames = optimised.waypoints.slice(1, -1).map((waypoint) => waypoint.name);
+
+  if (!optimised.feasible) {
+    throw new Error("RouteXL returned an infeasible route. Check the stops and try again.");
+  }
+
+  const orderedStopKeys = optimised.waypoints.slice(1, -1).map((waypoint) => extractRouteXLStopKey(waypoint.name));
 
   await prisma.$transaction(async (tx) => {
-    for (const [index, waypointName] of orderedNames.entries()) {
-      const matchingStop = optimisableStops.find((stop) => {
-        const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ");
-        return orders === waypointName;
-      });
+    for (const [index, stopKey] of orderedStopKeys.entries()) {
+      const matchingStop = stopByRouteXLKey.get(stopKey);
 
       if (matchingStop) {
         await tx.stop.update({
