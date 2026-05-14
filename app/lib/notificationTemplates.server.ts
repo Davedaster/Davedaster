@@ -63,7 +63,7 @@ export function buildBookedSlotMessage(input: NotificationTemplateInput, channel
   const slot = formatSlot(input.estimatedArrival, input.slotMinutes);
   const date = formatDate(input.deliveryDate);
   const greeting = `Hi ${displayName(input.customerName)},`;
-  const body = `${greeting}\n\nYour Bathroom Panels Direct delivery has been booked for ${date}, between ${slot}.\n\nYour order will be delivered by our own team to a room of your choice.${trackingLine(input.trackingUrl)}\n\nBathroom Panels Direct`;
+  const body = `${greeting}\n\nYour Bathroom Panels Direct delivery has been booked for ${date}, ${slot}.\n\nYour order will be delivered by our own team to a room of your choice.${trackingLine(input.trackingUrl)}\n\nBathroom Panels Direct`;
 
   return {
     subject: channel === "email" ? `Your delivery slot for ${input.orderNumber || "your order"}` : undefined,
@@ -75,7 +75,7 @@ export function buildOutForDeliveryMessage(input: NotificationTemplateInput, cha
   const slot = formatSlot(input.estimatedArrival, input.slotMinutes);
   const greeting = `Hi ${displayName(input.customerName)},`;
   const driver = input.driverName ? ` Your driver today is ${input.driverName}.` : "";
-  const body = `${greeting}\n\nYour Bathroom Panels Direct order is out for delivery and is currently booked between ${slot}.${driver}\n\nOur team will deliver to a room of your choice.${trackingLine(input.trackingUrl)}\n\nBathroom Panels Direct`;
+  const body = `${greeting}\n\nYour Bathroom Panels Direct order is out for delivery and is currently booked for ${slot}.${driver}\n\nOur team will deliver to a room of your choice.${trackingLine(input.trackingUrl)}\n\nBathroom Panels Direct`;
 
   return {
     subject: channel === "email" ? `Your Bathroom Panels Direct order is out for delivery` : undefined,
