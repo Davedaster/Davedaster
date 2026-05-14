@@ -17,11 +17,6 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
           orderIndex: "asc",
         },
       },
-      history: {
-        orderBy: {
-          createdAt: "desc",
-        },
-      },
     },
   });
 
@@ -43,15 +38,37 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
     return null;
   }
 
-  const isNextDrop = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING" && stop.orderIndex === Math.min(
-    ...route.stops.filter((routeStop) => routeStop.status === "PENDING").map((routeStop) => routeStop.orderIndex),
-  );
+  const pendingStops = route.stops.filter((routeStop) => routeStop.status === "PENDING");
+  const nextPendingOrderIndex = pendingStops.length
+    ? Math.min(...pendingStops.map((routeStop) => routeStop.orderIndex))
+    : null;
+  const isNextDrop = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING" && stop.orderIndex === nextPendingOrderIndex;
 
   return {
-    route,
-    stop,
-    deliveryGroup: stop.deliveryGroup,
-    order,
+    route: {
+      id: route.id,
+      name: route.name,
+      date: route.date,
+      status: route.status,
+      driver: route.driver ? {
+        name: route.driver.name,
+        photoUrl: route.driver.photoUrl,
+      } : null,
+    },
+    stop: {
+      id: stop.id,
+      orderIndex: stop.orderIndex,
+      estimatedArrival: stop.estimatedArrival,
+      status: stop.status,
+    },
+    deliveryGroup: {
+      postcode: stop.deliveryGroup.postcode,
+      deliveryNote: stop.deliveryGroup.deliveryNote,
+      proofPhotoUrl: stop.deliveryGroup.proofPhotoUrl,
+    },
+    order: {
+      shopifyOrderNumber: order.shopifyOrderNumber,
+    },
     isNextDrop,
   };
 }
