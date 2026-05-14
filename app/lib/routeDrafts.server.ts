@@ -182,3 +182,24 @@ export async function renameRoute(routeId: string, name: string) {
     },
   });
 }
+
+export async function assignDriverToRoute(routeId: string, driverId: string | null) {
+  const driver = driverId
+    ? await prisma.driver.findUnique({ where: { id: driverId } })
+    : null;
+
+  return prisma.route.update({
+    where: {
+      id: routeId,
+    },
+    data: {
+      driverId,
+      history: {
+        create: {
+          action: driver ? "Driver assigned" : "Driver removed",
+          details: driver ? `Assigned to ${driver.name}` : "Driver assignment removed",
+        },
+      },
+    },
+  });
+}
