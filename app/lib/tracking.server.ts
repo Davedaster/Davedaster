@@ -10,6 +10,11 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
           deliveryGroup: {
             include: {
               orders: true,
+              proofPhotos: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
             },
           },
         },
@@ -65,6 +70,11 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
       postcode: stop.deliveryGroup.postcode,
       deliveryNote: stop.deliveryGroup.deliveryNote,
       proofPhotoUrl: stop.deliveryGroup.proofPhotoUrl,
+      proofPhotos: stop.deliveryGroup.proofPhotos.map((photo) => ({
+        id: photo.id,
+        url: photo.url,
+        label: photo.label,
+      })),
     },
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,
