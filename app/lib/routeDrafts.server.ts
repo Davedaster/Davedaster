@@ -74,6 +74,7 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
                   customerEmail: order.email,
                   customerPhone: order.phone,
                   postcode: order.postcode,
+                  lineItemSummary: order.lineItemSummary,
                 },
               },
             },
