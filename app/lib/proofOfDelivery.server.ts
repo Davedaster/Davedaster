@@ -1,8 +1,20 @@
 import prisma from "../db.server";
 
+function isValidProofPhotoUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export async function listStopsForProofOfDelivery() {
   return prisma.stop.findMany({
     where: {
+      status: {
+        not: "DELIVERED",
+      },
       route: {
         status: {
           in: ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"],
@@ -35,6 +47,8 @@ export async function saveProofOfDelivery(input: {
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
 }) {
+  const proofPhotoUrl = input.proofPhotoUrl.trim();
+
   const stop = await prisma.stop.findUnique({
     where: {
       id: input.stopId,
@@ -53,8 +67,16 @@ export async function saveProofOfDelivery(input: {
     throw new Error("Stop not found.");
   }
 
-  if (!input.proofPhotoUrl.trim()) {
+  if (stop.status === "DELIVERED") {
+    throw new Error("This stop has already been marked delivered.");
+  }
+
+  if (!proofPhotoUrl) {
     throw new Error("Proof photo link is required before marking delivered.");
+  }
+
+  if (!isValidProofPhotoUrl(proofPhotoUrl)) {
+    throw new Error("Proof photo link must be a valid web address.");
   }
 
   await prisma.$transaction(async (tx) => {
@@ -63,7 +85,7 @@ export async function saveProofOfDelivery(input: {
         id: stop.deliveryGroupId!,
       },
       data: {
-        proofPhotoUrl: input.proofPhotoUrl.trim(),
+        proofPhotoUrl,
         deliveryNote: input.deliveryNote?.trim() || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
       },
