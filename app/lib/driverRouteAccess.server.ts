@@ -1,7 +1,16 @@
 import crypto from "node:crypto";
 
 import prisma from "../db.server";
+import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
+import { saveProofOfDelivery } from "./proofOfDelivery.server";
+
+type ShopifyAdmin = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<Response>;
+};
 
 type DriverRouteNotificationResult = {
   smsSent: boolean;
@@ -162,6 +171,68 @@ export async function startDriverRouteFromToken(token: string) {
         },
       },
     },
+  });
+}
+
+async function getStopForDriverToken(token: string, stopId: string) {
+  const stop = await prisma.stop.findFirst({
+    where: {
+      id: stopId,
+      route: {
+        driverAccessToken: token,
+        status: {
+          in: ["OUT_FOR_DELIVERY"],
+        },
+      },
+    },
+    include: {
+      route: true,
+      deliveryGroup: true,
+    },
+  });
+
+  if (!stop) {
+    throw new Error("Stop not found for this active driver route.");
+  }
+
+  return stop;
+}
+
+export async function completeDriverStopFromToken(input: {
+  token: string;
+  stopId: string;
+  admin: ShopifyAdmin;
+  proofPhotoUrls: string[];
+  deliveryNote?: string | null;
+  safePlaceNote?: string | null;
+  leftInSafePlace?: boolean;
+}) {
+  await getStopForDriverToken(input.token, input.stopId);
+
+  await saveProofOfDelivery({
+    admin: input.admin,
+    stopId: input.stopId,
+    proofPhotoUrl: input.proofPhotoUrls,
+    deliveryNote: input.deliveryNote,
+    safePlaceNote: input.safePlaceNote,
+    leftInSafePlace: input.leftInSafePlace,
+  });
+}
+
+export async function markDriverStopMissedFromToken(input: {
+  token: string;
+  stopId: string;
+  admin: ShopifyAdmin;
+  reason: string;
+  note?: string | null;
+}) {
+  await getStopForDriverToken(input.token, input.stopId);
+
+  await markStopFailedDelivery({
+    admin: input.admin,
+    stopId: input.stopId,
+    reason: input.reason,
+    note: input.note,
   });
 }
 
