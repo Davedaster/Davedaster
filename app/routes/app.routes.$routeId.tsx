@@ -17,7 +17,8 @@ import {
 import { useState } from "react";
 
 import { listActiveDrivers } from "../lib/drivers.server";
-import { assignDriverToRoute, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { formatEtaSlot } from "../lib/etaSlots.server";
+import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -82,6 +83,24 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
   }
 
+  if (intent === "calculateEtas") {
+    try {
+      const startTime = String(formData.get("startTime") || "05:00");
+      const stopMinutes = Number(formData.get("stopMinutes") || 10);
+      const slotMinutes = Number(formData.get("slotMinutes") || 60);
+
+      await calculateEtaSlots(
+        routeId,
+        startTime,
+        Number.isFinite(stopMinutes) ? stopMinutes : 10,
+        Number.isFinite(slotMinutes) ? slotMinutes : 60,
+      );
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "ETA calculation failed." }, { status: 400 });
+    }
+  }
+
   return redirect(`/app/routes/${routeId}`);
 };
 
@@ -90,6 +109,17 @@ function formatDate(value: string | Date) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatTime(value: string | Date | null) {
+  if (!value) {
+    return "Pending";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -110,6 +140,9 @@ export default function RouteDetails() {
   const actionData = useActionData<typeof action>();
   const [routeName, setRouteName] = useState(route.name);
   const [driverId, setDriverId] = useState(route.driverId || "");
+  const [startTime, setStartTime] = useState("05:00");
+  const [stopMinutes, setStopMinutes] = useState("10");
+  const [slotMinutes, setSlotMinutes] = useState("60");
   const canPublish = route.status === "DRAFT";
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
 
@@ -121,15 +154,20 @@ export default function RouteDetails() {
     })),
   ];
 
+  const slotMinutesNumber = Number(slotMinutes);
+
   const stopRows = route.stops.map((stop) => {
     const deliveryGroup = stop.deliveryGroup;
     const orders = deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
+    const estimatedArrival = stop.estimatedArrival ? new Date(stop.estimatedArrival) : null;
+    const slotEnd = estimatedArrival ? new Date(estimatedArrival.getTime() + (Number.isFinite(slotMinutesNumber) ? slotMinutesNumber : 60) * 60 * 1000) : null;
 
     return [
       String(stop.orderIndex),
       orders,
       deliveryGroup?.postcode || "No postcode",
       deliveryGroup?.address || "No address",
+      estimatedArrival && slotEnd ? formatEtaSlot(estimatedArrival, slotEnd) : "Pending",
       stop.isLocked ? "Locked" : "Open",
     ];
   });
@@ -222,6 +260,37 @@ export default function RouteDetails() {
                 </Form>
               </InlineStack>
 
+              <Form method="post">
+                <input type="hidden" name="intent" value="calculateEtas" />
+                <InlineStack gap="200" blockAlign="end">
+                  <TextField
+                    label="Driver start time"
+                    name="startTime"
+                    type="time"
+                    value={startTime}
+                    onChange={setStartTime}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Minutes per stop"
+                    name="stopMinutes"
+                    type="number"
+                    value={stopMinutes}
+                    onChange={setStopMinutes}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Customer slot minutes"
+                    name="slotMinutes"
+                    type="number"
+                    value={slotMinutes}
+                    onChange={setSlotMinutes}
+                    autoComplete="off"
+                  />
+                  <Button submit disabled={route.stops.length === 0}>Calculate ETA slots</Button>
+                </InlineStack>
+              </Form>
+
               <Form id="publish-route-form" method="post">
                 <input type="hidden" name="intent" value="publish" />
               </Form>
@@ -230,8 +299,8 @@ export default function RouteDetails() {
 
           <LegacyCard title="Stops">
             <DataTable
-              columnContentTypes={["numeric", "text", "text", "text", "text"]}
-              headings={["Stop", "Orders", "Postcode", "Address", "Lock"]}
+              columnContentTypes={["numeric", "text", "text", "text", "text", "text"]}
+              headings={["Stop", "Orders", "Postcode", "Address", "ETA slot", "Lock"]}
               rows={stopRows}
             />
           </LegacyCard>
