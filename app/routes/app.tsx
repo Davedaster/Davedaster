@@ -25,6 +25,7 @@ export default function App() {
           Orders Map
         </Link>
         <Link to="/app/routes">Routes</Link>
+        <Link to="/app/driver-routes">Driver Routes</Link>
         <Link to="/app/drivers">Drivers</Link>
         <Link to="/app/address-checks">Address Checks</Link>
         <Link to="/app/proof-of-delivery">Proof of Delivery</Link>
