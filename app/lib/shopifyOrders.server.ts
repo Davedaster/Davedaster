@@ -233,7 +233,7 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const weakAddress = hasWeakAddress(order);
   const addressSummary = formatAddress(order);
-  const lookup = hasDeliveryAddress
+  const lookup = hasDeliveryAddress && !override
     ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary)
     : null;
 
