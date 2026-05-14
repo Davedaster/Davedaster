@@ -21,6 +21,7 @@ import { markStopFailedDelivery } from "../lib/failedDelivery.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getDriverRoute, startDriverRoute } from "../lib/driverRoutes.server";
 import { saveProofOfDelivery } from "../lib/proofOfDelivery.server";
+import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -37,7 +38,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route });
+  return json({ route, proofPhotoStorageEnabled: isProofPhotoStorageEnabled() });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -64,10 +65,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "completeStop") {
     try {
+      const stopId = String(formData.get("stopId") || "").trim();
+      const proofPhotoFile = formData.get("proofPhotoFile");
+      let proofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
+
+      if (proofPhotoFile instanceof File && proofPhotoFile.size > 0) {
+        proofPhotoUrl = await uploadProofPhoto(proofPhotoFile, stopId);
+      }
+
       await saveProofOfDelivery({
         admin,
-        stopId: String(formData.get("stopId") || "").trim(),
-        proofPhotoUrl: String(formData.get("proofPhotoUrl") || "").trim(),
+        stopId,
+        proofPhotoUrl,
         deliveryNote: String(formData.get("deliveryNote") || "").trim(),
         safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
         leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
@@ -166,14 +175,16 @@ function tidyPhone(phone?: string | null) {
   return phone.replace(/[^+\d]/g, "");
 }
 
-function DriverStopActions({ stopId, isDisabled, routeStarted }: { stopId: string; isDisabled: boolean; routeStarted: boolean }) {
+function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
+  const [proofPhotoSelected, setProofPhotoSelected] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
+  const hasProofPhoto = proofPhotoSelected || proofPhotoUrl.trim().length > 0;
 
   return (
     <BlockStack gap="300">
@@ -183,20 +194,34 @@ function DriverStopActions({ stopId, isDisabled, routeStarted }: { stopId: strin
         <Text as="p" variant="bodySm" tone="subdued">Start the route before marking stops delivered or failed.</Text>
       ) : null}
 
-      <Form method="post">
+      <Form method="post" encType="multipart/form-data">
         <input type="hidden" name="intent" value="completeStop" />
         <input type="hidden" name="stopId" value={stopId} />
         <input type="hidden" name="leftInSafePlace" value={leftInSafePlace ? "true" : "false"} />
         <BlockStack gap="200">
+          {proofPhotoStorageEnabled ? (
+            <label>
+              <Text as="span" variant="bodyMd" fontWeight="medium">Proof photo</Text>
+              <input
+                type="file"
+                name="proofPhotoFile"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                capture="environment"
+                disabled={updatesDisabled}
+                onChange={(event) => setProofPhotoSelected(Boolean(event.currentTarget.files?.length))}
+                style={{ display: "block", marginTop: 6 }}
+              />
+            </label>
+          ) : null}
           <TextField
-            label="Proof photo link"
+            label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"}
             name="proofPhotoUrl"
             type="url"
             value={proofPhotoUrl}
             onChange={setProofPhotoUrl}
             autoComplete="off"
             disabled={updatesDisabled}
-            helpText="Required before marking delivered."
+            helpText={proofPhotoStorageEnabled ? "Upload a photo above, or paste a hosted link if needed." : "Required before marking delivered."}
           />
           <TextField
             label="Delivery note"
@@ -222,7 +247,7 @@ function DriverStopActions({ stopId, isDisabled, routeStarted }: { stopId: strin
             multiline={2}
             disabled={updatesDisabled}
           />
-          <Button submit variant="primary" disabled={updatesDisabled || !proofPhotoUrl}>Mark delivered</Button>
+          <Button submit variant="primary" disabled={updatesDisabled || !hasProofPhoto}>Mark delivered</Button>
         </BlockStack>
       </Form>
 
@@ -256,7 +281,7 @@ function DriverStopActions({ stopId, isDisabled, routeStarted }: { stopId: strin
 }
 
 export default function DriverRouteDetails() {
-  const { route } = useLoaderData<typeof loader>();
+  const { route, proofPhotoStorageEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const routeStarted = route.status === "OUT_FOR_DELIVERY";
   const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
@@ -291,6 +316,10 @@ export default function DriverRouteDetails() {
                   <Badge tone="success">OUT_FOR_DELIVERY</Badge>
                 )}
               </InlineStack>
+
+              {!proofPhotoStorageEnabled ? (
+                <Text as="p" variant="bodySm" tone="subdued">Proof photo storage is not set up yet, so hosted proof photo links can still be pasted manually.</Text>
+              ) : null}
 
               {actionData && "error" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
@@ -359,7 +388,7 @@ export default function DriverRouteDetails() {
                       ) : null}
                     </InlineStack>
 
-                    <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} />
+                    <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} />
                   </BlockStack>
                 </LegacyCard>
               );
