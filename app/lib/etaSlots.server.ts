@@ -24,7 +24,7 @@ function addMinutes(date: Date, minutes: number) {
 function routeDateWithStartTime(routeDate: Date, startTime: string) {
   const startMinutes = parseTimeToMinutes(startTime);
   const date = new Date(routeDate);
-  date.setHours(0, 0, 0, 0);
+  date.setUTCHours(0, 0, 0, 0);
 
   return addMinutes(date, startMinutes);
 }
@@ -47,7 +47,7 @@ export function buildEtaSlots(
 ) {
   const routeStart = routeDateWithStartTime(routeDate, startTime);
 
-  return stops
+  return [...stops]
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .map((stop, index) => {
       const estimatedArrival = addMinutes(routeStart, index * stopMinutes);
