@@ -56,6 +56,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/driver-routes/${routeId}`);
   }
 
+  const route = await getDriverRoute(routeId);
+
+  if (!route || route.status !== "OUT_FOR_DELIVERY") {
+    return json({ ok: false, error: "Start the route before updating stops." }, { status: 400 });
+  }
+
   if (intent === "completeStop") {
     try {
       await saveProofOfDelivery({
@@ -160,18 +166,22 @@ function tidyPhone(phone?: string | null) {
   return phone.replace(/[^+\d]/g, "");
 }
 
-function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled: boolean }) {
+function DriverStopActions({ stopId, isDisabled, routeStarted }: { stopId: string; isDisabled: boolean; routeStarted: boolean }) {
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
+  const updatesDisabled = isDisabled || !routeStarted;
 
   return (
     <BlockStack gap="300">
       <Divider />
       <Text as="h4" variant="headingSm">Update this stop</Text>
+      {!routeStarted ? (
+        <Text as="p" variant="bodySm" tone="subdued">Start the route before marking stops delivered or failed.</Text>
+      ) : null}
 
       <Form method="post">
         <input type="hidden" name="intent" value="completeStop" />
@@ -185,7 +195,7 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
             value={proofPhotoUrl}
             onChange={setProofPhotoUrl}
             autoComplete="off"
-            disabled={isDisabled}
+            disabled={updatesDisabled}
             helpText="Required before marking delivered."
           />
           <TextField
@@ -195,13 +205,13 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
             onChange={setDeliveryNote}
             autoComplete="off"
             multiline={2}
-            disabled={isDisabled}
+            disabled={updatesDisabled}
           />
           <Checkbox
             label="Left in safe place"
             checked={leftInSafePlace}
             onChange={setLeftInSafePlace}
-            disabled={isDisabled}
+            disabled={updatesDisabled}
           />
           <TextField
             label="Safe place note"
@@ -210,9 +220,9 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
             onChange={setSafePlaceNote}
             autoComplete="off"
             multiline={2}
-            disabled={isDisabled}
+            disabled={updatesDisabled}
           />
-          <Button submit variant="primary" disabled={isDisabled || !proofPhotoUrl}>Mark delivered</Button>
+          <Button submit variant="primary" disabled={updatesDisabled || !proofPhotoUrl}>Mark delivered</Button>
         </BlockStack>
       </Form>
 
@@ -226,7 +236,7 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
             value={failedReason}
             onChange={setFailedReason}
             autoComplete="off"
-            disabled={isDisabled}
+            disabled={updatesDisabled}
             helpText="Required before marking failed."
           />
           <TextField
@@ -236,9 +246,9 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
             onChange={setFailedNote}
             autoComplete="off"
             multiline={2}
-            disabled={isDisabled}
+            disabled={updatesDisabled}
           />
-          <Button submit tone="critical" disabled={isDisabled || !failedReason}>Mark failed delivery</Button>
+          <Button submit tone="critical" disabled={updatesDisabled || !failedReason}>Mark failed delivery</Button>
         </BlockStack>
       </Form>
     </BlockStack>
@@ -248,6 +258,7 @@ function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled:
 export default function DriverRouteDetails() {
   const { route } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const routeStarted = route.status === "OUT_FOR_DELIVERY";
   const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
@@ -271,7 +282,7 @@ export default function DriverRouteDetails() {
                     {route.stops.length} stops · {pendingStops} pending · {deliveredStops} delivered · {failedStops} failed
                   </Text>
                 </BlockStack>
-                {route.status !== "OUT_FOR_DELIVERY" ? (
+                {!routeStarted ? (
                   <Form method="post">
                     <input type="hidden" name="intent" value="startRoute" />
                     <Button submit variant="primary">Start route</Button>
@@ -348,7 +359,7 @@ export default function DriverRouteDetails() {
                       ) : null}
                     </InlineStack>
 
-                    <DriverStopActions stopId={stop.id} isDisabled={isFinalised} />
+                    <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} />
                   </BlockStack>
                 </LegacyCard>
               );
