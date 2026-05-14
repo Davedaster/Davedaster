@@ -178,11 +178,13 @@ function tidyPhone(phone?: string | null) {
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
+  const [proofPhotoSelected, setProofPhotoSelected] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
+  const hasProofPhoto = proofPhotoSelected || proofPhotoUrl.trim().length > 0;
 
   return (
     <BlockStack gap="300">
@@ -206,6 +208,7 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
                 accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                 capture="environment"
                 disabled={updatesDisabled}
+                onChange={(event) => setProofPhotoSelected(Boolean(event.currentTarget.files?.length))}
                 style={{ display: "block", marginTop: 6 }}
               />
             </label>
@@ -244,7 +247,7 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
             multiline={2}
             disabled={updatesDisabled}
           />
-          <Button submit variant="primary" disabled={updatesDisabled}>Mark delivered</Button>
+          <Button submit variant="primary" disabled={updatesDisabled || !hasProofPhoto}>Mark delivered</Button>
         </BlockStack>
       </Form>
 
