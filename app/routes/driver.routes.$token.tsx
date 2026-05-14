@@ -75,6 +75,13 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
+function splitLineItems(summary?: string | null) {
+  return (summary || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function DriverRoutePage() {
   const { route, canStart } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -138,6 +145,7 @@ export default function DriverRoutePage() {
             const group = stop.deliveryGroup;
             const customerName = group?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
             const orders = group?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
+            const lineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
             const phone = group?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || "";
             const address = group?.formattedAddress || group?.address || "No address";
             const wazeUrl = buildWazeUrl(group);
@@ -159,7 +167,18 @@ export default function DriverRoutePage() {
                   <p style={{ margin: 0 }}><strong>Mobile:</strong> {phone ? <a href={`tel:${phone}`} style={{ color: "#509AE6", fontWeight: 700 }}>{phone}</a> : "No phone"}</p>
                   <p style={{ margin: 0 }}><strong>Address:</strong> {address}</p>
                   <button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Address copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={{ border: "1px solid #d0d5dd", background: "#ffffff", borderRadius: 12, padding: "10px 12px", fontWeight: 700 }}>Copy address</button>
-                  <p style={{ margin: 0 }}><strong>Items:</strong> Items will show once line items are stored against each stop.</p>
+                  <div>
+                    <strong>Items:</strong>
+                    {lineItems.length ? (
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                        {lineItems.map((item, index) => (
+                          <li key={`${item}-${index}`}>{item}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p style={{ margin: "6px 0 0", color: "#667085" }}>No item details stored for this order.</p>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
