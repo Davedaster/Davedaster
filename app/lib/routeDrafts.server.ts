@@ -71,6 +71,8 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
                   shopifyOrderId: order.id,
                   shopifyOrderNumber: order.name,
                   customerName: order.customerName,
+                  customerEmail: order.email,
+                  customerPhone: order.phone,
                   postcode: order.postcode,
                 },
               },
