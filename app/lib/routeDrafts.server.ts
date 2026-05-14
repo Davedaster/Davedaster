@@ -108,3 +108,77 @@ export async function listRoutes() {
     },
   });
 }
+
+export async function getRoute(routeId: string) {
+  return prisma.route.findUnique({
+    where: {
+      id: routeId,
+    },
+    include: {
+      driver: true,
+      stops: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+        orderBy: {
+          orderIndex: "asc",
+        },
+      },
+      history: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+    },
+  });
+}
+
+export async function publishRoute(routeId: string) {
+  return prisma.route.update({
+    where: {
+      id: routeId,
+    },
+    data: {
+      status: "PUBLISHED",
+      history: {
+        create: {
+          action: "Route published",
+          details: "Route was published from the route details page",
+        },
+      },
+    },
+    include: {
+      stops: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+      },
+      history: true,
+    },
+  });
+}
+
+export async function renameRoute(routeId: string, name: string) {
+  return prisma.route.update({
+    where: {
+      id: routeId,
+    },
+    data: {
+      name,
+      history: {
+        create: {
+          action: "Route renamed",
+          details: `Route renamed to ${name}`,
+        },
+      },
+    },
+  });
+}
