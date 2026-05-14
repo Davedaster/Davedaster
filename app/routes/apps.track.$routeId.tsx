@@ -52,6 +52,35 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
+function ProofPhotoThumbs({ photos }: { photos: Array<{ id: string; url: string; label?: string | null }> }) {
+  if (!photos.length) {
+    return null;
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
+      {photos.map((photo, index) => (
+        <a
+          key={photo.id}
+          href={photo.url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ display: "block", color: "#323841", textDecoration: "none", border: "1px solid #d0d5dd", borderRadius: 14, padding: 8, background: "#ffffff" }}
+        >
+          <img
+            src={photo.url}
+            alt={photo.label || `Delivery photo ${index + 1}`}
+            style={{ width: "100%", height: 92, objectFit: "cover", borderRadius: 10, display: "block" }}
+          />
+          <span style={{ display: "block", marginTop: 7, color: "#509AE6", fontWeight: 700, fontSize: 13 }}>
+            View photo {index + 1}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export default function CustomerTrackingPage() {
   const { tracking } = useLoaderData<typeof loader>();
   const { route, stop, deliveryGroup, order, isNextDrop } = tracking;
@@ -118,13 +147,8 @@ export default function CustomerTrackingPage() {
             {showProof && proofPhotos.length ? (
               <div style={{ marginTop: 18 }}>
                 <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Proof of delivery</h3>
-                <div style={{ display: "grid", gap: 8 }}>
-                  {proofPhotos.map((photo, index) => (
-                    <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{ color: "#509AE6", fontWeight: 700 }}>
-                      View {photo.label || `delivery photo ${index + 1}`}
-                    </a>
-                  ))}
-                </div>
+                <p style={{ margin: "0 0 10px", color: "#667085", fontSize: 14 }}>Tap a photo to view it full size.</p>
+                <ProofPhotoThumbs photos={proofPhotos} />
               </div>
             ) : null}
           </aside>
