@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useLoaderData, useActionData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -12,10 +12,15 @@ import {
   InlineStack,
   Box,
   Divider,
+  TextField,
+  Checkbox,
 } from "@shopify/polaris";
+import { useState } from "react";
 
+import { markStopFailedDelivery } from "../lib/failedDelivery.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getDriverRoute, startDriverRoute } from "../lib/driverRoutes.server";
+import { saveProofOfDelivery } from "../lib/proofOfDelivery.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -36,11 +41,51 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const routeId = params.routeId;
 
-  if (routeId) {
+  if (!routeId) {
+    throw new Response("Route not found", { status: 404 });
+  }
+
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "startRoute");
+
+  if (intent === "startRoute") {
     await startDriverRoute(routeId);
+    return redirect(`/app/driver-routes/${routeId}`);
+  }
+
+  if (intent === "completeStop") {
+    try {
+      await saveProofOfDelivery({
+        admin,
+        stopId: String(formData.get("stopId") || "").trim(),
+        proofPhotoUrl: String(formData.get("proofPhotoUrl") || "").trim(),
+        deliveryNote: String(formData.get("deliveryNote") || "").trim(),
+        safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
+        leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
+      });
+
+      return redirect(`/app/driver-routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Stop completion failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "failedStop") {
+    try {
+      await markStopFailedDelivery({
+        admin,
+        stopId: String(formData.get("stopId") || "").trim(),
+        reason: String(formData.get("failedReason") || "").trim(),
+        note: String(formData.get("failedNote") || "").trim(),
+      });
+
+      return redirect(`/app/driver-routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Failed delivery update failed." }, { status: 400 });
+    }
   }
 
   return redirect(`/app/driver-routes/${routeId}`);
@@ -115,8 +160,94 @@ function tidyPhone(phone?: string | null) {
   return phone.replace(/[^+\d]/g, "");
 }
 
+function DriverStopActions({ stopId, isDisabled }: { stopId: string; isDisabled: boolean }) {
+  const [leftInSafePlace, setLeftInSafePlace] = useState(false);
+  const [proofPhotoUrl, setProofPhotoUrl] = useState("");
+  const [deliveryNote, setDeliveryNote] = useState("");
+  const [safePlaceNote, setSafePlaceNote] = useState("");
+  const [failedReason, setFailedReason] = useState("");
+  const [failedNote, setFailedNote] = useState("");
+
+  return (
+    <BlockStack gap="300">
+      <Divider />
+      <Text as="h4" variant="headingSm">Update this stop</Text>
+
+      <Form method="post">
+        <input type="hidden" name="intent" value="completeStop" />
+        <input type="hidden" name="stopId" value={stopId} />
+        <input type="hidden" name="leftInSafePlace" value={leftInSafePlace ? "true" : "false"} />
+        <BlockStack gap="200">
+          <TextField
+            label="Proof photo link"
+            name="proofPhotoUrl"
+            type="url"
+            value={proofPhotoUrl}
+            onChange={setProofPhotoUrl}
+            autoComplete="off"
+            disabled={isDisabled}
+            helpText="Required before marking delivered."
+          />
+          <TextField
+            label="Delivery note"
+            name="deliveryNote"
+            value={deliveryNote}
+            onChange={setDeliveryNote}
+            autoComplete="off"
+            multiline={2}
+            disabled={isDisabled}
+          />
+          <Checkbox
+            label="Left in safe place"
+            checked={leftInSafePlace}
+            onChange={setLeftInSafePlace}
+            disabled={isDisabled}
+          />
+          <TextField
+            label="Safe place note"
+            name="safePlaceNote"
+            value={safePlaceNote}
+            onChange={setSafePlaceNote}
+            autoComplete="off"
+            multiline={2}
+            disabled={isDisabled}
+          />
+          <Button submit variant="primary" disabled={isDisabled || !proofPhotoUrl}>Mark delivered</Button>
+        </BlockStack>
+      </Form>
+
+      <Form method="post">
+        <input type="hidden" name="intent" value="failedStop" />
+        <input type="hidden" name="stopId" value={stopId} />
+        <BlockStack gap="200">
+          <TextField
+            label="Failed delivery reason"
+            name="failedReason"
+            value={failedReason}
+            onChange={setFailedReason}
+            autoComplete="off"
+            disabled={isDisabled}
+            helpText="Required before marking failed."
+          />
+          <TextField
+            label="Failed delivery note"
+            name="failedNote"
+            value={failedNote}
+            onChange={setFailedNote}
+            autoComplete="off"
+            multiline={2}
+            disabled={isDisabled}
+          />
+          <Button submit tone="critical" disabled={isDisabled || !failedReason}>Mark failed delivery</Button>
+        </BlockStack>
+      </Form>
+    </BlockStack>
+  );
+}
+
 export default function DriverRouteDetails() {
   const { route } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
@@ -142,12 +273,17 @@ export default function DriverRouteDetails() {
                 </BlockStack>
                 {route.status !== "OUT_FOR_DELIVERY" ? (
                   <Form method="post">
+                    <input type="hidden" name="intent" value="startRoute" />
                     <Button submit variant="primary">Start route</Button>
                   </Form>
                 ) : (
                   <Badge tone="success">OUT_FOR_DELIVERY</Badge>
                 )}
               </InlineStack>
+
+              {actionData && "error" in actionData ? (
+                <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
+              ) : null}
             </BlockStack>
           </LegacyCard>
 
@@ -159,6 +295,7 @@ export default function DriverRouteDetails() {
               const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || null;
               const cleanedPhone = tidyPhone(phone);
               const wazeUrl = buildWazeUrl(stop);
+              const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
 
               return (
                 <LegacyCard key={stop.id} sectioned>
@@ -210,6 +347,8 @@ export default function DriverRouteDetails() {
                         </Button>
                       ) : null}
                     </InlineStack>
+
+                    <DriverStopActions stopId={stop.id} isDisabled={isFinalised} />
                   </BlockStack>
                 </LegacyCard>
               );
