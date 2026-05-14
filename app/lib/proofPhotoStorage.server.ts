@@ -43,12 +43,6 @@ function getSigningKey(secretAccessKey: string, dateStamp: string, region: strin
 }
 
 function getFileExtension(file: File) {
-  const nameExtension = file.name.split(".").pop()?.toLowerCase();
-
-  if (nameExtension && /^[a-z0-9]+$/.test(nameExtension)) {
-    return nameExtension;
-  }
-
   if (file.type === "image/png") return "png";
   if (file.type === "image/webp") return "webp";
   if (file.type === "image/heic") return "heic";
