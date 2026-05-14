@@ -127,6 +127,7 @@ model OrderStop {
   customerEmail     String?
   customerPhone     String?
   postcode          String?
+  lineItemSummary   String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
