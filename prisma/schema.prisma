@@ -1,0 +1,133 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model Driver {
+  id                String   @id @default(cuid())
+  name              String
+  photoUrl          String?
+  phoneNumber       String?
+  email             String?
+  vehicleName       String?
+  vehicleRegistration String?
+  vehicleType       String?
+  fuelCardNumber    String?
+  fuelCardProvider  String?
+  startAddress      String?
+  endAddress        String?
+  isActive          Boolean  @default(true)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  routes            Route[]
+}
+
+model Route {
+  id                String   @id @default(cuid())
+  name              String
+  date              DateTime
+  status            String   @default("DRAFT") // DRAFT, PUBLISHED, NOTIFICATIONS_SENT, OUT_FOR_DELIVERY, COMPLETED, CANCELLED
+  driverId          String?
+  driver            Driver?  @relation(fields: [driverId], references: [id])
+  totalMileage      Float?
+  totalDuration     Int?     // in seconds or minutes
+  notificationsSent Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  stops             Stop[]
+  history           RouteHistory[]
+}
+
+model Stop {
+  id                String   @id @default(cuid())
+  routeId           String
+  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  orderIndex        Int
+  isLocked          Boolean  @default(false)
+  estimatedArrival  DateTime?
+  actualArrival     DateTime?
+  status            String   @default("PENDING") // PENDING, ARRIVED, DELIVERED, FAILED
+  deliveryGroupId   String?
+  deliveryGroup     DeliveryGroup? @relation(fields: [deliveryGroupId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model DeliveryGroup {
+  id                String   @id @default(cuid())
+  address           String
+  latitude          Float?
+  longitude         Float?
+  stops             Stop[]
+  orders            OrderStop[]
+  proofPhotoUrl     String?
+  deliveryNote      String?
+  safePlaceNote     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model OrderStop {
+  id                String   @id @default(cuid())
+  deliveryGroupId   String
+  deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  shopifyOrderId    String
+  shopifyOrderNumber String
+  customerName      String?
+  postcode          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model AreaFilter {
+  id                String   @id @default(cuid())
+  name              String   // Northern, Central, etc.
+  postcodePrefixes  String   // Comma separated list like "TR, PL"
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Setting {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model RouteHistory {
+  id                String   @id @default(cuid())
+  routeId           String
+  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  action            String   // Route created, Orders added, etc.
+  details           String?
+  createdAt         DateTime @default(now())
+}
