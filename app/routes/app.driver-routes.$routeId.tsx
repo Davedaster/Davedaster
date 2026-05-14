@@ -66,17 +66,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "completeStop") {
     try {
       const stopId = String(formData.get("stopId") || "").trim();
-      const proofPhotoFile = formData.get("proofPhotoFile");
-      let proofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
+      const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
+      const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
+      const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
 
-      if (proofPhotoFile instanceof File && proofPhotoFile.size > 0) {
-        proofPhotoUrl = await uploadProofPhoto(proofPhotoFile, stopId);
+      for (const proofPhotoFile of proofPhotoFiles) {
+        proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
       }
 
       await saveProofOfDelivery({
         admin,
         stopId,
-        proofPhotoUrl,
+        proofPhotoUrl: proofPhotoUrls,
         deliveryNote: String(formData.get("deliveryNote") || "").trim(),
         safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
         leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
@@ -178,13 +179,13 @@ function tidyPhone(phone?: string | null) {
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
-  const [proofPhotoSelected, setProofPhotoSelected] = useState(false);
+  const [proofPhotoCount, setProofPhotoCount] = useState(0);
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
-  const hasProofPhoto = proofPhotoSelected || proofPhotoUrl.trim().length > 0;
+  const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
 
   return (
     <BlockStack gap="300">
@@ -201,16 +202,20 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
         <BlockStack gap="200">
           {proofPhotoStorageEnabled ? (
             <label>
-              <Text as="span" variant="bodyMd" fontWeight="medium">Proof photo</Text>
+              <Text as="span" variant="bodyMd" fontWeight="medium">Proof photos</Text>
               <input
                 type="file"
-                name="proofPhotoFile"
+                name="proofPhotoFiles"
                 accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
                 capture="environment"
+                multiple
                 disabled={updatesDisabled}
-                onChange={(event) => setProofPhotoSelected(Boolean(event.currentTarget.files?.length))}
+                onChange={(event) => setProofPhotoCount(event.currentTarget.files?.length || 0)}
                 style={{ display: "block", marginTop: 6 }}
               />
+              {proofPhotoCount > 0 ? (
+                <Text as="p" variant="bodySm" tone="subdued">{proofPhotoCount} photo{proofPhotoCount === 1 ? "" : "s"} selected</Text>
+              ) : null}
             </label>
           ) : null}
           <TextField
@@ -221,7 +226,7 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
             onChange={setProofPhotoUrl}
             autoComplete="off"
             disabled={updatesDisabled}
-            helpText={proofPhotoStorageEnabled ? "Upload a photo above, or paste a hosted link if needed." : "Required before marking delivered."}
+            helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."}
           />
           <TextField
             label="Delivery note"
@@ -336,6 +341,7 @@ export default function DriverRouteDetails() {
               const cleanedPhone = tidyPhone(phone);
               const wazeUrl = buildWazeUrl(stop);
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
+              const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
 
               return (
                 <LegacyCard key={stop.id} sectioned>
@@ -372,6 +378,17 @@ export default function DriverRouteDetails() {
                           <Text as="p" variant="bodySm" tone="subdued">Phone</Text>
                           <Text as="p" variant="bodyMd">{phone || "No phone"}</Text>
                         </BlockStack>
+
+                        {proofPhotos.length ? (
+                          <BlockStack gap="050">
+                            <Text as="p" variant="bodySm" tone="subdued">Proof photos</Text>
+                            {proofPhotos.map((photo, index) => (
+                              <Button key={photo.id} url={photo.url} target="_blank">
+                                View proof photo {index + 1}
+                              </Button>
+                            ))}
+                          </BlockStack>
+                        ) : null}
                       </BlockStack>
                     </Box>
 
