@@ -12,8 +12,6 @@ import {
   Button,
   Icon,
   Badge,
-  ResourceList,
-  ResourceItem,
   EmptyState,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
@@ -47,6 +45,13 @@ interface Stop {
   eta: string;
   isLocked: boolean;
 }
+
+const UK_BOUNDS = {
+  north: 58.8,
+  south: 49.8,
+  west: -8.7,
+  east: 1.9,
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -144,6 +149,159 @@ function addressLabel(order: DeliveryOrder) {
   return order.addressConfidence === "HIGH" ? "Location ready" : "Ready";
 }
 
+function hasCoordinates(order: DeliveryOrder) {
+  return typeof order.latitude === "number" && typeof order.longitude === "number";
+}
+
+function getPinPosition(order: DeliveryOrder) {
+  if (!hasCoordinates(order)) {
+    return null;
+  }
+
+  const latitude = order.latitude as number;
+  const longitude = order.longitude as number;
+  const x = ((longitude - UK_BOUNDS.west) / (UK_BOUNDS.east - UK_BOUNDS.west)) * 100;
+  const y = ((UK_BOUNDS.north - latitude) / (UK_BOUNDS.north - UK_BOUNDS.south)) * 100;
+
+  return {
+    left: `${Math.max(2, Math.min(98, x))}%`,
+    top: `${Math.max(2, Math.min(98, y))}%`,
+  };
+}
+
+function MapPin({ order, selected, onClick }: { order: DeliveryOrder; selected: boolean; onClick: () => void }) {
+  const position = getPinPosition(order);
+
+  if (!position) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Select ${order.name}`}
+      title={`${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`}
+      style={{
+        position: "absolute",
+        left: position.left,
+        top: position.top,
+        transform: "translate(-50%, -100%)",
+        border: 0,
+        background: "transparent",
+        cursor: "pointer",
+        padding: 0,
+        zIndex: selected ? 3 : 2,
+      }}
+    >
+      <span
+        style={{
+          display: "grid",
+          placeItems: "center",
+          width: selected ? 34 : 28,
+          height: selected ? 34 : 28,
+          borderRadius: "50% 50% 50% 0",
+          transform: "rotate(-45deg)",
+          background: selected ? "#323841" : "#509AE6",
+          boxShadow: selected ? "0 0 0 4px rgba(80,154,230,0.22)" : "0 2px 8px rgba(0,0,0,0.25)",
+          border: "2px solid #ffffff",
+        }}
+      >
+        <span
+          style={{
+            transform: "rotate(45deg)",
+            color: "#ffffff",
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: 1,
+          }}
+        >
+          {order.name.replace("#", "")}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryOrder[]; selectedIds: Set<string>; onToggleOrder: (order: DeliveryOrder) => void }) {
+  const ordersWithCoordinates = orders.filter(hasCoordinates);
+  const ordersWithoutCoordinates = orders.filter((order) => !hasCoordinates(order));
+
+  return (
+    <BlockStack gap="300">
+      <div
+        style={{
+          position: "relative",
+          minHeight: 520,
+          overflow: "hidden",
+          borderRadius: 16,
+          border: "1px solid #d0d5dd",
+          background:
+            "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)",
+        }}
+      >
+        <svg
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+        >
+          <path
+            d="M52 4 C42 10 39 22 41 32 C31 36 30 50 37 59 C29 65 31 79 41 84 C52 90 66 84 68 72 C78 66 78 51 69 44 C72 31 66 15 52 4 Z"
+            fill="#eef7ef"
+            stroke="#b7d7c2"
+            strokeWidth="1"
+          />
+          <path
+            d="M46 54 C38 59 38 72 47 76 C56 80 65 74 64 64 C63 55 54 50 46 54 Z"
+            fill="#e5f4e9"
+            stroke="#b7d7c2"
+            strokeWidth="0.8"
+          />
+          <path
+            d="M43 78 C36 81 33 90 40 94 C48 98 57 93 55 85 C54 79 49 76 43 78 Z"
+            fill="#e5f4e9"
+            stroke="#b7d7c2"
+            strokeWidth="0.8"
+          />
+        </svg>
+
+        <div style={{ position: "absolute", inset: 16 }}>
+          <InlineStack align="space-between">
+            <Badge tone="info">UK map view</Badge>
+            <Badge tone="success">{ordersWithCoordinates.length} pins</Badge>
+          </InlineStack>
+        </div>
+
+        {ordersWithCoordinates.map((order) => (
+          <MapPin
+            key={order.id}
+            order={order}
+            selected={selectedIds.has(order.id)}
+            onClick={() => onToggleOrder(order)}
+          />
+        ))}
+      </div>
+
+      {ordersWithoutCoordinates.length ? (
+        <LegacyCard sectioned>
+          <BlockStack gap="200">
+            <Text as="h3" variant="headingSm">Needs location check before a pin can be shown</Text>
+            {ordersWithoutCoordinates.map((order) => (
+              <InlineStack key={order.id} align="space-between">
+                <Text as="span" variant="bodySm">
+                  {order.name} · {order.customerName} · {order.postcode || "No postcode"}
+                </Text>
+                <Badge tone="warning">{addressLabel(order)}</Badge>
+              </InlineStack>
+            ))}
+          </BlockStack>
+        </LegacyCard>
+      ) : null}
+    </BlockStack>
+  );
+}
+
 export default function OrdersMap() {
   const { orders, addressLookupEnabled } = useLoaderData<typeof loader>();
   const [stops, setStops] = useState<Stop[]>([]);
@@ -171,6 +329,10 @@ export default function OrdersMap() {
   };
 
   const toggleOrder = (order: DeliveryOrder) => {
+    if (!hasCoordinates(order)) {
+      return;
+    }
+
     setStops((currentStops) => {
       if (currentStops.some((stop) => stop.id === order.id)) {
         return currentStops.filter((stop) => stop.id !== order.id);
@@ -211,80 +373,16 @@ export default function OrdersMap() {
             </Box>
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
-              <BlockStack gap="300">
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Map pins will use the latitude and longitude shown below when the real map component is added.
-                </Text>
-
-                {orders.length === 0 ? (
-                  <EmptyState
-                    heading="No matching delivery orders found"
-                    image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-                  >
-                    <p>No orders matched the current delivery filters.</p>
-                  </EmptyState>
-                ) : (
-                  <ResourceList
-                    resourceName={{ singular: "order", plural: "orders" }}
-                    items={orders}
-                    renderItem={(order) => {
-                      const selected = selectedIds.has(order.id);
-                      const coordinates = order.latitude && order.longitude
-                        ? `${order.latitude.toFixed(5)}, ${order.longitude.toFixed(5)}`
-                        : "No coordinates yet";
-
-                      return (
-                        <ResourceItem
-                          id={order.id}
-                          accessibilityLabel={`Select ${order.name}`}
-                          onClick={() => toggleOrder(order)}
-                        >
-                          <Box
-                            padding="300"
-                            borderColor={selected ? "border-info" : "border"}
-                            borderWidth="025"
-                            borderRadius="200"
-                            background={selected ? "bg-surface-info" : "bg-surface"}
-                          >
-                            <InlineStack align="space-between">
-                              <BlockStack gap="050">
-                                <Text as="h3" variant="bodyMd" fontWeight="bold">
-                                  {order.name} · {order.customerName}
-                                </Text>
-                                <Text as="p" variant="bodySm" tone="subdued">
-                                  {order.postcode || "No postcode"} · {order.shippingMethod || "No shipping method"}
-                                </Text>
-                                <Text as="p" variant="bodySm" tone="subdued">
-                                  Shopify address: {order.addressSummary}
-                                </Text>
-                                {order.formattedAddress ? (
-                                  <Text as="p" variant="bodySm" tone="subdued">
-                                    Matched address: {order.formattedAddress}
-                                  </Text>
-                                ) : null}
-                                {order.hasManualOverride ? (
-                                  <Text as="p" variant="bodySm" tone="success">
-                                    Manual override: {order.manualAddress}
-                                  </Text>
-                                ) : null}
-                                <Text as="p" variant="bodySm" tone="subdued">
-                                  Coordinates: {coordinates}
-                                </Text>
-                              </BlockStack>
-                              <BlockStack gap="100" align="end">
-                                <Badge tone={addressTone(order.addressStatus, order.addressConfidence)}>
-                                  {addressLabel(order)}
-                                </Badge>
-                                {selected ? <Badge tone="info">Selected</Badge> : null}
-                              </BlockStack>
-                            </InlineStack>
-                          </Box>
-                        </ResourceItem>
-                      );
-                    }}
-                  />
-                )}
-              </BlockStack>
+              {orders.length === 0 ? (
+                <EmptyState
+                  heading="No matching delivery orders found"
+                  image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                >
+                  <p>No orders matched the current delivery filters.</p>
+                </EmptyState>
+              ) : (
+                <DeliveryMap orders={orders} selectedIds={selectedIds} onToggleOrder={toggleOrder} />
+              )}
             </Box>
           </LegacyCard>
         </Layout.Section>
