@@ -1,3 +1,4 @@
+import { lookupAddress } from "./getAddress.server";
 import { getLastWorkingDaysStart } from "./workingDays.server";
 
 type ShopifyAdmin = {
@@ -76,10 +77,14 @@ export type DeliveryOrder = {
   financialStatus: string;
   postcode: string | null;
   addressSummary: string;
+  formattedAddress: string | null;
   hasDeliveryAddress: boolean;
   hasPanel: boolean;
   isSampleOnly: boolean;
   addressStatus: "READY" | "NEEDS_ADDRESS" | "NEEDS_LOCATION_CHECK";
+  addressConfidence: "HIGH" | "LOW";
+  latitude: number | null;
+  longitude: number | null;
   lineItemSummary: string;
 };
 
@@ -195,13 +200,19 @@ export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
   return includesAny(shippingMethod, INCLUDED_SHIPPING_TERMS);
 }
 
-export function toDeliveryOrder(order: ShopifyOrderNode): DeliveryOrder {
+export async function toDeliveryOrder(order: ShopifyOrderNode): Promise<DeliveryOrder> {
   const items = lineItems(order);
   const hasPanel = items.some(isPanelLineItem);
   const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
   const shippingMethod = shippingTitle(order);
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const weakAddress = hasWeakAddress(order);
+  const addressSummary = formatAddress(order);
+  const lookup = hasDeliveryAddress
+    ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary)
+    : null;
+
+  const lookupNeedsCheck = lookup ? lookup.confidence === "LOW" || !lookup.latitude || !lookup.longitude : false;
 
   return {
     id: order.id,
@@ -214,15 +225,19 @@ export function toDeliveryOrder(order: ShopifyOrderNode): DeliveryOrder {
     fulfilmentStatus: order.displayFulfillmentStatus,
     financialStatus: order.displayFinancialStatus,
     postcode: order.shippingAddress?.zip || null,
-    addressSummary: formatAddress(order),
+    addressSummary,
+    formattedAddress: lookup?.formattedAddress || null,
     hasDeliveryAddress,
     hasPanel,
     isSampleOnly,
     addressStatus: !hasDeliveryAddress
       ? "NEEDS_ADDRESS"
-      : weakAddress
+      : weakAddress || lookupNeedsCheck
         ? "NEEDS_LOCATION_CHECK"
         : "READY",
+    addressConfidence: lookup?.confidence || "LOW",
+    latitude: lookup?.latitude || null,
+    longitude: lookup?.longitude || null,
     lineItemSummary: items.map((item) => item.title).join(", "),
   };
 }
@@ -295,8 +310,7 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
   }
 
   const orders = payload.data?.orders?.edges.map((edge) => edge.node) || [];
+  const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
 
-  return orders
-    .filter(shouldShowOnDeliveryMap)
-    .map(toDeliveryOrder);
+  return Promise.all(filteredOrders.map(toDeliveryOrder));
 }

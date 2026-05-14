@@ -84,8 +84,17 @@ model Stop {
 model DeliveryGroup {
   id                String   @id @default(cuid())
   address           String
+  manualAddress     String?
+  useManualAddress  Boolean  @default(false)
+  postcode          String?
   latitude          Float?
   longitude         Float?
+  addressStatus     String   @default("NEEDS_LOCATION_CHECK") // READY, NEEDS_ADDRESS, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
+  addressSource     String   @default("none") // getaddress, manual, none
+  addressConfidence String   @default("LOW")
+  formattedAddress  String?
+  manualPinLatitude Float?
+  manualPinLongitude Float?
   stops             Stop[]
   orders            OrderStop[]
   proofPhotoUrl     String?

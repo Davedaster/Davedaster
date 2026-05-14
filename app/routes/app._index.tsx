@@ -52,7 +52,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const orders = await getDeliveryOrders(admin);
 
-  return json({ orders });
+  return json({ orders, addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY) });
 };
 
 function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: (id: string) => void; onToggleLock: (id: string) => void }) {
@@ -120,8 +120,28 @@ function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number): Stop {
   };
 }
 
+function addressTone(status: DeliveryOrder["addressStatus"], confidence: DeliveryOrder["addressConfidence"]) {
+  if (status === "READY" && confidence === "HIGH") {
+    return "success" as const;
+  }
+
+  return "warning" as const;
+}
+
+function addressLabel(order: DeliveryOrder) {
+  if (order.addressStatus === "NEEDS_ADDRESS") {
+    return "Needs address";
+  }
+
+  if (order.addressStatus === "NEEDS_LOCATION_CHECK") {
+    return "Needs location check";
+  }
+
+  return order.addressConfidence === "HIGH" ? "Location ready" : "Ready";
+}
+
 export default function OrdersMap() {
-  const { orders } = useLoaderData<typeof loader>();
+  const { orders, addressLookupEnabled } = useLoaderData<typeof loader>();
   const [stops, setStops] = useState<Stop[]>([]);
 
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
@@ -176,6 +196,11 @@ export default function OrdersMap() {
                   <Text as="p" variant="bodySm" tone="subdued">
                     Showing Rapid Delivery, Free Rapid Delivery and Local Delivery orders from the last 7 working days.
                   </Text>
+                  {!addressLookupEnabled ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      getAddress.io lookup is not enabled yet. Add GETADDRESS_API_KEY to the app environment before testing live coordinates.
+                    </Text>
+                  ) : null}
                 </BlockStack>
                 <Badge tone="info">{orders.length} orders</Badge>
               </InlineStack>
@@ -184,7 +209,7 @@ export default function OrdersMap() {
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
               <BlockStack gap="300">
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Map pins will appear here after getAddress.io is connected. For now, click orders below to build a route.
+                  Map pins will use the latitude and longitude shown below when the real map component is added.
                 </Text>
 
                 {orders.length === 0 ? (
@@ -200,6 +225,9 @@ export default function OrdersMap() {
                     items={orders}
                     renderItem={(order) => {
                       const selected = selectedIds.has(order.id);
+                      const coordinates = order.latitude && order.longitude
+                        ? `${order.latitude.toFixed(5)}, ${order.longitude.toFixed(5)}`
+                        : "No coordinates yet";
 
                       return (
                         <ResourceItem
@@ -223,12 +251,20 @@ export default function OrdersMap() {
                                   {order.postcode || "No postcode"} · {order.shippingMethod || "No shipping method"}
                                 </Text>
                                 <Text as="p" variant="bodySm" tone="subdued">
-                                  {order.addressSummary}
+                                  Shopify address: {order.addressSummary}
+                                </Text>
+                                {order.formattedAddress ? (
+                                  <Text as="p" variant="bodySm" tone="subdued">
+                                    Matched address: {order.formattedAddress}
+                                  </Text>
+                                ) : null}
+                                <Text as="p" variant="bodySm" tone="subdued">
+                                  Coordinates: {coordinates}
                                 </Text>
                               </BlockStack>
                               <BlockStack gap="100" align="end">
-                                <Badge tone={order.addressStatus === "READY" ? "success" : "warning"}>
-                                  {order.addressStatus === "READY" ? "Ready" : order.addressStatus === "NEEDS_ADDRESS" ? "Needs address" : "Needs location check"}
+                                <Badge tone={addressTone(order.addressStatus, order.addressConfidence)}>
+                                  {addressLabel(order)}
                                 </Badge>
                                 {selected ? <Badge tone="info">Selected</Badge> : null}
                               </BlockStack>
