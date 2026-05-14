@@ -57,6 +57,9 @@ model Route {
   status            String   @default("DRAFT") // DRAFT, PUBLISHED, NOTIFICATIONS_SENT, OUT_FOR_DELIVERY, COMPLETED, CANCELLED
   driverId          String?
   driver            Driver?  @relation(fields: [driverId], references: [id])
+  driverAccessToken String?  @unique
+  driverAccessTokenCreatedAt DateTime?
+  driverRouteLinkSentAt DateTime?
   totalMileage      Float?
   totalDuration     Int?     // in seconds or minutes
   notificationsSent Boolean  @default(false)
