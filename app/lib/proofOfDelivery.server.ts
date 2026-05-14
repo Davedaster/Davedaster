@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
 
 type ShopifyAdmin = {
@@ -99,6 +100,12 @@ export async function saveProofOfDelivery(input: {
     shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
   }
 
+  const notificationResult = await sendDeliveryCompleteNotifications({
+    routeName: stop.route.name,
+    proofPhotoUrl,
+    orders: stop.deliveryGroup.orders,
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.deliveryGroup.update({
       where: {
@@ -133,7 +140,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}`,
+            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped`,
           },
         },
       },
