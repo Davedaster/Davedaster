@@ -105,6 +105,9 @@ export async function saveProofOfDelivery(input: {
     proofPhotoUrl,
     orders: stop.deliveryGroup.orders,
   });
+  const notificationErrorDetails = notificationResult.errors.length
+    ? `. Notification errors: ${notificationResult.errors.join(" | ")}`
+    : "";
 
   await prisma.$transaction(async (tx) => {
     await tx.deliveryGroup.update({
@@ -140,7 +143,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped`,
+            details: `Stop ${stop.orderIndex} marked delivered with proof photo. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
