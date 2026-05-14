@@ -22,7 +22,7 @@ export async function listStopsForProofOfDelivery() {
   return prisma.stop.findMany({
     where: {
       status: {
-        not: "DELIVERED",
+        notIn: ["DELIVERED", "FAILED"],
       },
       route: {
         status: {
@@ -83,6 +83,10 @@ export async function saveProofOfDelivery(input: {
 
   if (stop.status === "DELIVERED") {
     throw new Error("This stop has already been marked delivered.");
+  }
+
+  if (stop.status === "FAILED") {
+    throw new Error("This stop has already been marked failed.");
   }
 
   if (!proofPhotoUrl) {
