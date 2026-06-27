@@ -51,8 +51,11 @@ export function CustomerSupportCard() {
         Need help?
       </p>
       <h3 style={{ margin: '0 0 10px' }}>Customer support</h3>
-      <p style={{ margin: '0 0 14px', color: '#667085' }}>
+      <p style={{ margin: '0 0 8px', color: '#667085' }}>
         Our delivery team is here to help with delivery updates and tracking enquiries.
+      </p>
+      <p style={{ margin: '0 0 14px', color: '#667085', fontSize: 14 }}>
+        Support email: <strong style={{ color: '#323841' }}>{SUPPORT_EMAIL}</strong>
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
