@@ -58,6 +58,12 @@ export function CustomerSupportCard() {
     }
   }
 
+  const copyFeedback = copyState === 'copied'
+    ? 'Tracking link copied'
+    : copyState === 'failed'
+      ? 'Copy failed'
+      : 'Copy tracking link';
+
   return (
     <div
       style={{
@@ -99,6 +105,7 @@ export function CustomerSupportCard() {
         <button
           type='button'
           onClick={() => void handleCopyTrackingLink()}
+          aria-live='polite'
           style={{
             border: '1px solid #509AE6',
             background: '#ffffff',
@@ -109,7 +116,7 @@ export function CustomerSupportCard() {
             cursor: 'pointer',
           }}
         >
-          {copyState === 'copied' ? 'Tracking link copied' : copyState === 'failed' ? 'Copy failed' : 'Copy tracking link'}
+          {copyFeedback}
         </button>
       </div>
     </div>
