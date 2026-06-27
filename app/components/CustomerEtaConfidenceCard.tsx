@@ -22,7 +22,7 @@ function confidenceCopy({
       eyebrow: 'Delivery planned',
       title: 'Your delivery slot',
       message: `We expect to be with you ${estimatedSlot}.`,
-      highlight: 'We will update this page when the route starts.',
+      highlight: 'We will update this page with live route progress once the driver starts their route.',
     };
   }
 
@@ -30,8 +30,8 @@ function confidenceCopy({
     return {
       eyebrow: 'Driver nearby',
       title: 'You are next',
-      message: 'Your delivery is the next stop on this route.',
-      highlight: 'Please keep your phone nearby and make sure access is clear.',
+      message: 'Your delivery is the next stop on the route.',
+      highlight: 'Please keep your phone nearby and ensure access is available for the driver.',
     };
   }
 
@@ -39,16 +39,16 @@ function confidenceCopy({
     return {
       eyebrow: 'Nearly there',
       title: '1 drop before yours',
-      message: 'The driver has one delivery to complete before heading to you.',
-      highlight: `Expected delivery window: ${estimatedSlot}.`,
+      message: 'There is just one delivery remaining before the driver heads to you.',
+      highlight: `Estimated arrival: ${estimatedSlot}.`,
     };
   }
 
   return {
     eyebrow: 'Route in progress',
     title: `${dropsBefore} drops before yours`,
-    message: 'The driver is working through the route and your delivery is coming up.',
-    highlight: `Expected delivery window: ${estimatedSlot}.`,
+    message: 'Your delivery is progressing through the route and getting closer.',
+    highlight: `Estimated arrival: ${estimatedSlot}.`,
   };
 }
 
