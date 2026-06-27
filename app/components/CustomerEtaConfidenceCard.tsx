@@ -15,7 +15,7 @@ function confidenceCopy({
   stopsBeforeCustomer,
   estimatedSlot,
 }: CustomerEtaConfidenceCardProps) {
-  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+  const deliveriesBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
   if (routeStatus !== 'OUT_FOR_DELIVERY') {
     return {
@@ -26,7 +26,7 @@ function confidenceCopy({
     };
   }
 
-  if (isNextDrop || dropsBefore === 0) {
+  if (isNextDrop || deliveriesBefore === 0) {
     return {
       eyebrow: 'Driver nearby',
       title: 'You are next',
@@ -35,10 +35,10 @@ function confidenceCopy({
     };
   }
 
-  if (dropsBefore === 1) {
+  if (deliveriesBefore === 1) {
     return {
       eyebrow: 'Nearly there',
-      title: '1 drop before yours',
+      title: '1 delivery before yours',
       message: 'There is just one delivery remaining before the driver heads to you.',
       highlight: `Estimated arrival: ${estimatedSlot}.`,
     };
@@ -46,7 +46,7 @@ function confidenceCopy({
 
   return {
     eyebrow: 'Route in progress',
-    title: `${dropsBefore} drops before yours`,
+    title: `${deliveriesBefore} deliveries before yours`,
     message: 'Your delivery is progressing through the route and getting closer.',
     highlight: `Estimated arrival: ${estimatedSlot}.`,
   };
