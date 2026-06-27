@@ -70,11 +70,16 @@ export async function saveProofOfDelivery(input: {
   podImage?: string | null;
   podName?: string | null;
   podTicked?: boolean;
+  podLat?: number | null;
+  podLng?: number | null;
 }) {
   const proofPhotoUrls = normaliseProofPhotoUrls(input.proofPhotoUrl);
   const primaryProofPhotoUrl = proofPhotoUrls[0];
   const podImage = input.podImage?.trim() || "";
   const podName = input.podName?.trim() || "";
+  const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null]
+    .filter(Boolean)
+    .join("\n");
 
   const stop = await prisma.stop.findUnique({
     where: {
@@ -149,7 +154,7 @@ export async function saveProofOfDelivery(input: {
             label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
           })),
         },
-        deliveryNote: input.deliveryNote?.trim() || null,
+        deliveryNote: noteParts || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
       },
     });
@@ -176,7 +181,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"} and POD name ${podName}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
