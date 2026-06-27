@@ -98,47 +98,47 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
   if (stopStatus === "DELIVERED") {
-    return "Your delivery has been completed.";
+    return "Your panel delivery has been completed.";
   }
 
   if (stopStatus === "FAILED") {
-    return "We attempted your delivery and an update has been recorded below.";
+    return "We attempted your panel delivery and an update has been recorded below.";
   }
 
   if (routeStatus === "OUT_FOR_DELIVERY" && (isNextDrop || dropsBefore === 0)) {
-    return "You are the next delivery. Please keep your phone nearby.";
+    return "Your panel delivery is next. Please keep your phone nearby.";
   }
 
   if (routeStatus === "OUT_FOR_DELIVERY") {
     return dropsBefore === 1
-      ? "There is 1 delivery before yours."
-      : `There are ${dropsBefore} deliveries before yours.`;
+      ? "There is 1 panel delivery before yours."
+      : `There are ${dropsBefore} panel deliveries before yours.`;
   }
 
   if (routeStatus === "CANCELLED") {
     return "This route is no longer active. Please contact us if you need help.";
   }
 
-  return "Your delivery has been planned and this page will update as the route progresses.";
+  return "Your panel delivery has been planned and this page will update as the route progresses.";
 }
 
 function progressSummary(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
-  if (stopStatus === "DELIVERED") return "Delivery completed. Live tracking has ended.";
-  if (stopStatus === "FAILED") return "Delivery attempted. Live tracking has ended.";
+  if (stopStatus === "DELIVERED") return "Panel delivery completed. Live tracking has ended.";
+  if (stopStatus === "FAILED") return "Panel delivery attempted. Live tracking has ended.";
   if (routeStatus !== "OUT_FOR_DELIVERY") return "Your route is planned and will update once the driver starts.";
   if (isNextDrop || dropsBefore === 0) return "You are next. Live tracking is active.";
-  if (dropsBefore === 1) return "1 stop before yours. Live tracking will activate when you are next.";
-  return `${dropsBefore} stops before yours. Live tracking will activate when you are next.`;
+  if (dropsBefore === 1) return "1 panel delivery before yours. Live tracking will activate when you are next.";
+  return `${dropsBefore} panel deliveries before yours. Live tracking will activate when you are next.`;
 }
 
 function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
   if (isNextDrop || dropsBefore === 0) return "You are next";
-  if (dropsBefore === 1) return "1 stop";
-  return `${dropsBefore} stops`;
+  if (dropsBefore === 1) return "1 panel delivery";
+  return `${dropsBefore} panel deliveries`;
 }
 
 function liveTrackingLabel(routeStatus: string, stopStatus: string, isNextDrop: boolean) {
@@ -150,12 +150,12 @@ function liveTrackingLabel(routeStatus: string, stopStatus: string, isNextDrop: 
 function liveTrackingMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
-  if (stopStatus === "DELIVERED") return "This delivery is complete, so live tracking has ended.";
-  if (stopStatus === "FAILED") return "This delivery has been attempted, so live tracking has ended.";
-  if (routeStatus !== "OUT_FOR_DELIVERY") return "Live tracking will become available once the driver is out for delivery and you are the next stop.";
+  if (stopStatus === "DELIVERED") return "This panel delivery is complete, so live tracking has ended.";
+  if (stopStatus === "FAILED") return "This panel delivery has been attempted, so live tracking has ended.";
+  if (routeStatus !== "OUT_FOR_DELIVERY") return "Live tracking will become available once the driver is out for delivery and your panel delivery is next.";
   if (isNextDrop || dropsBefore === 0) return "Your driver is nearby. Keep this page open for the latest update.";
-  if (dropsBefore === 1) return "For privacy, the live map appears when there is 1 stop left and you become the next delivery.";
-  return "For privacy, the live map appears when you become the next delivery.";
+  if (dropsBefore === 1) return "For privacy, the live map appears when there is 1 panel delivery left and you become the next delivery.";
+  return "For privacy, the live map appears when your panel delivery becomes the next delivery.";
 }
 
 function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
@@ -210,7 +210,7 @@ function DeliveryConfirmationCard({ tracking }: { tracking: Awaited<ReturnType<t
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
         <div>
           <p style={{ margin: "0 0 6px", color: "#16a34a", fontWeight: 800, letterSpacing: 0.4 }}>Delivered</p>
-          <h2 style={{ margin: 0, fontSize: 22 }}>Delivery confirmation</h2>
+          <h2 style={{ margin: 0, fontSize: 22 }}>Panel delivery confirmation</h2>
         </div>
         <button type="button" onClick={() => window.print()} style={{ border: "1px solid #509AE6", color: "#509AE6", background: "#ffffff", borderRadius: 999, padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>
           Download proof
@@ -255,10 +255,10 @@ function FailedDeliveryCard({ tracking }: { tracking: Awaited<ReturnType<typeof 
 
   return (
     <div style={{ marginBottom: 18, background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", border: "1px solid #fed7aa" }}>
-      <p style={{ margin: "0 0 6px", color: "#ea580c", fontWeight: 800, letterSpacing: 0.4 }}>Delivery attempted</p>
+      <p style={{ margin: "0 0 6px", color: "#ea580c", fontWeight: 800, letterSpacing: 0.4 }}>Panel delivery attempted</p>
       <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>We could not complete your delivery this time</h2>
       <p style={{ margin: "0 0 14px", color: "#667085" }}>
-        Our team has recorded an attempted delivery. Please contact us and we will help arrange the next step.
+        Our team has recorded an attempted panel delivery. Please contact us and we will help arrange the next step.
       </p>
 
       <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
@@ -299,9 +299,9 @@ export default function CustomerTrackingPage() {
       : [];
   const customerMessage = customerStatusMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
   const pageTitle = showProof
-    ? "Your delivery has been completed"
+    ? "Your panel delivery has been completed"
     : showFailedDelivery
-      ? "We attempted your delivery"
+      ? "We attempted your panel delivery"
       : `We expect to be with you ${slot}`;
   const customerProgressSummary = progressSummary(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
   const customerLiveTrackingMessage = liveTrackingMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
