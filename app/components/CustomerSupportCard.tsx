@@ -2,6 +2,19 @@ import { useState } from 'react';
 
 const SUPPORT_EMAIL = 'deliveries@bathroompanelsdirect.co.uk';
 
+function buildSupportEmailHref() {
+  const subject = 'Delivery tracking enquiry';
+  const body = [
+    'Hi Bathroom Panels Direct,',
+    '',
+    'I need help with my delivery tracking.',
+    '',
+    `Tracking link: ${typeof window === 'undefined' ? '' : window.location.href}`,
+  ].join('\n');
+
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 async function copyCurrentTrackingLink() {
   if (typeof window === 'undefined') {
     return;
@@ -60,7 +73,7 @@ export function CustomerSupportCard() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <a
-          href={`mailto:${SUPPORT_EMAIL}`}
+          href={buildSupportEmailHref()}
           style={{
             background: '#509AE6',
             color: '#ffffff',
