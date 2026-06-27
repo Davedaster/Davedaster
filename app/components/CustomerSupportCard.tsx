@@ -1,6 +1,29 @@
-export function CustomerSupportCard() {
-  const trackingUrl = typeof window !== 'undefined' ? window.location.href : '';
+const SUPPORT_EMAIL = 'deliveries@bathroompanelsdirect.co.uk';
 
+async function copyCurrentTrackingLink() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const trackingUrl = window.location.href;
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(trackingUrl);
+    return;
+  }
+
+  const textArea = document.createElement('textarea');
+  textArea.value = trackingUrl;
+  textArea.setAttribute('readonly', 'true');
+  textArea.style.position = 'absolute';
+  textArea.style.left = '-9999px';
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textArea);
+}
+
+export function CustomerSupportCard() {
   return (
     <div
       style={{
@@ -20,7 +43,7 @@ export function CustomerSupportCard() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <a
-          href='mailto:deliveries@bathroompanelsdirect.co.uk'
+          href={`mailto:${SUPPORT_EMAIL}`}
           style={{
             background: '#509AE6',
             color: '#ffffff',
@@ -35,7 +58,7 @@ export function CustomerSupportCard() {
 
         <button
           type='button'
-          onClick={() => navigator.clipboard.writeText(trackingUrl)}
+          onClick={() => void copyCurrentTrackingLink()}
           style={{
             border: '1px solid #509AE6',
             background: '#ffffff',
