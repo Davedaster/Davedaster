@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
+import { CustomerEtaConfidenceCard } from "../components/CustomerEtaConfidenceCard";
 import { CustomerSupportCard } from "../components/CustomerSupportCard";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getCustomerTracking } from "../lib/tracking.server";
@@ -254,6 +255,14 @@ export default function CustomerTrackingPage() {
 
         {showProof ? <DeliveryConfirmationCard tracking={tracking} /> : null}
         {showFailedDelivery ? <FailedDeliveryCard tracking={tracking} /> : null}
+        {!showProof && !showFailedDelivery ? (
+          <CustomerEtaConfidenceCard
+            routeStatus={route.status}
+            isNextDrop={isNextDrop}
+            stopsBeforeCustomer={progress.stopsBeforeCustomer}
+            estimatedSlot={slot}
+          />
+        ) : null}
         <div style={{ marginBottom: 18 }}>
           <CustomerSupportCard />
         </div>
