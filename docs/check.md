@@ -1,3 +1,3 @@
 # Check
 
-Temporary check updated.
+Temporary note.
