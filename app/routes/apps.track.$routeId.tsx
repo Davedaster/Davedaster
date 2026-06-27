@@ -198,6 +198,12 @@ export default function CustomerTrackingPage() {
           <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>{showProof ? "Your delivery has been completed" : `We expect to be with you ${slot}`}</h1>
           <p style={{ margin: "12px 0 0", color: "#667085" }}>{formatDate(route.date)} · Order {order.shopifyOrderNumber}</p>
           <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop || showProof ? "#16a34a" : "#323841" }}>{customerMessage}</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+            <p style={{ margin: 0, color: "#667085", fontSize: 14 }}>Refresh this page for the latest driver update.</p>
+            <button type="button" onClick={() => window.location.reload()} style={{ border: "1px solid #509AE6", color: "#ffffff", background: "#509AE6", borderRadius: 999, padding: "9px 14px", fontWeight: 800, cursor: "pointer" }}>
+              Refresh tracking
+            </button>
+          </div>
         </div>
 
         {showProof ? <DeliveryConfirmationCard tracking={tracking} /> : null}
