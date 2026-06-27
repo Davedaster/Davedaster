@@ -28,6 +28,18 @@ function normaliseProofPhotoUrls(value: string | string[]) {
   return urls.map((url) => url.trim()).filter(Boolean);
 }
 
+function formatPodLocationNote(latitude?: number | null, longitude?: number | null) {
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return null;
+  }
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return `POD location: ${latitude},${longitude}`;
+}
+
 export async function listStopsForProofOfDelivery() {
   return prisma.stop.findMany({
     where: {
@@ -77,7 +89,8 @@ export async function saveProofOfDelivery(input: {
   const primaryProofPhotoUrl = proofPhotoUrls[0];
   const podImage = input.podImage?.trim() || "";
   const podName = input.podName?.trim() || "";
-  const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null]
+  const podLocationNote = formatPodLocationNote(input.podLat, input.podLng);
+  const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null, podLocationNote]
     .filter(Boolean)
     .join("\n");
 
