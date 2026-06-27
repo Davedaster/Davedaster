@@ -233,40 +233,10 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
               ) : null}
             </label>
           ) : null}
-          <TextField
-            label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"}
-            name="proofPhotoUrl"
-            type="url"
-            value={proofPhotoUrl}
-            onChange={setProofPhotoUrl}
-            autoComplete="off"
-            disabled={updatesDisabled}
-            helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."}
-          />
-          <TextField
-            label="Delivery note"
-            name="deliveryNote"
-            value={deliveryNote}
-            onChange={setDeliveryNote}
-            autoComplete="off"
-            multiline={2}
-            disabled={updatesDisabled}
-          />
-          <Checkbox
-            label="Left in safe place"
-            checked={leftInSafePlace}
-            onChange={setLeftInSafePlace}
-            disabled={updatesDisabled}
-          />
-          <TextField
-            label="Safe place note"
-            name="safePlaceNote"
-            value={safePlaceNote}
-            onChange={setSafePlaceNote}
-            autoComplete="off"
-            multiline={2}
-            disabled={updatesDisabled}
-          />
+          <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
+          <TextField label="Delivery note" name="deliveryNote" value={deliveryNote} onChange={setDeliveryNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
+          <Checkbox label="Left in safe place" checked={leftInSafePlace} onChange={setLeftInSafePlace} disabled={updatesDisabled} />
+          <TextField label="Safe place note" name="safePlaceNote" value={safePlaceNote} onChange={setSafePlaceNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
           <Button submit variant="primary" disabled={updatesDisabled || !hasProofPhoto}>Mark delivered</Button>
         </BlockStack>
       </Form>
@@ -275,24 +245,8 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
         <input type="hidden" name="intent" value="failedStop" />
         <input type="hidden" name="stopId" value={stopId} />
         <BlockStack gap="200">
-          <TextField
-            label="Failed delivery reason"
-            name="failedReason"
-            value={failedReason}
-            onChange={setFailedReason}
-            autoComplete="off"
-            disabled={updatesDisabled}
-            helpText="Required before marking failed."
-          />
-          <TextField
-            label="Failed delivery note"
-            name="failedNote"
-            value={failedNote}
-            onChange={setFailedNote}
-            autoComplete="off"
-            multiline={2}
-            disabled={updatesDisabled}
-          />
+          <TextField label="Failed delivery reason" name="failedReason" value={failedReason} onChange={setFailedReason} autoComplete="off" disabled={updatesDisabled} helpText="Required before marking failed." />
+          <TextField label="Failed delivery note" name="failedNote" value={failedNote} onChange={setFailedNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
           <Button submit tone="critical" disabled={updatesDisabled || !failedReason}>Mark failed delivery</Button>
         </BlockStack>
       </Form>
@@ -309,10 +263,7 @@ export default function DriverRouteDetails() {
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
 
   return (
-    <Page
-      title={route.name}
-      backAction={{ content: "Driver routes", url: "/app/driver-routes" }}
-    >
+    <Page title={route.name} backAction={{ content: "Driver routes", url: "/app/driver-routes" }}>
       <Layout>
         <Layout.Section>
           <LegacyCard sectioned>
@@ -320,30 +271,24 @@ export default function DriverRouteDetails() {
               <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Driver route details</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    {formatDate(route.date)} · Driver: {route.driver?.name || "No driver assigned"}
-                  </Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    {route.stops.length} stops · {pendingStops} pending · {deliveredStops} delivered · {failedStops} failed
-                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">{formatDate(route.date)} · Driver: {route.driver?.name || "No driver assigned"}</Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">{route.stops.length} stops · {pendingStops} pending · {deliveredStops} delivered · {failedStops} failed</Text>
                 </BlockStack>
-                {!routeStarted ? (
-                  <Form method="post">
-                    <input type="hidden" name="intent" value="startRoute" />
-                    <Button submit variant="primary">Start route</Button>
-                  </Form>
-                ) : (
-                  <Badge tone="success">OUT_FOR_DELIVERY</Badge>
-                )}
+                <InlineStack gap="200" blockAlign="center">
+                  <Button url={`/app/driver-routes/${route.id}/print`} target="_blank">Print labels</Button>
+                  {!routeStarted ? (
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="startRoute" />
+                      <Button submit variant="primary">Start route</Button>
+                    </Form>
+                  ) : (
+                    <Badge tone="success">OUT_FOR_DELIVERY</Badge>
+                  )}
+                </InlineStack>
               </InlineStack>
 
-              {!proofPhotoStorageEnabled ? (
-                <Text as="p" variant="bodySm" tone="subdued">Proof photo storage is not set up yet, so hosted proof photo links can still be pasted manually.</Text>
-              ) : null}
-
-              {actionData && "error" in actionData ? (
-                <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
-              ) : null}
+              {!proofPhotoStorageEnabled ? <Text as="p" variant="bodySm" tone="subdued">Proof photo storage is not set up yet, so hosted proof photo links can still be pasted manually.</Text> : null}
+              {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
 
@@ -368,49 +313,20 @@ export default function DriverRouteDetails() {
                       </BlockStack>
                       <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>
                     </InlineStack>
-
                     <Divider />
-
                     <Box>
                       <BlockStack gap="200">
-                        <BlockStack gap="050">
-                          <Text as="p" variant="bodySm" tone="subdued">Customer</Text>
-                          <Text as="p" variant="bodyMd" fontWeight="bold">{customerNames}</Text>
-                        </BlockStack>
-
-                        <BlockStack gap="050">
-                          <Text as="p" variant="bodySm" tone="subdued">Address</Text>
-                          <Text as="p" variant="bodyMd">{address}</Text>
-                          <Text as="p" variant="bodyMd" fontWeight="bold">{stop.deliveryGroup?.postcode || "No postcode"}</Text>
-                        </BlockStack>
-
-                        <BlockStack gap="050">
-                          <Text as="p" variant="bodySm" tone="subdued">ETA slot</Text>
-                          <Text as="p" variant="bodyMd" fontWeight="bold">{formatSlot(stop.estimatedArrival)}</Text>
-                        </BlockStack>
-
-                        <BlockStack gap="050">
-                          <Text as="p" variant="bodySm" tone="subdued">Phone</Text>
-                          <Text as="p" variant="bodyMd">{phone || "No phone"}</Text>
-                        </BlockStack>
-
+                        <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Customer</Text><Text as="p" variant="bodyMd" fontWeight="bold">{customerNames}</Text></BlockStack>
+                        <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Address</Text><Text as="p" variant="bodyMd">{address}</Text><Text as="p" variant="bodyMd" fontWeight="bold">{stop.deliveryGroup?.postcode || "No postcode"}</Text></BlockStack>
+                        <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">ETA slot</Text><Text as="p" variant="bodyMd" fontWeight="bold">{formatSlot(stop.estimatedArrival)}</Text></BlockStack>
+                        <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Phone</Text><Text as="p" variant="bodyMd">{phone || "No phone"}</Text></BlockStack>
                         <ProofPhotoGallery proofPhotos={proofPhotos} />
                       </BlockStack>
                     </Box>
-
                     <InlineStack gap="200">
-                      {wazeUrl ? (
-                        <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>
-                          Open Waze
-                        </Button>
-                      ) : null}
-                      {cleanedPhone ? (
-                        <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>
-                          Call customer
-                        </Button>
-                      ) : null}
+                      {wazeUrl ? <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>Open Waze</Button> : null}
+                      {cleanedPhone ? <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>Call customer</Button> : null}
                     </InlineStack>
-
                     <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} />
                   </BlockStack>
                 </LegacyCard>
