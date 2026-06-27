@@ -180,6 +180,15 @@ export default function CustomerTrackingPage() {
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Delivery note</dt><dd style={{ margin: 0 }}>{deliveryGroup.deliveryNote || "No delivery note added"}</dd></div>
             </dl>
 
+            {order.items.length ? (
+              <div style={{ marginTop: 18, padding: 14, background: "#f8fafc", borderRadius: 14 }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Your order</h3>
+                <ul style={{ margin: 0, paddingLeft: 20, color: "#667085" }}>
+                  {order.items.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            ) : null}
+
             <div style={{ marginTop: 18, padding: 14, background: "#f8fafc", borderRadius: 14 }}>
               <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Room of choice delivery</h3>
               <p style={{ margin: 0, color: "#667085" }}>Our own team will bring your order to a room of your choice where access allows.</p>
