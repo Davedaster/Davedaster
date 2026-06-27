@@ -461,6 +461,7 @@ export default function DriverRouteDetails() {
   const nextPendingOrderIndex = pendingStops
     ? Math.min(...route.stops.filter((stop) => stop.status === "PENDING").map((stop) => stop.orderIndex))
     : null;
+  const routeComplete = totalStops > 0 && pendingStops === 0;
 
   return (
     <Page title={route.name} backAction={{ content: "Driver routes", url: "/app/driver-routes" }}>
@@ -503,6 +504,15 @@ export default function DriverRouteDetails() {
                   </InlineStack>
                 </BlockStack>
               </Box>
+
+              {routeComplete ? (
+                <Box background="bg-surface-success" padding="300" borderRadius="300">
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">Route complete</Text>
+                    <Text as="p" variant="bodySm">All stops have been marked delivered or failed. Review the proof photos and failed delivery notes before closing the day.</Text>
+                  </BlockStack>
+                </Box>
+              ) : null}
 
               {!proofPhotoStorageEnabled ? <Text as="p" variant="bodySm" tone="subdued">Proof photo storage is not set up yet, so hosted proof photo links can still be pasted manually.</Text> : null}
               {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
