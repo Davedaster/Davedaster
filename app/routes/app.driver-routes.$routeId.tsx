@@ -15,7 +15,8 @@ import {
   TextField,
   Checkbox,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 
 import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { markStopFailedDelivery } from "../lib/failedDelivery.server";
@@ -84,6 +85,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
       const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
       const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
+      const podLatValue = Number(String(formData.get("podLat") || ""));
+      const podLngValue = Number(String(formData.get("podLng") || ""));
 
       for (const proofPhotoFile of proofPhotoFiles) {
         proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
@@ -96,6 +99,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         deliveryNote: String(formData.get("deliveryNote") || "").trim(),
         safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
         leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
+        podImage: String(formData.get("podImage") || "").trim(),
+        podName: String(formData.get("podName") || "").trim(),
+        podTicked: String(formData.get("podTicked") || "") === "true",
+        podLat: Number.isFinite(podLatValue) ? podLatValue : null,
+        podLng: Number.isFinite(podLngValue) ? podLngValue : null,
       });
 
       return redirect(`/app/driver-routes/${routeId}`);
@@ -196,6 +204,8 @@ function tidyPhone(phone?: string | null) {
 }
 
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
   const [proofPhotoCount, setProofPhotoCount] = useState(0);
@@ -203,8 +213,97 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
   const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
+  const [podName, setPodName] = useState("");
+  const [podImage, setPodImage] = useState("");
+  const [podTicked, setPodTicked] = useState(false);
+  const [podLat, setPodLat] = useState("");
+  const [podLng, setPodLng] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
   const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
+  const canMarkDelivered = !updatesDisabled && hasProofPhoto && podName.trim().length > 0 && podImage.length > 0 && podTicked;
+
+  useEffect(() => {
+    if (!routeStarted || !("geolocation" in navigator)) {
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setPodLat(String(position.coords.latitude));
+        setPodLng(String(position.coords.longitude));
+      },
+      () => undefined,
+      { enableHighAccuracy: true, timeout: 5000 },
+    );
+  }, [routeStarted]);
+
+  function getCanvasPoint(event: PointerEvent<HTMLCanvasElement>) {
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  }
+
+  function saveCanvasImage() {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    setPodImage(canvas.toDataURL("image/png"));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (updatesDisabled) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    lastPointRef.current = getCanvasPoint(event);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLCanvasElement>) {
+    if (updatesDisabled || !lastPointRef.current) {
+      return;
+    }
+
+    const canvas = event.currentTarget;
+    const context = canvas.getContext("2d");
+    const nextPoint = getCanvasPoint(event);
+
+    if (!context) {
+      return;
+    }
+
+    context.lineWidth = 4;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(lastPointRef.current.x, lastPointRef.current.y);
+    context.lineTo(nextPoint.x, nextPoint.y);
+    context.stroke();
+    lastPointRef.current = nextPoint;
+    saveCanvasImage();
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLCanvasElement>) {
+    lastPointRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    saveCanvasImage();
+  }
+
+  function clearPodImage() {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+
+    if (canvas && context) {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    setPodImage("");
+  }
 
   return (
     <BlockStack gap="300">
@@ -218,6 +317,10 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
         <input type="hidden" name="intent" value="completeStop" />
         <input type="hidden" name="stopId" value={stopId} />
         <input type="hidden" name="leftInSafePlace" value={leftInSafePlace ? "true" : "false"} />
+        <input type="hidden" name="podImage" value={podImage} />
+        <input type="hidden" name="podTicked" value={podTicked ? "true" : "false"} />
+        <input type="hidden" name="podLat" value={podLat} />
+        <input type="hidden" name="podLng" value={podLng} />
         <BlockStack gap="200">
           {proofPhotoStorageEnabled ? (
             <label>
@@ -227,10 +330,31 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
             </label>
           ) : null}
           <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
+          <TextField label="Receiver" name="podName" value={podName} onChange={setPodName} autoComplete="off" disabled={updatesDisabled} />
+          <Box>
+            <BlockStack gap="100">
+              <Text as="p" variant="bodyMd" fontWeight="medium">Draw mark</Text>
+              <canvas
+                ref={canvasRef}
+                width={700}
+                height={220}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                style={{ width: "100%", maxWidth: 700, height: 220, border: "1px solid #c9cccf", borderRadius: 10, background: "#ffffff", touchAction: "none" }}
+              />
+              <InlineStack gap="200" blockAlign="center">
+                <Button onClick={clearPodImage} disabled={updatesDisabled || !podImage}>Clear mark</Button>
+                {podImage ? <Text as="p" variant="bodySm" tone="success">Mark added</Text> : <Text as="p" variant="bodySm" tone="subdued">Use a finger or stylus.</Text>}
+              </InlineStack>
+            </BlockStack>
+          </Box>
+          <Checkbox label="Checked" checked={podTicked} onChange={setPodTicked} disabled={updatesDisabled} />
           <TextField label="Delivery note" name="deliveryNote" value={deliveryNote} onChange={setDeliveryNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
           <Checkbox label="Left in safe place" checked={leftInSafePlace} onChange={setLeftInSafePlace} disabled={updatesDisabled} />
           <TextField label="Safe place note" name="safePlaceNote" value={safePlaceNote} onChange={setSafePlaceNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
-          <Button submit variant="primary" disabled={updatesDisabled || !hasProofPhoto}>Mark delivered</Button>
+          <Button submit variant="primary" disabled={!canMarkDelivered}>Mark delivered</Button>
         </BlockStack>
       </Form>
 
