@@ -18,6 +18,10 @@ function isValidProofPhotoUrl(value: string) {
   }
 }
 
+function isValidPodImage(value: string) {
+  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length > 500;
+}
+
 function normaliseProofPhotoUrls(value: string | string[]) {
   const urls = Array.isArray(value) ? value : [value];
 
@@ -63,9 +67,14 @@ export async function saveProofOfDelivery(input: {
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
+  podImage?: string | null;
+  podName?: string | null;
+  podTicked?: boolean;
 }) {
   const proofPhotoUrls = normaliseProofPhotoUrls(input.proofPhotoUrl);
   const primaryProofPhotoUrl = proofPhotoUrls[0];
+  const podImage = input.podImage?.trim() || "";
+  const podName = input.podName?.trim() || "";
 
   const stop = await prisma.stop.findUnique({
     where: {
@@ -105,6 +114,10 @@ export async function saveProofOfDelivery(input: {
     if (!isValidProofPhotoUrl(proofPhotoUrl)) {
       throw new Error("Every proof photo link must be a valid web address.");
     }
+  }
+
+  if (!podName || !isValidPodImage(podImage) || !input.podTicked) {
+    throw new Error("Complete the POD fields before marking delivered.");
   }
 
   const shopifyResults = [];
