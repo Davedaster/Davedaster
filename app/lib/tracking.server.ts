@@ -81,6 +81,7 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
       id: stop.id,
       orderIndex: stop.orderIndex,
       estimatedArrival: stop.estimatedArrival,
+      actualArrival: stop.actualArrival,
       status: stop.status,
     },
     deliveryGroup: {
@@ -92,6 +93,13 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
         url: photo.url,
         label: photo.label,
       })),
+      signatureImage: stop.deliveryGroup.signatureImage,
+      signatureName: stop.deliveryGroup.signatureName,
+      signatureAcceptedAt: stop.deliveryGroup.signatureAcceptedAt,
+      signatureTermsAccepted: stop.deliveryGroup.signatureTermsAccepted,
+      signatureTermsText: stop.deliveryGroup.signatureTermsText,
+      signatureGpsLat: stop.deliveryGroup.signatureGpsLat,
+      signatureGpsLng: stop.deliveryGroup.signatureGpsLng,
     },
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,
