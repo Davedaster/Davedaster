@@ -125,8 +125,8 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
 function progressSummary(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
-  if (stopStatus === "DELIVERED") return "Delivery completed";
-  if (stopStatus === "FAILED") return "Delivery attempted";
+  if (stopStatus === "DELIVERED") return "Delivery completed. Live tracking has ended.";
+  if (stopStatus === "FAILED") return "Delivery attempted. Live tracking has ended.";
   if (routeStatus !== "OUT_FOR_DELIVERY") return "Your route is planned and will update once the driver starts.";
   if (isNextDrop || dropsBefore === 0) return "You are next. Live tracking is active.";
   if (dropsBefore === 1) return "1 stop before yours. Live tracking will activate when you are next.";
@@ -141,7 +141,9 @@ function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
   return `${dropsBefore} stops`;
 }
 
-function liveTrackingLabel(isNextDrop: boolean) {
+function liveTrackingLabel(routeStatus: string, stopStatus: string, isNextDrop: boolean) {
+  if (stopStatus === "DELIVERED" || routeStatus === "COMPLETED" || stopStatus === "FAILED") return "Tracking ended";
+  if (routeStatus === "CANCELLED") return "Route inactive";
   return isNextDrop ? "Live tracking active" : "Activates when next";
 }
 
@@ -381,7 +383,7 @@ export default function CustomerTrackingPage() {
             <div style={{ minHeight: 360, borderRadius: 14, background: "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)", border: "1px solid #d0d5dd", position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <span style={{ background: "#ffffff", color: "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>Map view</span>
-                <span style={{ background: isNextDrop ? "#16a34a" : "#ffffff", color: isNextDrop ? "#ffffff" : "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>{liveTrackingLabel(isNextDrop)}</span>
+                <span style={{ background: isNextDrop ? "#16a34a" : "#ffffff", color: isNextDrop ? "#ffffff" : "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>{liveTrackingLabel(route.status, stop.status, isNextDrop)}</span>
               </div>
 
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} aria-hidden="true">
