@@ -68,7 +68,13 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
+function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
+  return Math.max(0, Number.isFinite(stopsBeforeCustomer) ? stopsBeforeCustomer : 0);
+}
+
 function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
+  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+
   if (stopStatus === "DELIVERED") {
     return "Your delivery has been completed.";
   }
@@ -77,14 +83,14 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
     return "We attempted your delivery and an update has been recorded below.";
   }
 
-  if (routeStatus === "OUT_FOR_DELIVERY" && isNextDrop) {
+  if (routeStatus === "OUT_FOR_DELIVERY" && (isNextDrop || dropsBefore === 0)) {
     return "You are the next delivery. Please keep your phone nearby.";
   }
 
   if (routeStatus === "OUT_FOR_DELIVERY") {
-    return stopsBeforeCustomer === 1
+    return dropsBefore === 1
       ? "There is 1 delivery before yours."
-      : `There are ${stopsBeforeCustomer} deliveries before yours.`;
+      : `There are ${dropsBefore} deliveries before yours.`;
   }
 
   if (routeStatus === "CANCELLED") {
@@ -223,6 +229,7 @@ export default function CustomerTrackingPage() {
   const { tracking } = useLoaderData<typeof loader>();
   const { route, stop, deliveryGroup, order, isNextDrop, progress } = tracking;
   const slot = formatSlot(stop.estimatedArrival);
+  const stopsBeforeCustomer = normaliseStopsBeforeCustomer(progress.stopsBeforeCustomer);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
   const showFailedDelivery = stop.status === "FAILED";
   const proofPhotos = deliveryGroup.proofPhotos?.length
@@ -230,7 +237,7 @@ export default function CustomerTrackingPage() {
     : deliveryGroup.proofPhotoUrl
       ? [{ id: "primary", url: deliveryGroup.proofPhotoUrl, label: "Proof photo" }]
       : [];
-  const customerMessage = customerStatusMessage(route.status, stop.status, isNextDrop, progress.stopsBeforeCustomer);
+  const customerMessage = customerStatusMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
   const pageTitle = showProof
     ? "Your delivery has been completed"
     : showFailedDelivery
@@ -259,7 +266,7 @@ export default function CustomerTrackingPage() {
           <CustomerEtaConfidenceCard
             routeStatus={route.status}
             isNextDrop={isNextDrop}
-            stopsBeforeCustomer={progress.stopsBeforeCustomer}
+            stopsBeforeCustomer={stopsBeforeCustomer}
             estimatedSlot={slot}
           />
         ) : null}
@@ -280,7 +287,7 @@ export default function CustomerTrackingPage() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 14 }}>
             <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Your drop</dt><dd style={{ margin: 0, fontWeight: 700 }}>Number {stop.orderIndex}</dd></div>
-            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Before you</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.stopsBeforeCustomer}</dd></div>
+            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Before you</dt><dd style={{ margin: 0, fontWeight: 700 }}>{stopsBeforeCustomer}</dd></div>
             <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Remaining</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.remainingStops}</dd></div>
             <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Updates</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.failedStops}</dd></div>
           </div>
