@@ -230,6 +230,21 @@ function buildGoogleMapsUrl(stop: NavigationStop) {
   return `https://www.google.com/maps/search/?api=1&query=${query.encoded}`;
 }
 
+function buildGoogleMapsRouteUrl(stops: NavigationStop[]) {
+  const queries = stops
+    .map((stop) => buildNavigationQuery(stop))
+    .filter((query): query is { label: string; encoded: string } => Boolean(query));
+
+  if (!queries.length) {
+    return null;
+  }
+
+  const destination = queries[queries.length - 1];
+  const waypoints = queries.slice(0, -1).map((query) => query.encoded).join("%7C");
+
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination.encoded}${waypoints ? `&waypoints=${waypoints}` : ""}`;
+}
+
 function buildAppleMapsUrl(stop: NavigationStop) {
   const query = buildNavigationQuery(stop);
 
@@ -439,6 +454,10 @@ export default function DriverRouteDetails() {
   const completedStops = deliveredStops + failedStops;
   const progressPercent = totalStops ? Math.round((completedStops / totalStops) * 100) : 0;
   const remainingDrops = totalStops - completedStops;
+  const pendingRouteStops = route.stops
+    .filter((stop) => stop.status === "PENDING")
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+  const remainingRouteUrl = buildGoogleMapsRouteUrl(pendingRouteStops);
   const nextPendingOrderIndex = pendingStops
     ? Math.min(...route.stops.filter((stop) => stop.status === "PENDING").map((stop) => stop.orderIndex))
     : null;
@@ -458,6 +477,7 @@ export default function DriverRouteDetails() {
                 <InlineStack gap="200" blockAlign="center">
                   <Button url={`/app/driver-routes/${route.id}/pick-list`} target="_blank">Picking list</Button>
                   <Button url={`/app/driver-routes/${route.id}/print`} target="_blank">Print labels</Button>
+                  {remainingRouteUrl ? <Button url={remainingRouteUrl} target="_blank">Open remaining route</Button> : null}
                   {!routeStarted ? (
                     <Form method="post">
                       <input type="hidden" name="intent" value="startRoute" />
