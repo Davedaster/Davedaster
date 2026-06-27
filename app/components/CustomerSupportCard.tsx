@@ -9,6 +9,8 @@ function buildSupportEmailHref() {
     '',
     'I need help with my delivery tracking.',
     '',
+    'Order number:',
+    '',
     `Tracking link: ${typeof window === 'undefined' ? '' : window.location.href}`,
   ].join('\n');
 
@@ -67,8 +69,11 @@ export function CustomerSupportCard() {
       <p style={{ margin: '0 0 8px', color: '#667085' }}>
         Our delivery team is here to help with delivery updates and tracking enquiries.
       </p>
-      <p style={{ margin: '0 0 14px', color: '#667085', fontSize: 14 }}>
+      <p style={{ margin: '0 0 8px', color: '#667085', fontSize: 14 }}>
         Support email: <strong style={{ color: '#323841' }}>{SUPPORT_EMAIL}</strong>
+      </p>
+      <p style={{ margin: '0 0 14px', color: '#667085', fontSize: 14 }}>
+        Please include your order number if you know it.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
