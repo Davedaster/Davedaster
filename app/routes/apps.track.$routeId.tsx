@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
+import { CustomerSupportCard } from "../components/CustomerSupportCard";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getCustomerTracking } from "../lib/tracking.server";
 
@@ -253,6 +254,9 @@ export default function CustomerTrackingPage() {
 
         {showProof ? <DeliveryConfirmationCard tracking={tracking} /> : null}
         {showFailedDelivery ? <FailedDeliveryCard tracking={tracking} /> : null}
+        <div style={{ marginBottom: 18 }}>
+          <CustomerSupportCard />
+        </div>
 
         <div style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
