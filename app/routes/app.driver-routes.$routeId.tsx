@@ -15,7 +15,7 @@ import {
   TextField,
   Checkbox,
 } from "@shopify/polaris";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { markStopFailedDelivery } from "../lib/failedDelivery.server";
@@ -25,6 +25,8 @@ import { saveProofOfDelivery } from "../lib/proofOfDelivery.server";
 import { deleteProofPhoto } from "../lib/proofPhotos.server";
 import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";
 import { authenticate } from "../shopify.server";
+
+const DELIVERY_SIGNATURE_TERMS = "By signing below, I confirm that I have received the goods delivered today. I have checked the quantity of items received and confirm that no obvious damage or shortages were identified at the time of delivery. Any concealed damage or discrepancies must be reported within 24 hours.";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -96,6 +98,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         deliveryNote: String(formData.get("deliveryNote") || "").trim(),
         safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
         leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
+        signatureImage: String(formData.get("signatureImage") || "").trim(),
+        signatureName: String(formData.get("signatureName") || "").trim(),
+        signatureTermsAccepted: String(formData.get("signatureTermsAccepted") || "") === "true",
+        signatureTermsText: String(formData.get("signatureTermsText") || DELIVERY_SIGNATURE_TERMS).trim(),
+        signatureGpsLat: String(formData.get("signatureGpsLat") || "").trim(),
+        signatureGpsLng: String(formData.get("signatureGpsLng") || "").trim(),
       });
 
       return redirect(`/app/driver-routes/${routeId}`);
@@ -127,6 +135,20 @@ function formatDate(value: string | Date) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string | Date | null) {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -195,16 +217,174 @@ function tidyPhone(phone?: string | null) {
   return phone.replace(/[^+\d]/g, "");
 }
 
+function SignaturePad({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDrawingRef = useRef(false);
+
+  function resizeCanvas() {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    canvas.width = Math.max(rect.width || 600, 320) * scale;
+    canvas.height = 180 * scale;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return;
+    }
+
+    context.scale(scale, scale);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = "#323841";
+  }
+
+  useEffect(() => {
+    resizeCanvas();
+  }, []);
+
+  function getPoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return { x: 0, y: 0 };
+    }
+
+    const rect = canvas.getBoundingClientRect();
+
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  }
+
+  function startDrawing(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (disabled) {
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+
+    if (!canvas || !context) {
+      return;
+    }
+
+    canvas.setPointerCapture(event.pointerId);
+    const point = getPoint(event);
+    isDrawingRef.current = true;
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+  }
+
+  function draw(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!isDrawingRef.current || disabled) {
+      return;
+    }
+
+    const context = canvasRef.current?.getContext("2d");
+
+    if (!context) {
+      return;
+    }
+
+    const point = getPoint(event);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+  }
+
+  function stopDrawing() {
+    if (!isDrawingRef.current) {
+      return;
+    }
+
+    isDrawingRef.current = false;
+    const canvas = canvasRef.current;
+
+    if (canvas) {
+      onChange(canvas.toDataURL("image/png"));
+    }
+  }
+
+  function clearSignature() {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+
+    if (!canvas || !context) {
+      return;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    resizeCanvas();
+    onChange("");
+  }
+
+  return (
+    <BlockStack gap="150">
+      <Text as="p" variant="bodyMd" fontWeight="medium">Customer signature</Text>
+      <canvas
+        ref={canvasRef}
+        onPointerDown={startDrawing}
+        onPointerMove={draw}
+        onPointerUp={stopDrawing}
+        onPointerCancel={stopDrawing}
+        style={{
+          width: "100%",
+          height: 180,
+          border: "1px solid #c9cccf",
+          borderRadius: 8,
+          background: disabled ? "#f6f6f7" : "#ffffff",
+          touchAction: "none",
+          display: "block",
+        }}
+        aria-label="Customer signature pad"
+      />
+      <InlineStack gap="200" blockAlign="center">
+        <Button onClick={clearSignature} disabled={disabled || !value}>Clear signature</Button>
+        {value ? <Badge tone="success">Signature captured</Badge> : <Text as="p" variant="bodySm" tone="critical">Signature required</Text>}
+      </InlineStack>
+    </BlockStack>
+  );
+}
+
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
   const [proofPhotoCount, setProofPhotoCount] = useState(0);
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState("");
+  const [signatureImage, setSignatureImage] = useState("");
+  const [signatureName, setSignatureName] = useState("");
+  const [signatureTermsAccepted, setSignatureTermsAccepted] = useState(false);
+  const [signatureGpsLat, setSignatureGpsLat] = useState("");
+  const [signatureGpsLng, setSignatureGpsLng] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
   const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
+  const hasSignature = signatureImage.trim().length > 0;
+  const canCompleteDelivery = hasProofPhoto && hasSignature && signatureName.trim().length > 0 && signatureTermsAccepted;
+
+  useEffect(() => {
+    if (updatesDisabled || typeof navigator === "undefined" || !navigator.geolocation) {
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSignatureGpsLat(String(position.coords.latitude));
+        setSignatureGpsLng(String(position.coords.longitude));
+      },
+      () => undefined,
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
+    );
+  }, [updatesDisabled]);
 
   return (
     <BlockStack gap="300">
@@ -218,19 +398,38 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
         <input type="hidden" name="intent" value="completeStop" />
         <input type="hidden" name="stopId" value={stopId} />
         <input type="hidden" name="leftInSafePlace" value={leftInSafePlace ? "true" : "false"} />
-        <BlockStack gap="200">
-          {proofPhotoStorageEnabled ? (
-            <label>
-              <Text as="span" variant="bodyMd" fontWeight="medium">Proof photos</Text>
-              <input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple disabled={updatesDisabled} onChange={(event) => setProofPhotoCount(event.currentTarget.files?.length || 0)} style={{ display: "block", marginTop: 6 }} />
-              {proofPhotoCount > 0 ? <Text as="p" variant="bodySm" tone="subdued">{proofPhotoCount} photo{proofPhotoCount === 1 ? "" : "s"} selected</Text> : null}
-            </label>
-          ) : null}
-          <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
-          <TextField label="Delivery note" name="deliveryNote" value={deliveryNote} onChange={setDeliveryNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
-          <Checkbox label="Left in safe place" checked={leftInSafePlace} onChange={setLeftInSafePlace} disabled={updatesDisabled} />
-          <TextField label="Safe place note" name="safePlaceNote" value={safePlaceNote} onChange={setSafePlaceNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
-          <Button submit variant="primary" disabled={updatesDisabled || !hasProofPhoto}>Mark delivered</Button>
+        <input type="hidden" name="signatureImage" value={signatureImage} />
+        <input type="hidden" name="signatureTermsAccepted" value={signatureTermsAccepted ? "true" : "false"} />
+        <input type="hidden" name="signatureTermsText" value={DELIVERY_SIGNATURE_TERMS} />
+        <input type="hidden" name="signatureGpsLat" value={signatureGpsLat} />
+        <input type="hidden" name="signatureGpsLng" value={signatureGpsLng} />
+        <BlockStack gap="300">
+          <BlockStack gap="200">
+            {proofPhotoStorageEnabled ? (
+              <label>
+                <Text as="span" variant="bodyMd" fontWeight="medium">Proof photos</Text>
+                <input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple disabled={updatesDisabled} onChange={(event) => setProofPhotoCount(event.currentTarget.files?.length || 0)} style={{ display: "block", marginTop: 6 }} />
+                {proofPhotoCount > 0 ? <Text as="p" variant="bodySm" tone="subdued">{proofPhotoCount} photo{proofPhotoCount === 1 ? "" : "s"} selected</Text> : null}
+              </label>
+            ) : null}
+            <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
+            <TextField label="Delivery note" name="deliveryNote" value={deliveryNote} onChange={setDeliveryNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
+            <Checkbox label="Left in safe place" checked={leftInSafePlace} onChange={setLeftInSafePlace} disabled={updatesDisabled} />
+            <TextField label="Safe place note" name="safePlaceNote" value={safePlaceNote} onChange={setSafePlaceNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
+          </BlockStack>
+
+          <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+            <BlockStack gap="250">
+              <Text as="h4" variant="headingSm">Delivery confirmation</Text>
+              <Text as="p" variant="bodySm" tone="subdued">{DELIVERY_SIGNATURE_TERMS}</Text>
+              <TextField label="Printed customer name" name="signatureName" value={signatureName} onChange={setSignatureName} autoComplete="name" disabled={updatesDisabled} />
+              <SignaturePad value={signatureImage} onChange={setSignatureImage} disabled={updatesDisabled} />
+              <Checkbox label="I confirm I have read and agree to the delivery confirmation above" checked={signatureTermsAccepted} onChange={setSignatureTermsAccepted} disabled={updatesDisabled} />
+              {signatureGpsLat && signatureGpsLng ? <Text as="p" variant="bodySm" tone="subdued">GPS captured for proof of delivery.</Text> : <Text as="p" variant="bodySm" tone="subdued">GPS will be captured where the device allows location access.</Text>}
+            </BlockStack>
+          </Box>
+
+          <Button submit variant="primary" disabled={updatesDisabled || !canCompleteDelivery}>Mark delivered</Button>
         </BlockStack>
       </Form>
 
@@ -297,6 +496,8 @@ export default function DriverRouteDetails() {
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
               const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
               const orderLinks = stop.deliveryGroup?.orders || [];
+              const signatureImage = stop.deliveryGroup?.signatureImage;
+              const signatureName = stop.deliveryGroup?.signatureName;
 
               return (
                 <LegacyCard key={stop.id} sectioned>
@@ -328,6 +529,18 @@ export default function DriverRouteDetails() {
                           </BlockStack>
                         ) : null}
                         <ProofPhotoGallery proofPhotos={proofPhotos} />
+                        {signatureImage && signatureName ? (
+                          <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                            <BlockStack gap="150">
+                              <InlineStack gap="200" blockAlign="center">
+                                <Badge tone="success">Signed</Badge>
+                                <Text as="p" variant="bodySm" tone="subdued">Proof of delivery accepted by {signatureName}</Text>
+                              </InlineStack>
+                              <img src={signatureImage} alt="Customer delivery signature" style={{ maxWidth: 360, width: "100%", maxHeight: 120, objectFit: "contain", background: "#ffffff", border: "1px solid #d0d5dd", borderRadius: 8 }} />
+                              <Text as="p" variant="bodySm" tone="subdued">Accepted {formatDateTime(stop.deliveryGroup?.signatureAcceptedAt || null)}</Text>
+                            </BlockStack>
+                          </Box>
+                        ) : null}
                       </BlockStack>
                     </Box>
                     <InlineStack gap="200">
