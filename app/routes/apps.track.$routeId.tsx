@@ -32,6 +32,20 @@ function formatDate(value: string | Date) {
   }).format(new Date(value));
 }
 
+function formatDateTime(value: string | Date | null) {
+  if (!value) {
+    return "Not recorded";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
   if (!estimatedArrival) {
     return "Your delivery slot is being confirmed";
@@ -117,6 +131,7 @@ export default function CustomerTrackingPage() {
     : deliveryGroup.proofPhotoUrl
       ? [{ id: "primary", url: deliveryGroup.proofPhotoUrl, label: "Proof photo" }]
       : [];
+  const hasSignature = Boolean(deliveryGroup.signatureImage && deliveryGroup.signatureName);
   const customerMessage = customerStatusMessage(route.status, stop.status, isNextDrop, progress.stopsBeforeCustomer);
 
   return (
@@ -199,6 +214,17 @@ export default function CustomerTrackingPage() {
                 <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Proof of delivery</h3>
                 <p style={{ margin: "0 0 10px", color: "#667085", fontSize: 14 }}>Tap a photo to view it full size.</p>
                 <ProofPhotoThumbs photos={proofPhotos} />
+              </div>
+            ) : null}
+
+            {showProof && hasSignature ? (
+              <div style={{ marginTop: 18, padding: 14, background: "#f8fafc", borderRadius: 14 }}>
+                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Delivery signature</h3>
+                <p style={{ margin: "0 0 4px", color: "#667085", fontSize: 14 }}>Signed by</p>
+                <p style={{ margin: "0 0 10px", fontWeight: 700 }}>{deliveryGroup.signatureName}</p>
+                <img src={deliveryGroup.signatureImage || ""} alt="Customer delivery signature" style={{ width: "100%", maxHeight: 130, objectFit: "contain", background: "#ffffff", border: "1px solid #d0d5dd", borderRadius: 12 }} />
+                <p style={{ margin: "10px 0 0", color: "#667085", fontSize: 13 }}>Accepted {formatDateTime(deliveryGroup.signatureAcceptedAt)}</p>
+                {deliveryGroup.signatureTermsText ? <p style={{ margin: "8px 0 0", color: "#667085", fontSize: 12 }}>{deliveryGroup.signatureTermsText}</p> : null}
               </div>
             ) : null}
           </aside>
