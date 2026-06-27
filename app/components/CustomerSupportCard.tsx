@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 const SUPPORT_EMAIL = 'deliveries@bathroompanelsdirect.co.uk';
 
 async function copyCurrentTrackingLink() {
@@ -24,6 +26,18 @@ async function copyCurrentTrackingLink() {
 }
 
 export function CustomerSupportCard() {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  async function handleCopyTrackingLink() {
+    try {
+      await copyCurrentTrackingLink();
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2500);
+    } catch {
+      setCopyState('failed');
+    }
+  }
+
   return (
     <div
       style={{
@@ -58,7 +72,7 @@ export function CustomerSupportCard() {
 
         <button
           type='button'
-          onClick={() => void copyCurrentTrackingLink()}
+          onClick={() => void handleCopyTrackingLink()}
           style={{
             border: '1px solid #509AE6',
             background: '#ffffff',
@@ -69,7 +83,7 @@ export function CustomerSupportCard() {
             cursor: 'pointer',
           }}
         >
-          Copy tracking link
+          {copyState === 'copied' ? 'Tracking link copied' : copyState === 'failed' ? 'Copy failed' : 'Copy tracking link'}
         </button>
       </div>
     </div>
