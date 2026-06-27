@@ -149,10 +149,16 @@ export async function saveProofOfDelivery(input: {
       data: {
         proofPhotoUrl: primaryProofPhotoUrl,
         proofPhotos: {
-          create: proofPhotoUrls.map((url, index) => ({
-            url,
-            label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
-          })),
+          create: [
+            ...proofPhotoUrls.map((url, index) => ({
+              url,
+              label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
+            })),
+            {
+              url: podImage,
+              label: `Receiver mark ${podName}`,
+            },
+          ],
         },
         deliveryNote: noteParts || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
