@@ -1,3 +1,3 @@
 # Check
 
-Temporary note.
+Recipient field.
