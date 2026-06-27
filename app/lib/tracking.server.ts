@@ -7,6 +7,35 @@ function splitLineItems(summary?: string | null) {
     .filter(Boolean);
 }
 
+function parseProofOfDeliveryMetadata(deliveryNote?: string | null) {
+  const lines = (deliveryNote || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const receiverPrefix = "Receiver:";
+  const locationPrefix = "POD location:";
+  const receiverLine = lines.find((line) => line.toLowerCase().startsWith(receiverPrefix.toLowerCase()));
+  const locationLine = lines.find((line) => line.toLowerCase().startsWith(locationPrefix.toLowerCase()));
+  const customerNote = lines
+    .filter((line) => !line.toLowerCase().startsWith(receiverPrefix.toLowerCase()))
+    .filter((line) => !line.toLowerCase().startsWith(locationPrefix.toLowerCase()))
+    .join("\n");
+
+  const locationValue = locationLine?.slice(locationPrefix.length).trim() || "";
+  const [latValue, lngValue] = locationValue.split(",").map((part) => Number(part.trim()));
+  const hasLocation = Number.isFinite(latValue) && Number.isFinite(lngValue);
+
+  return {
+    customerNote: customerNote || null,
+    receiverName: receiverLine?.slice(receiverPrefix.length).trim() || null,
+    location: hasLocation ? { latitude: latValue, longitude: lngValue } : null,
+  };
+}
+
+function isReceiverMark(label?: string | null) {
+  return (label || "").toLowerCase().startsWith("receiver mark");
+}
+
 export async function getCustomerTracking(routeId: string, shopifyOrderId: string) {
   const route = await prisma.route.findUnique({
     where: { id: routeId },
@@ -65,6 +94,8 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
   const progressPercent = route.stops.length
     ? Math.round((completedStops / route.stops.length) * 100)
     : 0;
+  const podMeta = parseProofOfDeliveryMetadata(stop.deliveryGroup.deliveryNote);
+  const receiverMark = stop.deliveryGroup.proofPhotos.find((photo) => isReceiverMark(photo.label));
 
   return {
     route: {
@@ -81,17 +112,32 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
       id: stop.id,
       orderIndex: stop.orderIndex,
       estimatedArrival: stop.estimatedArrival,
+      actualArrival: stop.actualArrival,
       status: stop.status,
     },
     deliveryGroup: {
       postcode: stop.deliveryGroup.postcode,
-      deliveryNote: stop.deliveryGroup.deliveryNote,
+      deliveryNote: podMeta.customerNote,
+      safePlaceNote: stop.deliveryGroup.safePlaceNote,
       proofPhotoUrl: stop.deliveryGroup.proofPhotoUrl,
-      proofPhotos: stop.deliveryGroup.proofPhotos.map((photo) => ({
-        id: photo.id,
-        url: photo.url,
-        label: photo.label,
-      })),
+      proofPhotos: stop.deliveryGroup.proofPhotos
+        .filter((photo) => !isReceiverMark(photo.label))
+        .map((photo) => ({
+          id: photo.id,
+          url: photo.url,
+          label: photo.label,
+          createdAt: photo.createdAt,
+        })),
+      proofOfDelivery: {
+        receiverName: podMeta.receiverName,
+        location: podMeta.location,
+        receiverMark: receiverMark ? {
+          id: receiverMark.id,
+          url: receiverMark.url,
+          label: receiverMark.label,
+          createdAt: receiverMark.createdAt,
+        } : null,
+      },
     },
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,

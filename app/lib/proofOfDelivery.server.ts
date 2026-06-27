@@ -18,10 +18,26 @@ function isValidProofPhotoUrl(value: string) {
   }
 }
 
+function isValidPodImage(value: string) {
+  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length > 500;
+}
+
 function normaliseProofPhotoUrls(value: string | string[]) {
   const urls = Array.isArray(value) ? value : [value];
 
   return urls.map((url) => url.trim()).filter(Boolean);
+}
+
+function formatPodLocationNote(latitude?: number | null, longitude?: number | null) {
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return null;
+  }
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return `POD location: ${latitude},${longitude}`;
 }
 
 export async function listStopsForProofOfDelivery() {
@@ -63,9 +79,20 @@ export async function saveProofOfDelivery(input: {
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
+  podImage?: string | null;
+  podName?: string | null;
+  podTicked?: boolean;
+  podLat?: number | null;
+  podLng?: number | null;
 }) {
   const proofPhotoUrls = normaliseProofPhotoUrls(input.proofPhotoUrl);
   const primaryProofPhotoUrl = proofPhotoUrls[0];
+  const podImage = input.podImage?.trim() || "";
+  const podName = input.podName?.trim() || "";
+  const podLocationNote = formatPodLocationNote(input.podLat, input.podLng);
+  const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null, podLocationNote]
+    .filter(Boolean)
+    .join("\n");
 
   const stop = await prisma.stop.findUnique({
     where: {
@@ -107,6 +134,10 @@ export async function saveProofOfDelivery(input: {
     }
   }
 
+  if (!podName || !isValidPodImage(podImage) || !input.podTicked) {
+    throw new Error("Complete the POD fields before marking delivered.");
+  }
+
   const shopifyResults = [];
 
   for (const order of stop.deliveryGroup.orders) {
@@ -131,12 +162,18 @@ export async function saveProofOfDelivery(input: {
       data: {
         proofPhotoUrl: primaryProofPhotoUrl,
         proofPhotos: {
-          create: proofPhotoUrls.map((url, index) => ({
-            url,
-            label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
-          })),
+          create: [
+            ...proofPhotoUrls.map((url, index) => ({
+              url,
+              label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
+            })),
+            {
+              url: podImage,
+              label: `Receiver mark ${podName}`,
+            },
+          ],
         },
-        deliveryNote: input.deliveryNote?.trim() || null,
+        deliveryNote: noteParts || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
       },
     });
@@ -163,7 +200,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"} and POD name ${podName}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
