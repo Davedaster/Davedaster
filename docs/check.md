@@ -1,3 +1,3 @@
 # Check
 
-Recipient field.
+data:image/png;base64 value.
