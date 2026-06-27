@@ -183,6 +183,10 @@ function buildWazeUrl(stop: {
   return `https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`;
 }
 
+function buildTrackingUrl(routeId: string, shopifyOrderId: string) {
+  return `/apps/track/${routeId}?order=${encodeURIComponent(shopifyOrderId)}`;
+}
+
 function tidyPhone(phone?: string | null) {
   if (!phone) {
     return null;
@@ -292,6 +296,7 @@ export default function DriverRouteDetails() {
               const wazeUrl = buildWazeUrl(stop);
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
               const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
+              const orderLinks = stop.deliveryGroup?.orders || [];
 
               return (
                 <LegacyCard key={stop.id} sectioned>
@@ -310,6 +315,18 @@ export default function DriverRouteDetails() {
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Address</Text><Text as="p" variant="bodyMd">{address}</Text><Text as="p" variant="bodyMd" fontWeight="bold">{stop.deliveryGroup?.postcode || "No postcode"}</Text></BlockStack>
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">ETA slot</Text><Text as="p" variant="bodyMd" fontWeight="bold">{formatSlot(stop.estimatedArrival)}</Text></BlockStack>
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Phone</Text><Text as="p" variant="bodyMd">{phone || "No phone"}</Text></BlockStack>
+                        {orderLinks.length ? (
+                          <BlockStack gap="100">
+                            <Text as="p" variant="bodySm" tone="subdued">Customer tracking</Text>
+                            <InlineStack gap="200">
+                              {orderLinks.map((order) => (
+                                <Button key={order.id} url={buildTrackingUrl(route.id, order.shopifyOrderId)} target="_blank">
+                                  Open {order.shopifyOrderNumber}
+                                </Button>
+                              ))}
+                            </InlineStack>
+                          </BlockStack>
+                        ) : null}
                         <ProofPhotoGallery proofPhotos={proofPhotos} />
                       </BlockStack>
                     </Box>
