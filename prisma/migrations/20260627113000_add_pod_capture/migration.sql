@@ -1,0 +1,7 @@
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podImage" TEXT;
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podName" TEXT;
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podAt" TIMESTAMP(3);
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podTerms" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podTermsText" TEXT;
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podLat" DOUBLE PRECISION;
+ALTER TABLE "DeliveryGroup" ADD COLUMN "podLng" DOUBLE PRECISION;
