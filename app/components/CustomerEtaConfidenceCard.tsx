@@ -30,7 +30,7 @@ function confidenceCopy({
     return {
       eyebrow: 'Driver nearby',
       title: 'You are next',
-      message: 'Your delivery is the next stop on the route.',
+      message: 'Your delivery is the next delivery on the route.',
       highlight: 'Please keep your phone nearby and ensure access is available for the driver.',
     };
   }
