@@ -161,7 +161,7 @@ function statusTone(status: string) {
   return "info" as const;
 }
 
-function buildWazeUrl(stop: {
+type NavigationStop = {
   deliveryGroup?: {
     latitude?: number | null;
     longitude?: number | null;
@@ -169,7 +169,37 @@ function buildWazeUrl(stop: {
     formattedAddress?: string | null;
     postcode?: string | null;
   } | null;
-}) {
+};
+
+function buildNavigationQuery(stop: NavigationStop) {
+  const group = stop.deliveryGroup;
+
+  if (!group) {
+    return null;
+  }
+
+  if (typeof group.latitude === "number" && typeof group.longitude === "number") {
+    return {
+      label: `${group.latitude},${group.longitude}`,
+      encoded: `${group.latitude},${group.longitude}`,
+    };
+  }
+
+  const label = [group.address, group.formattedAddress, group.postcode]
+    .filter(Boolean)
+    .join(", ");
+
+  if (!label) {
+    return null;
+  }
+
+  return {
+    label,
+    encoded: encodeURIComponent(label),
+  };
+}
+
+function buildWazeUrl(stop: NavigationStop) {
   const group = stop.deliveryGroup;
 
   if (!group) {
@@ -180,15 +210,33 @@ function buildWazeUrl(stop: {
     return `https://waze.com/ul?ll=${group.latitude},${group.longitude}&navigate=yes`;
   }
 
-  const query = [group.address, group.formattedAddress, group.postcode]
-    .filter(Boolean)
-    .join(", ");
+  const query = buildNavigationQuery(stop);
 
   if (!query) {
     return null;
   }
 
-  return `https://waze.com/ul?q=${encodeURIComponent(query)}&navigate=yes`;
+  return `https://waze.com/ul?q=${query.encoded}&navigate=yes`;
+}
+
+function buildGoogleMapsUrl(stop: NavigationStop) {
+  const query = buildNavigationQuery(stop);
+
+  if (!query) {
+    return null;
+  }
+
+  return `https://www.google.com/maps/search/?api=1&query=${query.encoded}`;
+}
+
+function buildAppleMapsUrl(stop: NavigationStop) {
+  const query = buildNavigationQuery(stop);
+
+  if (!query) {
+    return null;
+  }
+
+  return `https://maps.apple.com/?q=${query.encoded}`;
 }
 
 function buildTrackingUrl(routeId: string, shopifyOrderId: string) {
@@ -378,6 +426,9 @@ export default function DriverRouteDetails() {
   const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
+  const nextPendingOrderIndex = pendingStops
+    ? Math.min(...route.stops.filter((stop) => stop.status === "PENDING").map((stop) => stop.orderIndex))
+    : null;
 
   return (
     <Page title={route.name} backAction={{ content: "Driver routes", url: "/app/driver-routes" }}>
@@ -418,16 +469,24 @@ export default function DriverRouteDetails() {
               const phone = stop.deliveryGroup?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || null;
               const cleanedPhone = tidyPhone(phone);
               const wazeUrl = buildWazeUrl(stop);
+              const googleMapsUrl = buildGoogleMapsUrl(stop);
+              const appleMapsUrl = buildAppleMapsUrl(stop);
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
               const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
               const orderLinks = stop.deliveryGroup?.orders || [];
+              const isNextPendingStop = routeStarted && stop.status === "PENDING" && stop.orderIndex === nextPendingOrderIndex;
+              const deliveryNote = stop.deliveryGroup?.deliveryNote?.trim();
+              const safePlaceNote = stop.deliveryGroup?.safePlaceNote?.trim();
 
               return (
                 <LegacyCard key={stop.id} sectioned>
                   <BlockStack gap="300">
                     <InlineStack align="space-between" blockAlign="start">
                       <BlockStack gap="100">
-                        <Text as="h3" variant="headingMd">Stop {stop.orderIndex}</Text>
+                        <InlineStack gap="200" blockAlign="center">
+                          <Text as="h3" variant="headingMd">Stop {stop.orderIndex}</Text>
+                          {isNextPendingStop ? <Badge tone="success">NEXT DROP</Badge> : null}
+                        </InlineStack>
                         <Text as="p" variant="bodySm" tone="subdued">Orders: {orders}</Text>
                       </BlockStack>
                       <Badge tone={statusTone(stop.status)}>{stop.status}</Badge>
@@ -435,6 +494,23 @@ export default function DriverRouteDetails() {
                     <Divider />
                     <Box>
                       <BlockStack gap="200">
+                        {isNextPendingStop ? (
+                          <Box background="bg-surface-success" padding="300" borderRadius="300">
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodyMd" fontWeight="bold">This is the next delivery</Text>
+                              <Text as="p" variant="bodySm">Open navigation before leaving, then complete the POD once the delivery is finished.</Text>
+                            </BlockStack>
+                          </Box>
+                        ) : null}
+                        {(deliveryNote || safePlaceNote) ? (
+                          <Box background="bg-surface-warning" padding="300" borderRadius="300">
+                            <BlockStack gap="100">
+                              <Text as="p" variant="bodyMd" fontWeight="bold">Driver notes</Text>
+                              {deliveryNote ? <Text as="p" variant="bodySm">Delivery note: {deliveryNote}</Text> : null}
+                              {safePlaceNote ? <Text as="p" variant="bodySm">Safe place: {safePlaceNote}</Text> : null}
+                            </BlockStack>
+                          </Box>
+                        ) : null}
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Customer</Text><Text as="p" variant="bodyMd" fontWeight="bold">{customerNames}</Text></BlockStack>
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">Address</Text><Text as="p" variant="bodyMd">{address}</Text><Text as="p" variant="bodyMd" fontWeight="bold">{stop.deliveryGroup?.postcode || "No postcode"}</Text></BlockStack>
                         <BlockStack gap="050"><Text as="p" variant="bodySm" tone="subdued">ETA slot</Text><Text as="p" variant="bodyMd" fontWeight="bold">{formatSlot(stop.estimatedArrival)}</Text></BlockStack>
@@ -455,7 +531,9 @@ export default function DriverRouteDetails() {
                       </BlockStack>
                     </Box>
                     <InlineStack gap="200">
-                      {wazeUrl ? <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>Open Waze</Button> : null}
+                      {wazeUrl ? <Button url={wazeUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Waze`}>Waze</Button> : null}
+                      {googleMapsUrl ? <Button url={googleMapsUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Google Maps`}>Google Maps</Button> : null}
+                      {appleMapsUrl ? <Button url={appleMapsUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Apple Maps`}>Apple Maps</Button> : null}
                       {cleanedPhone ? <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>Call customer</Button> : null}
                     </InlineStack>
                     <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} />
