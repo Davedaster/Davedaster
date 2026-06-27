@@ -122,6 +122,40 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
   return "Your delivery has been planned and this page will update as the route progresses.";
 }
 
+function progressSummary(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
+  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+
+  if (stopStatus === "DELIVERED") return "Delivery completed";
+  if (stopStatus === "FAILED") return "Delivery attempted";
+  if (routeStatus !== "OUT_FOR_DELIVERY") return "Your route is planned and will update once the driver starts.";
+  if (isNextDrop || dropsBefore === 0) return "You are next. Live tracking is active.";
+  if (dropsBefore === 1) return "1 stop before yours. Live tracking will activate when you are next.";
+  return `${dropsBefore} stops before yours. Live tracking will activate when you are next.`;
+}
+
+function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
+  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+
+  if (isNextDrop || dropsBefore === 0) return "You are next";
+  if (dropsBefore === 1) return "1 stop";
+  return `${dropsBefore} stops`;
+}
+
+function liveTrackingLabel(isNextDrop: boolean) {
+  return isNextDrop ? "Live tracking active" : "Activates when next";
+}
+
+function liveTrackingMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
+  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+
+  if (stopStatus === "DELIVERED") return "This delivery is complete, so live tracking has ended.";
+  if (stopStatus === "FAILED") return "This delivery has been attempted, so live tracking has ended.";
+  if (routeStatus !== "OUT_FOR_DELIVERY") return "Live tracking will become available once the driver is out for delivery and you are the next stop.";
+  if (isNextDrop || dropsBefore === 0) return "Your driver is nearby. Keep this page open for the latest update.";
+  if (dropsBefore === 1) return "For privacy, the live map appears when there is 1 stop left and you become the next delivery.";
+  return "For privacy, the live map appears when you become the next delivery.";
+}
+
 function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
   if (!location) {
     return null;
@@ -267,6 +301,8 @@ export default function CustomerTrackingPage() {
     : showFailedDelivery
       ? "We attempted your delivery"
       : `We expect to be with you ${slot}`;
+  const customerProgressSummary = progressSummary(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
+  const customerLiveTrackingMessage = liveTrackingMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer);
 
   useEffect(() => {
     setLastUpdatedAt(new Date());
@@ -325,7 +361,7 @@ export default function CustomerTrackingPage() {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
             <div>
               <h2 style={{ margin: 0, fontSize: 20 }}>Route progress</h2>
-              <p style={{ margin: "6px 0 0", color: "#667085" }}>{progress.completedStops} of {progress.totalStops} drops completed</p>
+              <p style={{ margin: "6px 0 0", color: "#667085" }}>{customerProgressSummary}</p>
             </div>
             <strong style={{ color: "#509AE6", fontSize: 22 }}>{progress.progressPercent}%</strong>
           </div>
@@ -334,9 +370,9 @@ export default function CustomerTrackingPage() {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginTop: 14 }}>
             <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Your drop</dt><dd style={{ margin: 0, fontWeight: 700 }}>Number {stop.orderIndex}</dd></div>
-            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Before you</dt><dd style={{ margin: 0, fontWeight: 700 }}>{stopsBeforeCustomer}</dd></div>
-            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Remaining</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.remainingStops}</dd></div>
-            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Updates</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.failedStops}</dd></div>
+            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Before you</dt><dd style={{ margin: 0, fontWeight: 700 }}>{stopsBeforeLabel(stopsBeforeCustomer, isNextDrop)}</dd></div>
+            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Remaining route</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.remainingStops} drops</dd></div>
+            <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Route updates</dt><dd style={{ margin: 0, fontWeight: 700 }}>{progress.failedStops ? `${progress.failedStops} issue${progress.failedStops === 1 ? "" : "s"}` : "None"}</dd></div>
           </div>
         </div>
 
@@ -345,7 +381,7 @@ export default function CustomerTrackingPage() {
             <div style={{ minHeight: 360, borderRadius: 14, background: "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)", border: "1px solid #d0d5dd", position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", inset: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <span style={{ background: "#ffffff", color: "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>Map view</span>
-                <span style={{ background: isNextDrop ? "#16a34a" : "#ffffff", color: isNextDrop ? "#ffffff" : "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>{isNextDrop ? "Live tracking active" : "Live tracking hidden"}</span>
+                <span style={{ background: isNextDrop ? "#16a34a" : "#ffffff", color: isNextDrop ? "#ffffff" : "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>{liveTrackingLabel(isNextDrop)}</span>
               </div>
 
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} aria-hidden="true">
@@ -361,6 +397,7 @@ export default function CustomerTrackingPage() {
 
               {isNextDrop ? <div style={{ position: "absolute", left: "35%", top: "42%", transform: "translate(-50%, -50%)", background: "#323841", color: "#ffffff", padding: "10px 12px", borderRadius: 12, fontWeight: 700 }}>Driver nearby</div> : null}
             </div>
+            <p style={{ margin: "12px 0 0", color: "#667085", fontSize: 14 }}>{customerLiveTrackingMessage}</p>
           </div>
 
           <aside style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
