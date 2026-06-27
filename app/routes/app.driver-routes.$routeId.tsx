@@ -252,6 +252,14 @@ function tidyPhone(phone?: string | null) {
   return phone.replace(/[^+\d]/g, "");
 }
 
+function buildSmsUrl(phone: string | null, message: string) {
+  if (!phone) {
+    return null;
+  }
+
+  return `sms:${phone}?&body=${encodeURIComponent(message)}`;
+}
+
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
@@ -491,6 +499,8 @@ export default function DriverRouteDetails() {
               const wazeUrl = buildWazeUrl(stop);
               const googleMapsUrl = buildGoogleMapsUrl(stop);
               const appleMapsUrl = buildAppleMapsUrl(stop);
+              const onWaySmsUrl = buildSmsUrl(cleanedPhone, "Your Bathroom Panels Direct delivery is on the way. We will be with you shortly.");
+              const issueSmsUrl = buildSmsUrl(cleanedPhone, "This is Bathroom Panels Direct. We are trying to complete your delivery today but need to contact you about access.");
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
               const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
               const orderLinks = stop.deliveryGroup?.orders || [];
@@ -555,6 +565,8 @@ export default function DriverRouteDetails() {
                       {googleMapsUrl ? <Button url={googleMapsUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Google Maps`}>Google Maps</Button> : null}
                       {appleMapsUrl ? <Button url={appleMapsUrl} target="_blank" accessibilityLabel={`Open stop ${stop.orderIndex} in Apple Maps`}>Apple Maps</Button> : null}
                       {cleanedPhone ? <Button url={`tel:${cleanedPhone}`} accessibilityLabel={`Call customer for stop ${stop.orderIndex}`}>Call customer</Button> : null}
+                      {onWaySmsUrl ? <Button url={onWaySmsUrl} accessibilityLabel={`Text customer that stop ${stop.orderIndex} is on the way`}>Text on way</Button> : null}
+                      {issueSmsUrl ? <Button url={issueSmsUrl} accessibilityLabel={`Text customer about access for stop ${stop.orderIndex}`}>Text access issue</Button> : null}
                     </InlineStack>
                     <DriverStopActions stopId={stop.id} isDisabled={isFinalised} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} />
                   </BlockStack>
