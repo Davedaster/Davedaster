@@ -218,19 +218,8 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
           {proofPhotoStorageEnabled ? (
             <label>
               <Text as="span" variant="bodyMd" fontWeight="medium">Proof photos</Text>
-              <input
-                type="file"
-                name="proofPhotoFiles"
-                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                capture="environment"
-                multiple
-                disabled={updatesDisabled}
-                onChange={(event) => setProofPhotoCount(event.currentTarget.files?.length || 0)}
-                style={{ display: "block", marginTop: 6 }}
-              />
-              {proofPhotoCount > 0 ? (
-                <Text as="p" variant="bodySm" tone="subdued">{proofPhotoCount} photo{proofPhotoCount === 1 ? "" : "s"} selected</Text>
-              ) : null}
+              <input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple disabled={updatesDisabled} onChange={(event) => setProofPhotoCount(event.currentTarget.files?.length || 0)} style={{ display: "block", marginTop: 6 }} />
+              {proofPhotoCount > 0 ? <Text as="p" variant="bodySm" tone="subdued">{proofPhotoCount} photo{proofPhotoCount === 1 ? "" : "s"} selected</Text> : null}
             </label>
           ) : null}
           <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
@@ -275,6 +264,7 @@ export default function DriverRouteDetails() {
                   <Text as="p" variant="bodyMd" tone="subdued">{route.stops.length} stops · {pendingStops} pending · {deliveredStops} delivered · {failedStops} failed</Text>
                 </BlockStack>
                 <InlineStack gap="200" blockAlign="center">
+                  <Button url={`/app/driver-routes/${route.id}/pick-list`} target="_blank">Picking list</Button>
                   <Button url={`/app/driver-routes/${route.id}/print`} target="_blank">Print labels</Button>
                   {!routeStarted ? (
                     <Form method="post">
