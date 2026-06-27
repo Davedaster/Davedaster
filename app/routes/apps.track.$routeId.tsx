@@ -72,7 +72,7 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
   }
 
   if (stopStatus === "FAILED") {
-    return "Delivery update available. Please contact us if you need help.";
+    return "We attempted your delivery and an update has been recorded below.";
   }
 
   if (routeStatus === "OUT_FOR_DELIVERY" && isNextDrop) {
@@ -178,26 +178,71 @@ function DeliveryConfirmationCard({ tracking }: { tracking: Awaited<ReturnType<t
   );
 }
 
+function FailedDeliveryCard({ tracking }: { tracking: Awaited<ReturnType<typeof getCustomerTracking>> }) {
+  if (!tracking) {
+    return null;
+  }
+
+  const { stop, deliveryGroup } = tracking;
+  const attemptedAt = stop.actualArrival || deliveryGroup.proofPhotos[0]?.createdAt || null;
+  const note = deliveryGroup.deliveryNote || deliveryGroup.safePlaceNote || null;
+
+  return (
+    <div style={{ marginBottom: 18, background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", border: "1px solid #fed7aa" }}>
+      <p style={{ margin: "0 0 6px", color: "#ea580c", fontWeight: 800, letterSpacing: 0.4 }}>Delivery attempted</p>
+      <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>We could not complete your delivery this time</h2>
+      <p style={{ margin: "0 0 14px", color: "#667085" }}>
+        Our team has recorded an attempted delivery. Please contact us and we will help arrange the next step.
+      </p>
+
+      <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+        <div style={{ background: "#fff7ed", borderRadius: 14, padding: 12 }}><dt style={{ color: "#9a3412", fontSize: 13 }}>Attempt recorded</dt><dd style={{ margin: 0, fontWeight: 800 }}>{formatDateTime(attemptedAt)}</dd></div>
+        <div style={{ background: "#fff7ed", borderRadius: 14, padding: 12 }}><dt style={{ color: "#9a3412", fontSize: 13 }}>What happens next</dt><dd style={{ margin: 0, fontWeight: 800 }}>Please contact the team</dd></div>
+      </dl>
+
+      {note ? (
+        <div style={{ marginTop: 14, padding: 14, background: "#f8fafc", borderRadius: 14 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Driver note</h3>
+          <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap" }}>{note}</p>
+        </div>
+      ) : null}
+
+      {deliveryGroup.proofPhotos.length ? (
+        <div style={{ marginTop: 14 }}>
+          <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Attempt photos</h3>
+          <ProofPhotoThumbs photos={deliveryGroup.proofPhotos} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function CustomerTrackingPage() {
   const { tracking } = useLoaderData<typeof loader>();
   const { route, stop, deliveryGroup, order, isNextDrop, progress } = tracking;
   const slot = formatSlot(stop.estimatedArrival);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
+  const showFailedDelivery = stop.status === "FAILED";
   const proofPhotos = deliveryGroup.proofPhotos?.length
     ? deliveryGroup.proofPhotos
     : deliveryGroup.proofPhotoUrl
       ? [{ id: "primary", url: deliveryGroup.proofPhotoUrl, label: "Proof photo" }]
       : [];
   const customerMessage = customerStatusMessage(route.status, stop.status, isNextDrop, progress.stopsBeforeCustomer);
+  const pageTitle = showProof
+    ? "Your delivery has been completed"
+    : showFailedDelivery
+      ? "We attempted your delivery"
+      : `We expect to be with you ${slot}`;
 
   return (
     <main style={{ minHeight: "100vh", background: "#f4f7fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
       <section style={{ maxWidth: 980, margin: "0 auto", padding: "28px 16px" }}>
         <div style={{ background: "#ffffff", borderRadius: 18, padding: 22, boxShadow: "0 14px 40px rgba(50,56,65,0.12)", marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", color: "#509AE6", fontWeight: 700, letterSpacing: 0.4 }}>Bathroom Panels Direct</p>
-          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>{showProof ? "Your delivery has been completed" : `We expect to be with you ${slot}`}</h1>
+          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>{pageTitle}</h1>
           <p style={{ margin: "12px 0 0", color: "#667085" }}>{formatDate(route.date)} · Order {order.shopifyOrderNumber}</p>
-          <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop || showProof ? "#16a34a" : "#323841" }}>{customerMessage}</p>
+          <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop || showProof ? "#16a34a" : showFailedDelivery ? "#ea580c" : "#323841" }}>{customerMessage}</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
             <p style={{ margin: 0, color: "#667085", fontSize: 14 }}>Refresh this page for the latest driver update.</p>
             <button type="button" onClick={() => window.location.reload()} style={{ border: "1px solid #509AE6", color: "#ffffff", background: "#509AE6", borderRadius: 999, padding: "9px 14px", fontWeight: 800, cursor: "pointer" }}>
@@ -207,6 +252,7 @@ export default function CustomerTrackingPage() {
         </div>
 
         {showProof ? <DeliveryConfirmationCard tracking={tracking} /> : null}
+        {showFailedDelivery ? <FailedDeliveryCard tracking={tracking} /> : null}
 
         <div style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
@@ -253,7 +299,7 @@ export default function CustomerTrackingPage() {
           <aside style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
             <h2 style={{ margin: "0 0 12px", fontSize: 20 }}>Delivery details</h2>
             <dl style={{ margin: 0, display: "grid", gap: 12 }}>
-              <div><dt style={{ color: "#667085", fontSize: 13 }}>Status</dt><dd style={{ margin: 0, fontWeight: 700 }}>{showProof ? "Delivered" : statusLabel(route.status)}</dd></div>
+              <div><dt style={{ color: "#667085", fontSize: 13 }}>Status</dt><dd style={{ margin: 0, fontWeight: 700 }}>{showProof ? "Delivered" : showFailedDelivery ? "Delivery attempted" : statusLabel(route.status)}</dd></div>
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Driver</dt><dd style={{ margin: 0, fontWeight: 700 }}>{route.driver?.name || "To be confirmed"}</dd></div>
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Postcode</dt><dd style={{ margin: 0, fontWeight: 700 }}>{deliveryGroup.postcode || "Not shown"}</dd></div>
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Delivery note</dt><dd style={{ margin: 0, whiteSpace: "pre-wrap" }}>{deliveryGroup.deliveryNote || "No delivery note added"}</dd></div>
