@@ -14,6 +14,7 @@ import {
   Divider,
   TextField,
   Checkbox,
+  ProgressBar,
 } from "@shopify/polaris";
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
@@ -423,9 +424,13 @@ export default function DriverRouteDetails() {
   const { route, proofPhotoStorageEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const routeStarted = route.status === "OUT_FOR_DELIVERY";
+  const totalStops = route.stops.length;
   const pendingStops = route.stops.filter((stop) => stop.status === "PENDING").length;
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
+  const completedStops = deliveredStops + failedStops;
+  const progressPercent = totalStops ? Math.round((completedStops / totalStops) * 100) : 0;
+  const remainingDrops = totalStops - completedStops;
   const nextPendingOrderIndex = pendingStops
     ? Math.min(...route.stops.filter((stop) => stop.status === "PENDING").map((stop) => stop.orderIndex))
     : null;
@@ -455,6 +460,21 @@ export default function DriverRouteDetails() {
                   )}
                 </InlineStack>
               </InlineStack>
+
+              <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                <BlockStack gap="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="p" variant="bodyMd" fontWeight="bold">Route progress</Text>
+                    <Text as="p" variant="bodyMd" fontWeight="bold">{progressPercent}%</Text>
+                  </InlineStack>
+                  <ProgressBar progress={progressPercent} size="small" />
+                  <InlineStack gap="400">
+                    <Text as="p" variant="bodySm">{completedStops} completed</Text>
+                    <Text as="p" variant="bodySm">{remainingDrops} remaining</Text>
+                    <Text as="p" variant="bodySm">{failedStops} failed</Text>
+                  </InlineStack>
+                </BlockStack>
+              </Box>
 
               {!proofPhotoStorageEnabled ? <Text as="p" variant="bodySm" tone="subdued">Proof photo storage is not set up yet, so hosted proof photo links can still be pasted manually.</Text> : null}
               {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
