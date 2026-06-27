@@ -18,10 +18,24 @@ function isValidProofPhotoUrl(value: string) {
   }
 }
 
+function isValidSignatureImage(value: string) {
+  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value);
+}
+
 function normaliseProofPhotoUrls(value: string | string[]) {
   const urls = Array.isArray(value) ? value : [value];
 
   return urls.map((url) => url.trim()).filter(Boolean);
+}
+
+function normaliseGpsValue(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export async function listStopsForProofOfDelivery() {
@@ -63,9 +77,18 @@ export async function saveProofOfDelivery(input: {
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
+  signatureImage?: string | null;
+  signatureName?: string | null;
+  signatureTermsAccepted?: boolean;
+  signatureTermsText?: string | null;
+  signatureGpsLat?: string | null;
+  signatureGpsLng?: string | null;
 }) {
   const proofPhotoUrls = normaliseProofPhotoUrls(input.proofPhotoUrl);
   const primaryProofPhotoUrl = proofPhotoUrls[0];
+  const signatureImage = input.signatureImage?.trim() || "";
+  const signatureName = input.signatureName?.trim() || "";
+  const signatureTermsText = input.signatureTermsText?.trim() || null;
 
   const stop = await prisma.stop.findUnique({
     where: {
@@ -107,6 +130,18 @@ export async function saveProofOfDelivery(input: {
     }
   }
 
+  if (!signatureName) {
+    throw new Error("Customer name is required before marking delivered.");
+  }
+
+  if (!signatureImage || !isValidSignatureImage(signatureImage)) {
+    throw new Error("Customer signature is required before marking delivered.");
+  }
+
+  if (!input.signatureTermsAccepted) {
+    throw new Error("Delivery confirmation terms must be accepted before marking delivered.");
+  }
+
   const shopifyResults = [];
 
   for (const order of stop.deliveryGroup.orders) {
@@ -138,6 +173,13 @@ export async function saveProofOfDelivery(input: {
         },
         deliveryNote: input.deliveryNote?.trim() || null,
         safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
+        signatureImage,
+        signatureName,
+        signatureAcceptedAt: new Date(),
+        signatureTermsAccepted: true,
+        signatureTermsText,
+        signatureGpsLat: normaliseGpsValue(input.signatureGpsLat),
+        signatureGpsLng: normaliseGpsValue(input.signatureGpsLng),
       },
     });
 
@@ -163,7 +205,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"} and a customer signature from ${signatureName}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
