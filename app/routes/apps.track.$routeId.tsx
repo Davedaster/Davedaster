@@ -1,11 +1,14 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { useEffect, useState } from "react";
 
 import { CustomerEtaConfidenceCard } from "../components/CustomerEtaConfidenceCard";
 import { CustomerSupportCard } from "../components/CustomerSupportCard";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { getCustomerTracking } from "../lib/tracking.server";
+
+const TRACKING_REFRESHED_KEY = "routeBuddyTrackingRefreshed";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const routeId = params.routeId;
@@ -48,6 +51,17 @@ function formatDateTime(value?: string | Date | null) {
   }).format(new Date(value));
 }
 
+function formatLastUpdatedTime(value: Date | null) {
+  if (!value) {
+    return "Checking now";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(value);
+}
+
 function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
   if (!estimatedArrival) {
     return "Your delivery slot is being confirmed";
@@ -66,6 +80,14 @@ function statusLabel(status: string) {
   if (status === "CANCELLED") return "Delivery cancelled";
   if (status === "PUBLISHED") return "Route planned";
   return status.replaceAll("_", " ").toLowerCase();
+}
+
+function trackingStatusLabel(routeStatus: string, stopStatus: string) {
+  if (stopStatus === "DELIVERED" || routeStatus === "COMPLETED") return "Delivery completed";
+  if (stopStatus === "FAILED") return "Delivery attempted";
+  if (routeStatus === "CANCELLED") return "Route inactive";
+  if (routeStatus === "OUT_FOR_DELIVERY") return "Route active";
+  return "Tracking active";
 }
 
 function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
@@ -232,6 +254,8 @@ export default function CustomerTrackingPage() {
   const stopsBeforeCustomer = normaliseStopsBeforeCustomer(progress.stopsBeforeCustomer);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
   const showFailedDelivery = stop.status === "FAILED";
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const proofPhotos = deliveryGroup.proofPhotos?.length
     ? deliveryGroup.proofPhotos
     : deliveryGroup.proofPhotoUrl
@@ -244,6 +268,21 @@ export default function CustomerTrackingPage() {
       ? "We attempted your delivery"
       : `We expect to be with you ${slot}`;
 
+  useEffect(() => {
+    setLastUpdatedAt(new Date());
+
+    if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") {
+      window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY);
+      setRefreshMessage("Tracking updated");
+      window.setTimeout(() => setRefreshMessage(null), 2500);
+    }
+  }, []);
+
+  function handleRefreshTracking() {
+    window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true");
+    window.location.reload();
+  }
+
   return (
     <main style={{ minHeight: "100vh", background: "#f4f7fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
       <section style={{ maxWidth: 980, margin: "0 auto", padding: "28px 16px" }}>
@@ -252,11 +291,19 @@ export default function CustomerTrackingPage() {
           <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>{pageTitle}</h1>
           <p style={{ margin: "12px 0 0", color: "#667085" }}>{formatDate(route.date)} · Order {order.shopifyOrderNumber}</p>
           <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop || showProof ? "#16a34a" : showFailedDelivery ? "#ea580c" : "#323841" }}>{customerMessage}</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
-            <p style={{ margin: 0, color: "#667085", fontSize: 14 }}>Refresh this page for the latest driver update.</p>
-            <button type="button" onClick={() => window.location.reload()} style={{ border: "1px solid #509AE6", color: "#ffffff", background: "#509AE6", borderRadius: 999, padding: "9px 14px", fontWeight: 800, cursor: "pointer" }}>
-              Refresh tracking
-            </button>
+          <div style={{ marginTop: 16, padding: 14, borderTop: "1px solid #e5e7eb", background: "#f8fafc", borderRadius: 14 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <p style={{ margin: "0 0 4px", color: "#509AE6", fontSize: 13, fontWeight: 800 }}>Tracking status</p>
+                <p style={{ margin: 0, color: "#667085", fontSize: 14 }}>
+                  Last updated {formatLastUpdatedTime(lastUpdatedAt)} · {trackingStatusLabel(route.status, stop.status)}
+                </p>
+                {refreshMessage ? <p style={{ margin: "6px 0 0", color: "#16a34a", fontSize: 13, fontWeight: 800 }}>{refreshMessage}</p> : null}
+              </div>
+              <button type="button" onClick={handleRefreshTracking} style={{ border: "1px solid #509AE6", color: "#ffffff", background: "#509AE6", borderRadius: 999, padding: "9px 14px", fontWeight: 800, cursor: "pointer" }}>
+                Refresh tracking
+              </button>
+            </div>
           </div>
         </div>
 
