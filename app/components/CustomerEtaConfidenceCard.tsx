@@ -83,6 +83,9 @@ export function CustomerEtaConfidenceCard(props: CustomerEtaConfidenceCardProps)
       >
         {copy.highlight}
       </div>
+      <p style={{ margin: '10px 0 0', color: '#667085', fontSize: 13 }}>
+        Times are estimates and may change slightly due to traffic, access, or earlier deliveries.
+      </p>
     </div>
   );
 }
