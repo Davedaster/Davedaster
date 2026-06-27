@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const SUPPORT_EMAIL = 'deliveries@bathroompanelsdirect.co.uk';
 
-function buildSupportEmailHref() {
+function buildSupportEmailHref(trackingUrl: string) {
   const subject = 'Delivery tracking enquiry';
   const body = [
     'Hi Bathroom Panels Direct,',
@@ -11,7 +11,7 @@ function buildSupportEmailHref() {
     '',
     'Order number:',
     '',
-    `Tracking link: ${typeof window === 'undefined' ? '' : window.location.href}`,
+    `Tracking link: ${trackingUrl}`,
   ].join('\n');
 
   return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -42,6 +42,11 @@ async function copyCurrentTrackingLink() {
 
 export function CustomerSupportCard() {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [trackingUrl, setTrackingUrl] = useState('');
+
+  useEffect(() => {
+    setTrackingUrl(window.location.href);
+  }, []);
 
   async function handleCopyTrackingLink() {
     try {
@@ -78,7 +83,7 @@ export function CustomerSupportCard() {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <a
-          href={buildSupportEmailHref()}
+          href={buildSupportEmailHref(trackingUrl)}
           style={{
             background: '#509AE6',
             color: '#ffffff',
