@@ -1,5 +1,12 @@
 import prisma from "../db.server";
 
+function splitLineItems(summary?: string | null) {
+  return (summary || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export async function getCustomerTracking(routeId: string, shopifyOrderId: string) {
   const route = await prisma.route.findUnique({
     where: { id: routeId },
@@ -88,6 +95,7 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
     },
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,
+      items: splitLineItems(order.lineItemSummary),
     },
     progress: {
       totalStops: route.stops.length,
