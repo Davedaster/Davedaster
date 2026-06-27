@@ -32,6 +32,20 @@ function formatDate(value: string | Date) {
   }).format(new Date(value));
 }
 
+function formatDateTime(value?: string | Date | null) {
+  if (!value) {
+    return "Not recorded yet";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
   if (!estimatedArrival) {
     return "Your delivery slot is being confirmed";
@@ -78,6 +92,14 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
   return "Your delivery has been planned and this page will update as the route progresses.";
 }
 
+function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
+  if (!location) {
+    return null;
+  }
+
+  return `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+}
+
 function ProofPhotoThumbs({ photos }: { photos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!photos.length) {
     return null;
@@ -107,6 +129,55 @@ function ProofPhotoThumbs({ photos }: { photos: Array<{ id: string; url: string;
   );
 }
 
+function DeliveryConfirmationCard({ tracking }: { tracking: Awaited<ReturnType<typeof getCustomerTracking>> }) {
+  if (!tracking) {
+    return null;
+  }
+
+  const { stop, deliveryGroup } = tracking;
+  const pod = deliveryGroup.proofOfDelivery;
+  const mapUrl = buildMapUrl(pod.location);
+  const deliveredAt = stop.actualArrival || pod.receiverMark?.createdAt || deliveryGroup.proofPhotos[0]?.createdAt || null;
+
+  return (
+    <div style={{ marginBottom: 18, background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", border: "1px solid #dcfce7" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+        <div>
+          <p style={{ margin: "0 0 6px", color: "#16a34a", fontWeight: 800, letterSpacing: 0.4 }}>Delivered</p>
+          <h2 style={{ margin: 0, fontSize: 22 }}>Delivery confirmation</h2>
+        </div>
+        <button type="button" onClick={() => window.print()} style={{ border: "1px solid #509AE6", color: "#509AE6", background: "#ffffff", borderRadius: 999, padding: "9px 13px", fontWeight: 800, cursor: "pointer" }}>
+          Download proof
+        </button>
+      </div>
+
+      <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+        <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Delivered on</dt><dd style={{ margin: 0, fontWeight: 800 }}>{formatDateTime(deliveredAt)}</dd></div>
+        <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Received by</dt><dd style={{ margin: 0, fontWeight: 800 }}>{pod.receiverName || "Recorded by driver"}</dd></div>
+        <div style={{ background: "#f8fafc", borderRadius: 14, padding: 12 }}><dt style={{ color: "#667085", fontSize: 13 }}>Location</dt><dd style={{ margin: 0, fontWeight: 800 }}>{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" style={{ color: "#509AE6" }}>View on map</a> : "Not recorded"}</dd></div>
+      </dl>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginTop: 14 }}>
+        {deliveryGroup.proofPhotos.length ? (
+          <div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Delivery photos</h3>
+            <ProofPhotoThumbs photos={deliveryGroup.proofPhotos} />
+          </div>
+        ) : null}
+
+        {pod.receiverMark ? (
+          <div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>Receiver mark</h3>
+            <a href={pod.receiverMark.url} target="_blank" rel="noreferrer" style={{ display: "block", border: "1px solid #d0d5dd", borderRadius: 14, padding: 8, background: "#ffffff" }}>
+              <img src={pod.receiverMark.url} alt="Receiver mark" style={{ width: "100%", height: 120, objectFit: "contain", borderRadius: 10, background: "#f8fafc", display: "block" }} />
+            </a>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function CustomerTrackingPage() {
   const { tracking } = useLoaderData<typeof loader>();
   const { route, stop, deliveryGroup, order, isNextDrop, progress } = tracking;
@@ -124,10 +195,12 @@ export default function CustomerTrackingPage() {
       <section style={{ maxWidth: 980, margin: "0 auto", padding: "28px 16px" }}>
         <div style={{ background: "#ffffff", borderRadius: 18, padding: 22, boxShadow: "0 14px 40px rgba(50,56,65,0.12)", marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", color: "#509AE6", fontWeight: 700, letterSpacing: 0.4 }}>Bathroom Panels Direct</p>
-          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>We expect to be with you {slot}</h1>
+          <h1 style={{ margin: 0, fontSize: 30, lineHeight: 1.15 }}>{showProof ? "Your delivery has been completed" : `We expect to be with you ${slot}`}</h1>
           <p style={{ margin: "12px 0 0", color: "#667085" }}>{formatDate(route.date)} · Order {order.shopifyOrderNumber}</p>
-          <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop ? "#16a34a" : "#323841" }}>{customerMessage}</p>
+          <p style={{ margin: "14px 0 0", fontWeight: 700, color: isNextDrop || showProof ? "#16a34a" : "#323841" }}>{customerMessage}</p>
         </div>
+
+        {showProof ? <DeliveryConfirmationCard tracking={tracking} /> : null}
 
         <div style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
@@ -174,10 +247,11 @@ export default function CustomerTrackingPage() {
           <aside style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
             <h2 style={{ margin: "0 0 12px", fontSize: 20 }}>Delivery details</h2>
             <dl style={{ margin: 0, display: "grid", gap: 12 }}>
-              <div><dt style={{ color: "#667085", fontSize: 13 }}>Status</dt><dd style={{ margin: 0, fontWeight: 700 }}>{statusLabel(route.status)}</dd></div>
+              <div><dt style={{ color: "#667085", fontSize: 13 }}>Status</dt><dd style={{ margin: 0, fontWeight: 700 }}>{showProof ? "Delivered" : statusLabel(route.status)}</dd></div>
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Driver</dt><dd style={{ margin: 0, fontWeight: 700 }}>{route.driver?.name || "To be confirmed"}</dd></div>
               <div><dt style={{ color: "#667085", fontSize: 13 }}>Postcode</dt><dd style={{ margin: 0, fontWeight: 700 }}>{deliveryGroup.postcode || "Not shown"}</dd></div>
-              <div><dt style={{ color: "#667085", fontSize: 13 }}>Delivery note</dt><dd style={{ margin: 0 }}>{deliveryGroup.deliveryNote || "No delivery note added"}</dd></div>
+              <div><dt style={{ color: "#667085", fontSize: 13 }}>Delivery note</dt><dd style={{ margin: 0, whiteSpace: "pre-wrap" }}>{deliveryGroup.deliveryNote || "No delivery note added"}</dd></div>
+              {deliveryGroup.safePlaceNote ? <div><dt style={{ color: "#667085", fontSize: 13 }}>Safe place note</dt><dd style={{ margin: 0 }}>{deliveryGroup.safePlaceNote}</dd></div> : null}
             </dl>
 
             {order.items.length ? (
