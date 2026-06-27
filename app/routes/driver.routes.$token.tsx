@@ -2,9 +2,17 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 
+import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { buildWazeUrl } from "../lib/waze";
-import { canStartDriverRoute, getDriverRouteByToken, startDriverRouteFromToken } from "../lib/driverRouteAccess.server";
+import {
+  canStartDriverRoute,
+  completeDriverStopFromToken,
+  getDriverRouteByToken,
+  markDriverStopMissedFromToken,
+  startDriverRouteFromToken,
+} from "../lib/driverRouteAccess.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
+import { uploadProofPhoto } from "../lib/proofPhotoStorage.server";
 
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const token = params.token;
@@ -26,18 +34,66 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
   });
 };
 
-export const action = async ({ params }: ActionFunctionArgs) => {
+export const action = async ({ request, params }: ActionFunctionArgs) => {
   const token = params.token;
 
   if (!token) {
     throw new Response("Driver route not found", { status: 404 });
   }
 
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "startRoute");
+
   try {
-    await startDriverRouteFromToken(token);
+    if (intent === "startRoute") {
+      await startDriverRouteFromToken(token);
+      return redirect(`/driver/routes/${token}`);
+    }
+
+    const stopId = String(formData.get("stopId") || "").trim();
+
+    if (!stopId) {
+      throw new Error("Stop is missing.");
+    }
+
+    if (intent === "completeStop") {
+      const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
+      const proofPhotoUrls: string[] = [];
+
+      for (const proofPhotoFile of proofPhotoFiles) {
+        proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
+      }
+
+      const admin = await getOfflineShopifyAdmin();
+      await completeDriverStopFromToken({
+        token,
+        stopId,
+        admin,
+        proofPhotoUrls,
+        deliveryNote: String(formData.get("deliveryNote") || "").trim(),
+        safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
+        leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
+      });
+
+      return redirect(`/driver/routes/${token}#next-stop`);
+    }
+
+    if (intent === "missedStop") {
+      const admin = await getOfflineShopifyAdmin();
+      await markDriverStopMissedFromToken({
+        token,
+        stopId,
+        admin,
+        reason: String(formData.get("failedReason") || "").trim(),
+        note: String(formData.get("failedNote") || "").trim(),
+      });
+
+      return redirect(`/driver/routes/${token}#next-stop`);
+    }
+
     return redirect(`/driver/routes/${token}`);
   } catch (error) {
-    return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be started." }, { status: 400 });
+    return json({ ok: false, error: error instanceof Error ? error.message : "Driver route action failed." }, { status: 400 });
   }
 };
 
@@ -82,6 +138,7 @@ export default function DriverRoutePage() {
   const routeStarted = route.status === "OUT_FOR_DELIVERY" || route.status === "COMPLETED";
   const plannedStartText = formatStart(firstEta);
   const pins = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number");
+  const nextStop = route.stops.find((stop) => stop.status === "PENDING");
 
   return (
     <main style={{ minHeight: "100vh", background: "#f4f7fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
@@ -119,6 +176,7 @@ export default function DriverRoutePage() {
             <p style={{ margin: 0, fontWeight: 700, color: "#16a34a" }}>Route started. Customer tracking can now become active.</p>
           ) : (
             <Form method="post">
+              <input type="hidden" name="intent" value="startRoute" />
               <button
                 type="submit"
                 disabled={!canStart}
@@ -142,15 +200,18 @@ export default function DriverRoutePage() {
             const address = group?.formattedAddress || group?.address || "No address";
             const wazeUrl = buildWazeUrl(group);
             const isDelivered = stop.status === "DELIVERED";
+            const isFailed = stop.status === "FAILED";
+            const isNextStop = nextStop?.id === stop.id;
+            const actionDisabled = !routeStarted || isDelivered || isFailed;
 
             return (
-              <article key={stop.id} style={{ background: isDelivered ? "#ecfdf3" : "#ffffff", border: isDelivered ? "1px solid #86efac" : "1px solid #e5e7eb", borderRadius: 18, padding: 16, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
+              <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: isDelivered ? "#ecfdf3" : isFailed ? "#fef3f2" : "#ffffff", border: isDelivered ? "1px solid #86efac" : isFailed ? "1px solid #fecdca" : isNextStop ? "2px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 18, padding: 16, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
                   <div>
-                    <h2 style={{ margin: 0, fontSize: 20 }}>Drop {stop.orderIndex}</h2>
+                    <h2 style={{ margin: 0, fontSize: 20 }}>Drop {stop.orderIndex}{isNextStop ? " · Next" : ""}</h2>
                     <p style={{ margin: "6px 0 0", color: "#667085" }}>{formatSlot(stop.estimatedArrival)}</p>
                   </div>
-                  <span style={{ background: isDelivered ? "#16a34a" : "#eff6ff", color: isDelivered ? "#ffffff" : "#509AE6", borderRadius: 999, padding: "6px 10px", fontSize: 13, fontWeight: 700 }}>{statusLabel(stop.status)}</span>
+                  <span style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : "#eff6ff", color: isDelivered || isFailed ? "#ffffff" : "#509AE6", borderRadius: 999, padding: "6px 10px", fontSize: 13, fontWeight: 700 }}>{statusLabel(stop.status)}</span>
                 </div>
 
                 <div style={{ marginTop: 14, display: "grid", gap: 9 }}>
@@ -162,12 +223,59 @@ export default function DriverRoutePage() {
                   <p style={{ margin: 0 }}><strong>Items:</strong> Items will show once line items are stored against each stop.</p>
                 </div>
 
+                {stop.deliveryGroup?.proofPhotos?.length ? (
+                  <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+                    {stop.deliveryGroup.proofPhotos.map((photo, index) => (
+                      <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none" }}>
+                        <img src={photo.url} alt={photo.label || `Proof photo ${index + 1}`} style={{ width: "100%", height: 78, objectFit: "cover", borderRadius: 10, display: "block" }} />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
                   {wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={{ textAlign: "center", borderRadius: 12, padding: "11px 10px", background: "#509AE6", color: "#ffffff", fontWeight: 700, textDecoration: "none" }}>Open map</a> : null}
-                  <button type="button" disabled style={{ border: 0, borderRadius: 12, padding: "11px 10px", background: "#eef2f7", color: "#667085", fontWeight: 700 }}>Add photos</button>
-                  <button type="button" disabled style={{ border: 0, borderRadius: 12, padding: "11px 10px", background: "#fee4e2", color: "#b42318", fontWeight: 700 }}>Missed delivery</button>
-                  <button type="button" disabled style={{ border: 0, borderRadius: 12, padding: "11px 10px", background: "#dcfce7", color: "#166534", fontWeight: 700 }}>Complete</button>
                 </div>
+
+                {!isDelivered && !isFailed ? (
+                  <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+                    <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 10 }}>
+                      <input type="hidden" name="intent" value="completeStop" />
+                      <input type="hidden" name="stopId" value={stop.id} />
+                      <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                        Add proof photos
+                        <input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple disabled={actionDisabled} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                        Delivery note
+                        <textarea name="deliveryNote" rows={2} disabled={actionDisabled} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                        Safe place note
+                        <textarea name="safePlaceNote" rows={2} disabled={actionDisabled} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                      </label>
+                      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input type="checkbox" name="leftInSafePlace" value="true" disabled={actionDisabled} />
+                        Left in safe place
+                      </label>
+                      <button type="submit" disabled={actionDisabled} style={{ border: 0, borderRadius: 12, padding: "12px 10px", background: actionDisabled ? "#d0d5dd" : "#16a34a", color: "#ffffff", fontWeight: 700 }}>Complete delivery</button>
+                    </Form>
+
+                    <Form method="post" style={{ display: "grid", gap: 10 }}>
+                      <input type="hidden" name="intent" value="missedStop" />
+                      <input type="hidden" name="stopId" value={stop.id} />
+                      <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                        Missed delivery reason
+                        <input name="failedReason" disabled={actionDisabled} placeholder="No answer, access issue, customer unavailable" style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                        Missed delivery note
+                        <textarea name="failedNote" rows={2} disabled={actionDisabled} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                      </label>
+                      <button type="submit" disabled={actionDisabled} style={{ border: 0, borderRadius: 12, padding: "12px 10px", background: actionDisabled ? "#d0d5dd" : "#b42318", color: "#ffffff", fontWeight: 700 }}>Mark missed delivery</button>
+                    </Form>
+                  </div>
+                ) : null}
               </article>
             );
           })}
