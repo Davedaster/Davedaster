@@ -44,10 +44,20 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
   }
 
   const pendingStops = route.stops.filter((routeStop) => routeStop.status === "PENDING");
+  const completedStops = route.stops.filter((routeStop) => routeStop.status === "DELIVERED").length;
+  const failedStops = route.stops.filter((routeStop) => routeStop.status === "FAILED").length;
+  const activeStops = route.stops.filter((routeStop) => routeStop.status !== "FAILED");
   const nextPendingOrderIndex = pendingStops.length
     ? Math.min(...pendingStops.map((routeStop) => routeStop.orderIndex))
     : null;
   const isNextDrop = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING" && stop.orderIndex === nextPendingOrderIndex;
+  const stopsBeforeCustomer = route.stops.filter((routeStop) => (
+    routeStop.orderIndex < stop.orderIndex && routeStop.status === "PENDING"
+  )).length;
+  const remainingStops = route.stops.filter((routeStop) => routeStop.status === "PENDING").length;
+  const progressPercent = route.stops.length
+    ? Math.round((completedStops / route.stops.length) * 100)
+    : 0;
 
   return {
     route: {
@@ -78,6 +88,15 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
     },
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,
+    },
+    progress: {
+      totalStops: route.stops.length,
+      activeStops: activeStops.length,
+      completedStops,
+      failedStops,
+      remainingStops,
+      stopsBeforeCustomer,
+      progressPercent,
     },
     isNextDrop,
   };
