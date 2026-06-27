@@ -90,6 +90,7 @@ export function CustomerSupportCard() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <a
           href={buildSupportEmailHref(trackingUrl)}
+          aria-label={`Email delivery support at ${SUPPORT_EMAIL}`}
           style={{
             background: '#509AE6',
             color: '#ffffff',
