@@ -128,6 +128,45 @@ function boundsForCoordinates(coordinates: number[][]) {
   ];
 }
 
+function straightLineCoordinates(points: MappablePoint[]) {
+  return points.map((point) => [point.longitude, point.latitude]);
+}
+
+function selectedRoutePoints(points: MappablePoint[]) {
+  return points.filter((point) => point.selected);
+}
+
+function routeRequestKey(points: MappablePoint[]) {
+  return points.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(":");
+}
+
+function tomTomRouteUrl(points: MappablePoint[], apiKey: string) {
+  const locations = routeRequestKey(points);
+  const params = new URLSearchParams({
+    key: apiKey,
+    traffic: "true",
+    travelMode: "van",
+    routeType: "fastest",
+  });
+
+  return `https://api.tomtom.com/routing/1/calculateRoute/${locations}/json?${params.toString()}`;
+}
+
+function coordinatesFromTomTomRoute(payload: any) {
+  const legs = payload?.routes?.[0]?.legs || [];
+  const coordinates: number[][] = [];
+
+  for (const leg of legs) {
+    for (const point of leg.points || []) {
+      if (typeof point.latitude === "number" && typeof point.longitude === "number") {
+        coordinates.push([point.longitude, point.latitude]);
+      }
+    }
+  }
+
+  return coordinates;
+}
+
 export function RouteMap({
   points,
   height = 520,
@@ -140,6 +179,7 @@ export function RouteMap({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<TomTomMapRef | null>(null);
   const popupRef = useRef<TomTomPopupRef | null>(null);
+  const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
   const clustersLayerIdRef = useRef(`clusters-${Math.random().toString(36).slice(2)}`);
@@ -149,7 +189,10 @@ export function RouteMap({
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
   const [mapReady, setMapReady] = useState(false);
+  const [roadRouteCoordinates, setRoadRouteCoordinates] = useState<number[][]>([]);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
+  const selectedPoints = useMemo(() => selectedRoutePoints(mappablePoints), [mappablePoints]);
+  const selectedRouteKey = useMemo(() => routeRequestKey(selectedPoints), [selectedPoints]);
   const activeApiKey = apiKey || loadedApiKey;
 
   useEffect(() => {
@@ -223,6 +266,44 @@ export function RouteMap({
   }, [activeApiKey]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadRoadRoute() {
+      if (!showRouteLine || !activeApiKey || selectedPoints.length < 2) {
+        setRoadRouteCoordinates([]);
+        return;
+      }
+
+      const fallback = straightLineCoordinates(selectedPoints);
+
+      try {
+        const response = await fetch(tomTomRouteUrl(selectedPoints, activeApiKey));
+
+        if (!response.ok) {
+          throw new Error(`TomTom route failed with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const coordinates = coordinatesFromTomTomRoute(payload);
+
+        if (!cancelled) {
+          setRoadRouteCoordinates(coordinates.length > 1 ? coordinates : fallback);
+        }
+      } catch {
+        if (!cancelled) {
+          setRoadRouteCoordinates(fallback);
+        }
+      }
+    }
+
+    loadRoadRoute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeApiKey, selectedRouteKey, selectedPoints, showRouteLine]);
+
+  useEffect(() => {
     const map = mapRef.current;
 
     if (!map || !mapReady) {
@@ -237,7 +318,8 @@ export function RouteMap({
     const pinLabelLayerId = pinLabelLayerIdRef.current;
     const routeLayerId = routeLayerIdRef.current;
     const featureCollection = buildFeatureCollection(mappablePoints);
-    const routeCoordinates = mappablePoints.map((point) => [point.longitude, point.latitude]);
+    const fallbackRouteCoordinates = straightLineCoordinates(selectedPoints);
+    const routeCoordinates = roadRouteCoordinates.length > 1 ? roadRouteCoordinates : fallbackRouteCoordinates;
 
     const removeLayer = (layerId: string) => {
       if (map.getLayer(layerId)) {
@@ -267,7 +349,7 @@ export function RouteMap({
       clusterRadius: 50,
     });
 
-    if (showRouteLine && routeCoordinates.length > 1) {
+    if (showRouteLine && selectedPoints.length > 1 && routeCoordinates.length > 1) {
       map.addSource(routeSourceId, {
         type: "geojson",
         data: {
@@ -418,10 +500,16 @@ export function RouteMap({
     map.on("mouseenter", pinsLayerId, handlePinEnter);
     map.on("mouseleave", pinsLayerId, handlePinLeave);
 
-    if (routeCoordinates.length === 1) {
-      map.flyTo({ center: routeCoordinates[0], zoom: Math.max(map.getZoom(), 14) });
-    } else if (routeCoordinates.length > 1) {
-      map.fitBounds(boundsForCoordinates(routeCoordinates), { padding: 52, maxZoom: 14 });
+    if (!hasInitialFitRef.current) {
+      const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : mappablePoints.map((point) => [point.longitude, point.latitude]);
+
+      if (fittingCoordinates.length === 1) {
+        map.flyTo({ center: fittingCoordinates[0], zoom: Math.max(map.getZoom(), 14) });
+        hasInitialFitRef.current = true;
+      } else if (fittingCoordinates.length > 1) {
+        map.fitBounds(boundsForCoordinates(fittingCoordinates), { padding: 52, maxZoom: 14 });
+        hasInitialFitRef.current = true;
+      }
     }
 
     return () => {
@@ -433,7 +521,7 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, handlePinLeave);
       popupRef.current?.remove();
     };
-  }, [mapReady, mappablePoints, onSelectPoint, showRouteLine]);
+  }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, selectedPoints, showRouteLine]);
 
   useEffect(() => {
     return () => {
