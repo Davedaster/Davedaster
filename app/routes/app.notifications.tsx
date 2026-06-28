@@ -28,38 +28,40 @@ const previewInput = {
   proofPhotoUrl: "https://example.com/proof-of-delivery-photo.jpg",
 };
 
-const previews = [
-  {
-    title: "Booked slot",
-    sms: buildBookedSlotMessage(previewInput, "sms"),
-    email: buildBookedSlotMessage(previewInput, "email"),
-  },
-  {
-    title: "Out for delivery",
-    sms: buildOutForDeliveryMessage(previewInput, "sms"),
-    email: buildOutForDeliveryMessage(previewInput, "email"),
-  },
-  {
-    title: "Next drop tracking",
-    sms: buildNextDropTrackingMessage(previewInput, "sms"),
-    email: buildNextDropTrackingMessage(previewInput, "email"),
-  },
-  {
-    title: "Delay, 45 minutes",
-    sms: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "sms"),
-    email: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "email"),
-  },
-  {
-    title: "Delay, 90 minutes",
-    sms: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "sms"),
-    email: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "email"),
-  },
-  {
-    title: "Delivery complete",
-    sms: buildDeliveryCompleteMessage(previewInput, "sms"),
-    email: buildDeliveryCompleteMessage(previewInput, "email"),
-  },
-];
+function buildPreviews() {
+  return [
+    {
+      title: "Booked slot",
+      sms: buildBookedSlotMessage(previewInput, "sms"),
+      email: buildBookedSlotMessage(previewInput, "email"),
+    },
+    {
+      title: "Out for delivery",
+      sms: buildOutForDeliveryMessage(previewInput, "sms"),
+      email: buildOutForDeliveryMessage(previewInput, "email"),
+    },
+    {
+      title: "Next drop tracking",
+      sms: buildNextDropTrackingMessage(previewInput, "sms"),
+      email: buildNextDropTrackingMessage(previewInput, "email"),
+    },
+    {
+      title: "Delay, 45 minutes",
+      sms: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "sms"),
+      email: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "email"),
+    },
+    {
+      title: "Delay, 90 minutes",
+      sms: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "sms"),
+      email: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "email"),
+    },
+    {
+      title: "Delivery complete",
+      sms: buildDeliveryCompleteMessage(previewInput, "sms"),
+      email: buildDeliveryCompleteMessage(previewInput, "email"),
+    },
+  ];
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -67,11 +69,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     twilioEnabled: isTwilioEnabled(),
     resendEnabled: isResendEnabled(),
+    previews: buildPreviews(),
   });
 };
 
 export default function Notifications() {
-  const { twilioEnabled, resendEnabled } = useLoaderData<typeof loader>();
+  const { twilioEnabled, resendEnabled, previews } = useLoaderData<typeof loader>();
 
   return (
     <Page title="Notifications">
