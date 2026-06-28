@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
 
+import { RouteMap } from "../components/RouteMap";
 import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { buildWazeUrl } from "../lib/waze";
 import {
@@ -185,8 +186,18 @@ export default function DriverRoutePage() {
   const firstEta = route.stops.find((stop) => stop.estimatedArrival)?.estimatedArrival || route.date;
   const routeStarted = route.status === "OUT_FOR_DELIVERY" || route.status === "COMPLETED";
   const plannedStartText = formatStart(firstEta);
-  const pins = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number");
   const nextStop = route.stops.find((stop) => stop.status === "PENDING");
+  const mapPoints = route.stops
+    .filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number")
+    .map((stop) => ({
+      id: stop.id,
+      label: String(stop.orderIndex),
+      title: `Drop ${stop.orderIndex} · ${stop.deliveryGroup?.postcode || "No postcode"}`,
+      latitude: stop.deliveryGroup?.latitude ?? null,
+      longitude: stop.deliveryGroup?.longitude ?? null,
+      selected: nextStop?.id === stop.id,
+      status: stop.status,
+    }));
 
   return (
     <main style={{ minHeight: "100vh", background: "#f4f7fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
@@ -200,20 +211,12 @@ export default function DriverRoutePage() {
         </header>
 
         <section style={{ background: "#ffffff", borderRadius: 18, padding: 14, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 14 }}>
-          <div style={{ minHeight: 320, borderRadius: 14, background: "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)", border: "1px solid #d0d5dd", position: "relative", overflow: "hidden" }}>
-            <span style={{ position: "absolute", top: 14, left: 14, background: "#ffffff", padding: "7px 10px", borderRadius: 999, fontWeight: 700, fontSize: 13 }}>Route map</span>
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} aria-hidden="true">
-              <path d="M12 72 C28 54 39 76 51 55 C64 34 72 44 88 23" fill="none" stroke="#509AE6" strokeWidth="1.2" strokeDasharray="3 2" />
-            </svg>
-            {pins.map((stop, index) => (
-              <div key={stop.id} style={{ position: "absolute", left: `${18 + ((index * 13) % 66)}%`, top: `${70 - ((index * 11) % 48)}%`, transform: "translate(-50%, -100%)" }}>
-                <div style={{ width: 34, height: 34, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: stop.status === "DELIVERED" ? "#16a34a" : "#509AE6", border: "3px solid white", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
-                  <span style={{ display: "grid", placeItems: "center", height: "100%", transform: "rotate(45deg)", color: "#ffffff", fontSize: 13, fontWeight: 700 }}>{stop.orderIndex}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p style={{ margin: "10px 0 0", color: "#667085", fontSize: 14 }}>Zoomable live map comes in the next map milestone. This view already shows the route order and pins.</p>
+          <RouteMap
+            title="Driver route map"
+            badge={`${mapPoints.length} pins`}
+            points={mapPoints}
+            height={340}
+          />
         </section>
 
         <section style={{ background: "#ffffff", borderRadius: 18, padding: 14, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 14 }}>

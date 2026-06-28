@@ -35,6 +35,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+import { RouteMap } from "../components/RouteMap";
 import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
@@ -50,13 +51,6 @@ interface Stop {
 
 type ManualPlanningOrder = ManualDeliveryOrderInput & {
   id: string;
-};
-
-const UK_BOUNDS = {
-  north: 58.8,
-  south: 49.8,
-  west: -8.7,
-  east: 1.9,
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -269,120 +263,33 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
-function getPinPosition(order: DeliveryOrder) {
-  if (!hasCoordinates(order)) {
-    return null;
-  }
-
-  const latitude = order.latitude as number;
-  const longitude = order.longitude as number;
-  const x = ((longitude - UK_BOUNDS.west) / (UK_BOUNDS.east - UK_BOUNDS.west)) * 100;
-  const y = ((UK_BOUNDS.north - latitude) / (UK_BOUNDS.north - UK_BOUNDS.south)) * 100;
-
-  return {
-    left: `${Math.max(2, Math.min(98, x))}%`,
-    top: `${Math.max(2, Math.min(98, y))}%`,
-  };
-}
-
-function MapPin({ order, selected, onClick }: { order: DeliveryOrder; selected: boolean; onClick: () => void }) {
-  const position = getPinPosition(order);
-
-  if (!position) {
-    return null;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`Select ${order.name}`}
-      title={`${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`}
-      style={{
-        position: "absolute",
-        left: position.left,
-        top: position.top,
-        transform: "translate(-50%, -100%)",
-        border: 0,
-        background: "transparent",
-        cursor: "pointer",
-        padding: 0,
-        zIndex: selected ? 3 : 2,
-      }}
-    >
-      <span
-        style={{
-          display: "grid",
-          placeItems: "center",
-          width: selected ? 34 : 28,
-          height: selected ? 34 : 28,
-          borderRadius: "50% 50% 50% 0",
-          transform: "rotate(-45deg)",
-          background: selected ? "#323841" : "#509AE6",
-          boxShadow: selected ? "0 0 0 4px rgba(80,154,230,0.22)" : "0 2px 8px rgba(0,0,0,0.25)",
-          border: "2px solid #ffffff",
-        }}
-      >
-        <span
-          style={{
-            transform: "rotate(45deg)",
-            color: "#ffffff",
-            fontSize: 11,
-            fontWeight: 700,
-            lineHeight: 1,
-          }}
-        >
-          {order.name.replace("#", "")}
-        </span>
-      </span>
-    </button>
-  );
-}
-
 function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryOrder[]; selectedIds: Set<string>; onToggleOrder: (order: DeliveryOrder) => void }) {
   const ordersWithCoordinates = orders.filter(hasCoordinates);
   const ordersWithoutCoordinates = orders.filter((order) => !hasCoordinates(order));
+  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  const mapPoints = ordersWithCoordinates.map((order) => ({
+    id: order.id,
+    label: order.name.replace("#", ""),
+    title: `${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
+    latitude: order.latitude,
+    longitude: order.longitude,
+    selected: selectedIds.has(order.id),
+  }));
 
   return (
     <BlockStack gap="300">
-      <div
-        style={{
-          position: "relative",
-          minHeight: 520,
-          overflow: "hidden",
-          borderRadius: 16,
-          border: "1px solid #d0d5dd",
-          background:
-            "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)",
+      <RouteMap
+        title="Delivery planning map"
+        badge={`${ordersWithCoordinates.length} pins`}
+        points={mapPoints}
+        showRouteLine={false}
+        onSelectPoint={(point) => {
+          const order = ordersById.get(point.id);
+          if (order) {
+            onToggleOrder(order);
+          }
         }}
-      >
-        <svg
-          viewBox="0 0 100 100"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-        >
-          <path d="M52 4 C42 10 39 22 41 32 C31 36 30 50 37 59 C29 65 31 79 41 84 C52 90 66 84 68 72 C78 66 78 51 69 44 C72 31 66 15 52 4 Z" fill="#eef7ef" stroke="#b7d7c2" strokeWidth="1" />
-          <path d="M46 54 C38 59 38 72 47 76 C56 80 65 74 64 64 C63 55 54 50 46 54 Z" fill="#e5f4e9" stroke="#b7d7c2" strokeWidth="0.8" />
-          <path d="M43 78 C36 81 33 90 40 94 C48 98 57 93 55 85 C54 79 49 76 43 78 Z" fill="#e5f4e9" stroke="#b7d7c2" strokeWidth="0.8" />
-        </svg>
-
-        <div style={{ position: "absolute", inset: 16 }}>
-          <InlineStack align="space-between">
-            <Badge tone="info">UK map view</Badge>
-            <Badge tone="success">{ordersWithCoordinates.length} pins</Badge>
-          </InlineStack>
-        </div>
-
-        {ordersWithCoordinates.map((order) => (
-          <MapPin
-            key={order.id}
-            order={order}
-            selected={selectedIds.has(order.id)}
-            onClick={() => onToggleOrder(order)}
-          />
-        ))}
-      </div>
+      />
 
       {ordersWithoutCoordinates.length ? (
         <LegacyCard sectioned>
