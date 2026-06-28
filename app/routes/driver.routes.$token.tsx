@@ -13,6 +13,7 @@ import {
 } from "../lib/driverRouteAccess.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { uploadProofPhoto } from "../lib/proofPhotoStorage.server";
+import { completeReturnTicketFromDriverToken } from "../lib/returns.server";
 
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const token = params.token;
@@ -48,6 +49,33 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (intent === "startRoute") {
       await startDriverRouteFromToken(token);
       return redirect(`/driver/routes/${token}`);
+    }
+
+    if (intent === "collectReturnTicket") {
+      const ticketId = String(formData.get("ticketId") || "").trim();
+      const quantities: Record<string, number> = {};
+      let collectionPhotoUrl: string | null = null;
+      const collectionPhotoFile = formData.get("collectionPhotoFile");
+
+      for (const [key, value] of formData.entries()) {
+        if (key.startsWith("quantityCollected_")) {
+          quantities[key.replace("quantityCollected_", "")] = Number(value || 0);
+        }
+      }
+
+      if (collectionPhotoFile instanceof File && collectionPhotoFile.size > 0) {
+        collectionPhotoUrl = await uploadProofPhoto(collectionPhotoFile, `return-${ticketId}`);
+      }
+
+      await completeReturnTicketFromDriverToken(token, {
+        ticketId,
+        quantities,
+        collectionPhotoUrl,
+        customerSignature: String(formData.get("customerSignature") || "").trim(),
+        driverNote: String(formData.get("driverNote") || "").trim(),
+      });
+
+      return redirect(`/driver/routes/${token}#next-stop`);
     }
 
     const stopId = String(formData.get("stopId") || "").trim();
@@ -111,6 +139,19 @@ function formatStart(value: string | Date) {
     weekday: "long",
     day: "2-digit",
     month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatCollectedAt(value: string | Date | null) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
@@ -211,6 +252,7 @@ export default function DriverRoutePage() {
             const isFailed = stop.status === "FAILED";
             const isNextStop = nextStop?.id === stop.id;
             const actionDisabled = !routeStarted || isDelivered || isFailed;
+            const returnTickets = stop.returnTickets || [];
 
             return (
               <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: isDelivered ? "#ecfdf3" : isFailed ? "#fef3f2" : "#ffffff", border: isDelivered ? "1px solid #86efac" : isFailed ? "1px solid #fecdca" : isNextStop ? "2px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 18, padding: 16, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
@@ -241,6 +283,53 @@ export default function DriverRoutePage() {
                     )}
                   </div>
                 </div>
+
+                {returnTickets.length ? (
+                  <section style={{ marginTop: 14, display: "grid", gap: 12 }}>
+                    <h3 style={{ margin: 0, fontSize: 18 }}>Returns to collect</h3>
+                    {returnTickets.map((ticket) => {
+                      const collected = ticket.status === "COLLECTED";
+
+                      return (
+                        <div key={ticket.id} style={{ border: collected ? "1px solid #86efac" : "1px solid #fedf89", background: collected ? "#ecfdf3" : "#fffaeb", borderRadius: 14, padding: 12 }}>
+                          <p style={{ margin: 0, fontWeight: 700 }}>{ticket.reference} · {ticket.status.toLowerCase()}</p>
+                          <p style={{ margin: "6px 0 0", color: "#667085" }}>{ticket.notes || "No return notes"}</p>
+                          {collected ? (
+                            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                              <p style={{ margin: 0 }}>Collected at {formatCollectedAt(ticket.collectedAt)}</p>
+                              {ticket.customerSignature ? <p style={{ margin: 0 }}><strong>Signed/marked by:</strong> {ticket.customerSignature}</p> : null}
+                              {ticket.collectionPhotoUrl ? <a href={ticket.collectionPhotoUrl} target="_blank" rel="noreferrer" style={{ color: "#509AE6", fontWeight: 700 }}>Open collection photo</a> : null}
+                            </div>
+                          ) : (
+                            <Form method="post" encType="multipart/form-data" style={{ marginTop: 10, display: "grid", gap: 10 }}>
+                              <input type="hidden" name="intent" value="collectReturnTicket" />
+                              <input type="hidden" name="ticketId" value={ticket.id} />
+                              {ticket.lines.map((line) => (
+                                <label key={line.id} style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                                  {line.itemName} · expected {line.quantityExpected}
+                                  <input name={`quantityCollected_${line.id}`} type="number" min="0" max={line.quantityExpected} defaultValue={line.quantityExpected} disabled={!routeStarted} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                                </label>
+                              ))}
+                              <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                                Collection photo
+                                <input type="file" name="collectionPhotoFile" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={!routeStarted} />
+                              </label>
+                              <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                                Customer signature or mark
+                                <input name="customerSignature" disabled={!routeStarted} placeholder="Customer name, signature mark, or not present" style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                              </label>
+                              <label style={{ display: "grid", gap: 6, fontWeight: 700 }}>
+                                Driver return note
+                                <textarea name="driverNote" rows={2} disabled={!routeStarted} style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 10 }} />
+                              </label>
+                              <button type="submit" disabled={!routeStarted} style={{ border: 0, borderRadius: 12, padding: "12px 10px", background: routeStarted ? "#509AE6" : "#d0d5dd", color: "#ffffff", fontWeight: 700 }}>Confirm return collected</button>
+                            </Form>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </section>
+                ) : null}
 
                 {stop.deliveryGroup?.proofPhotos?.length ? (
                   <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
