@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map as TomTomMap, Marker as TomTomMarker, Popup as TomTomPopup } from "@tomtom-international/web-sdk-maps";
+import "@tomtom-international/web-sdk-maps/dist/maps.css";
 
 type RouteMapPoint = {
   id: string;
@@ -22,6 +22,9 @@ type RouteMapProps = {
   onSelectPoint?: (point: RouteMapPoint) => void;
   apiKey?: string | null;
 };
+
+type TomTomMapRef = any;
+type TomTomPopupRef = any;
 
 const DEFAULT_CENTER: [number, number] = [-3.6119, 50.5293];
 
@@ -86,8 +89,7 @@ function styles() {
   return `
     .bpd-tomtom-map .mapboxgl-map { font-family: inherit; }
     .bpd-tomtom-map .mapboxgl-ctrl-group button { width: 36px; height: 36px; }
-    .bpd-tomtom-pin { display: grid; place-items: center; color: #fff; width: 46px; height: 46px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.24); font-size: 11px; font-weight: 800; line-height: 1; cursor: pointer; }
-    .bpd-tomtom-pin span { transform: rotate(45deg); max-width: 34px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bpd-tomtom-map .mapboxgl-canvas { outline: none; }
     .bpd-tomtom-popup .mapboxgl-popup-content { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
     .bpd-tomtom-popup .mapboxgl-popup-tip { display: none; }
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
@@ -95,14 +97,31 @@ function styles() {
   `;
 }
 
-function makeMarkerElement(point: RouteMapPoint, label: string) {
-  const element = document.createElement("button");
-  element.type = "button";
-  element.className = "bpd-tomtom-pin";
-  element.style.background = markerColour(point);
-  element.innerHTML = `<span>${escapeHtml(label)}</span>`;
+function emptyFeatureCollection() {
+  return {
+    type: "FeatureCollection" as const,
+    features: [],
+  };
+}
 
-  return element;
+function buildFeatureCollection(points: Array<RouteMapPoint & { latitude: number; longitude: number }>) {
+  return {
+    type: "FeatureCollection" as const,
+    features: points.map((point, index) => ({
+      type: "Feature" as const,
+      id: point.id,
+      properties: {
+        id: point.id,
+        label: cleanPinLabel(point, index + 1),
+        colour: markerColour(point),
+        tooltip: tooltipHtml(point),
+      },
+      geometry: {
+        type: "Point" as const,
+        coordinates: [point.longitude, point.latitude],
+      },
+    })),
+  };
 }
 
 export function RouteMap({
@@ -115,12 +134,17 @@ export function RouteMap({
   apiKey,
 }: RouteMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<TomTomMap | null>(null);
-  const markersRef = useRef<TomTomMarker[]>([]);
-  const popupsRef = useRef<TomTomPopup[]>([]);
+  const mapRef = useRef<TomTomMapRef | null>(null);
+  const popupRef = useRef<TomTomPopupRef | null>(null);
+  const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
+  const clustersLayerIdRef = useRef(`clusters-${Math.random().toString(36).slice(2)}`);
+  const clusterCountLayerIdRef = useRef(`cluster-count-${Math.random().toString(36).slice(2)}`);
+  const pinsLayerIdRef = useRef(`pins-${Math.random().toString(36).slice(2)}`);
+  const pinLabelLayerIdRef = useRef(`pin-labels-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
+  const [mapReady, setMapReady] = useState(false);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
   const activeApiKey = apiKey || loadedApiKey;
 
@@ -179,6 +203,11 @@ export function RouteMap({
       });
 
       map.addControl(new tt.NavigationControl(), "bottom-right");
+      map.once("load", () => {
+        if (!cancelled) {
+          setMapReady(true);
+        }
+      });
       mapRef.current = map;
     }
 
@@ -190,106 +219,215 @@ export function RouteMap({
   }, [activeApiKey]);
 
   useEffect(() => {
-    let cancelled = false;
+    const map = mapRef.current;
 
-    async function renderPoints() {
-      const map = mapRef.current;
+    if (!map || !mapReady) {
+      return;
+    }
 
-      if (!map || !activeApiKey) {
+    const sourceId = sourceIdRef.current;
+    const routeSourceId = routeSourceIdRef.current;
+    const clustersLayerId = clustersLayerIdRef.current;
+    const clusterCountLayerId = clusterCountLayerIdRef.current;
+    const pinsLayerId = pinsLayerIdRef.current;
+    const pinLabelLayerId = pinLabelLayerIdRef.current;
+    const routeLayerId = routeLayerIdRef.current;
+    const featureCollection = buildFeatureCollection(mappablePoints);
+    const routeCoordinates = mappablePoints.map((point) => [point.longitude, point.latitude]);
+
+    const removeLayer = (layerId: string) => {
+      if (map.getLayer(layerId)) {
+        map.removeLayer(layerId);
+      }
+    };
+
+    const removeSource = (id: string) => {
+      if (map.getSource(id)) {
+        map.removeSource(id);
+      }
+    };
+
+    removeLayer(clusterCountLayerId);
+    removeLayer(clustersLayerId);
+    removeLayer(pinLabelLayerId);
+    removeLayer(pinsLayerId);
+    removeLayer(routeLayerId);
+    removeSource(sourceId);
+    removeSource(routeSourceId);
+
+    map.addSource(sourceId, {
+      type: "geojson",
+      data: featureCollection,
+      cluster: true,
+      clusterMaxZoom: 14,
+      clusterRadius: 50,
+    });
+
+    if (showRouteLine && routeCoordinates.length > 1) {
+      map.addSource(routeSourceId, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: routeCoordinates,
+          },
+        },
+      });
+
+      map.addLayer({
+        id: routeLayerId,
+        type: "line",
+        source: routeSourceId,
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#509AE6",
+          "line-width": 4,
+          "line-opacity": 0.85,
+        },
+      });
+    }
+
+    map.addLayer({
+      id: clustersLayerId,
+      type: "circle",
+      source: sourceId,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": ["step", ["get", "point_count"], "#509AE6", 5, "#f97316", 13, "#b42318"],
+        "circle-radius": ["step", ["get", "point_count"], 22, 5, 27, 13, 32],
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3,
+        "circle-opacity": 0.95,
+      },
+    });
+
+    map.addLayer({
+      id: clusterCountLayerId,
+      type: "symbol",
+      source: sourceId,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-size": 14,
+        "text-font": ["Noto-Bold"],
+      },
+      paint: {
+        "text-color": "#ffffff",
+      },
+    });
+
+    map.addLayer({
+      id: pinsLayerId,
+      type: "circle",
+      source: sourceId,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-color": ["get", "colour"],
+        "circle-radius": 18,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3,
+        "circle-opacity": 0.98,
+      },
+    });
+
+    map.addLayer({
+      id: pinLabelLayerId,
+      type: "symbol",
+      source: sourceId,
+      filter: ["!", ["has", "point_count"]],
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 11,
+        "text-font": ["Noto-Bold"],
+        "text-allow-overlap": true,
+      },
+      paint: {
+        "text-color": "#ffffff",
+      },
+    });
+
+    const handleClusterClick = (event: any) => {
+      const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
+      const clusterId = features[0]?.properties?.cluster_id;
+      const source = map.getSource(sourceId);
+
+      if (!source || typeof clusterId === "undefined") {
+        return;
+      }
+
+      source.getClusterExpansionZoom(clusterId, (error: Error | null, zoom: number) => {
+        if (error) {
+          return;
+        }
+
+        map.easeTo({ center: features[0].geometry.coordinates, zoom });
+      });
+    };
+
+    const handlePinClick = (event: any) => {
+      const feature = event.features?.[0];
+      const id = feature?.properties?.id;
+      const point = mappablePoints.find((mapPoint) => mapPoint.id === id);
+
+      if (point) {
+        onSelectPoint?.(point);
+      }
+    };
+
+    const handlePinEnter = async (event: any) => {
+      map.getCanvas().style.cursor = "pointer";
+      const feature = event.features?.[0];
+
+      if (!feature) {
         return;
       }
 
       const tt = await import("@tomtom-international/web-sdk-maps");
+      popupRef.current?.remove();
+      popupRef.current = new tt.Popup({ closeButton: false, closeOnClick: false, className: "bpd-tomtom-popup", offset: 18 })
+        .setLngLat(feature.geometry.coordinates)
+        .setHTML(feature.properties.tooltip || "")
+        .addTo(map);
+    };
 
-      if (cancelled) {
-        return;
-      }
+    const handlePinLeave = () => {
+      map.getCanvas().style.cursor = "";
+      popupRef.current?.remove();
+    };
 
-      markersRef.current.forEach((marker) => marker.remove());
-      popupsRef.current.forEach((popup) => popup.remove());
-      markersRef.current = [];
-      popupsRef.current = [];
+    map.on("click", clustersLayerId, handleClusterClick);
+    map.on("click", pinsLayerId, handlePinClick);
+    map.on("mouseenter", clustersLayerId, () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", clustersLayerId, () => { map.getCanvas().style.cursor = ""; });
+    map.on("mouseenter", pinsLayerId, handlePinEnter);
+    map.on("mouseleave", pinsLayerId, handlePinLeave);
 
-      const sourceId = routeSourceIdRef.current;
-      const layerId = routeLayerIdRef.current;
-      if (map.getLayer(layerId)) {
-        map.removeLayer(layerId);
-      }
-      if (map.getSource(sourceId)) {
-        map.removeSource(sourceId);
-      }
-
-      const coordinates = mappablePoints.map((point) => [point.longitude, point.latitude] as [number, number]);
-
-      mappablePoints.forEach((point, index) => {
-        const label = cleanPinLabel(point, index + 1);
-        const element = makeMarkerElement(point, label);
-        const popup = new tt.Popup({ closeButton: false, closeOnClick: false, className: "bpd-tomtom-popup", offset: 38 }).setHTML(tooltipHtml(point));
-        const marker = new tt.Marker({ element, anchor: "bottom" })
-          .setLngLat([point.longitude, point.latitude])
-          .addTo(map);
-
-        element.addEventListener("mouseenter", () => popup.setLngLat([point.longitude, point.latitude]).addTo(map));
-        element.addEventListener("mouseleave", () => popup.remove());
-        element.addEventListener("focus", () => popup.setLngLat([point.longitude, point.latitude]).addTo(map));
-        element.addEventListener("blur", () => popup.remove());
-        element.addEventListener("click", () => onSelectPoint?.(point));
-
-        markersRef.current.push(marker);
-        popupsRef.current.push(popup);
-      });
-
-      if (showRouteLine && coordinates.length > 1) {
-        map.addSource(sourceId, {
-          type: "geojson",
-          data: {
-            type: "Feature",
-            properties: {},
-            geometry: {
-              type: "LineString",
-              coordinates,
-            },
-          },
-        });
-        map.addLayer({
-          id: layerId,
-          type: "line",
-          source: sourceId,
-          layout: {
-            "line-join": "round",
-            "line-cap": "round",
-          },
-          paint: {
-            "line-color": "#509AE6",
-            "line-width": 4,
-            "line-opacity": 0.9,
-          },
-        });
-      }
-
-      if (coordinates.length === 1) {
-        map.flyTo({ center: coordinates[0], zoom: Math.max(map.getZoom(), 14) });
-      } else if (coordinates.length > 1) {
-        const bounds = coordinates.reduce((lngLatBounds, coordinate) => lngLatBounds.extend(coordinate), new tt.LngLatBounds(coordinates[0], coordinates[0]));
+    if (routeCoordinates.length === 1) {
+      map.flyTo({ center: routeCoordinates[0], zoom: Math.max(map.getZoom(), 14) });
+    } else if (routeCoordinates.length > 1) {
+      const bounds = routeCoordinates.reduce((lngLatBounds: any, coordinate) => lngLatBounds.extend(coordinate), new (map as any).LngLatBounds?.(routeCoordinates[0], routeCoordinates[0]));
+      if (bounds) {
         map.fitBounds(bounds, { padding: 52, maxZoom: 14 });
       }
     }
 
-    if (mapRef.current?.loaded()) {
-      renderPoints();
-    } else {
-      mapRef.current?.once("load", renderPoints);
-    }
-
     return () => {
-      cancelled = true;
+      map.off("click", clustersLayerId, handleClusterClick);
+      map.off("click", pinsLayerId, handlePinClick);
+      map.off("mouseenter", pinsLayerId, handlePinEnter);
+      map.off("mouseleave", pinsLayerId, handlePinLeave);
+      popupRef.current?.remove();
     };
-  }, [activeApiKey, mappablePoints, onSelectPoint, showRouteLine]);
+  }, [mapReady, mappablePoints, onSelectPoint, showRouteLine]);
 
   useEffect(() => {
     return () => {
-      markersRef.current.forEach((marker) => marker.remove());
-      popupsRef.current.forEach((popup) => popup.remove());
+      popupRef.current?.remove();
       mapRef.current?.remove();
     };
   }, []);
