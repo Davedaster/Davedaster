@@ -397,7 +397,23 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
-function DeliveryMap({ orders, selectedIds, routeStopIds, onToggleOrder }: { orders: DeliveryOrder[]; selectedIds: Set<string>; routeStopIds: string[]; onToggleOrder: (order: DeliveryOrder) => void }) {
+function DeliveryMap({
+  orders,
+  selectedIds,
+  routeStopIds,
+  startAddress,
+  finishAddress,
+  returnToBase,
+  onToggleOrder,
+}: {
+  orders: DeliveryOrder[];
+  selectedIds: Set<string>;
+  routeStopIds: string[];
+  startAddress: string;
+  finishAddress: string;
+  returnToBase: boolean;
+  onToggleOrder: (order: DeliveryOrder) => void;
+}) {
   const ordersWithCoordinates = orders.filter(hasCoordinates);
   const ordersWithoutCoordinates = orders.filter((order) => !hasCoordinates(order));
   const ordersById = new Map(orders.map((order) => [order.id, order]));
@@ -430,7 +446,17 @@ function DeliveryMap({ orders, selectedIds, routeStopIds, onToggleOrder }: { ord
         title="Live planning map"
         badge={`${routeStopIds.length} selected`}
         points={[...routePoints, ...unselectedPoints]}
-        showRouteLine={routePoints.length > 1}
+        showRouteLine={routePoints.length > 0}
+        routeStart={{
+          address: startAddress,
+          label: "START",
+          status: "START",
+        }}
+        routeFinish={returnToBase ? {
+          address: finishAddress || startAddress,
+          label: "FINISH",
+          status: "FINISH",
+        } : null}
         onSelectPoint={(point) => {
           const order = ordersById.get(point.id);
           if (order) {
@@ -498,7 +524,6 @@ export default function OrdersMap() {
 
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
   const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
-  const ordersById = useMemo(() => new Map(allOrders.map((order) => [order.id, order])), [allOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
   const manualOrdersJson = JSON.stringify(manualOrders);
@@ -665,7 +690,15 @@ export default function OrdersMap() {
                   <p>No orders matched the current delivery filters.</p>
                 </EmptyState>
               ) : (
-                <DeliveryMap orders={allOrders} selectedIds={selectedIds} routeStopIds={stops.map((stop) => stop.id)} onToggleOrder={toggleOrder} />
+                <DeliveryMap
+                  orders={allOrders}
+                  selectedIds={selectedIds}
+                  routeStopIds={stops.map((stop) => stop.id)}
+                  startAddress={startAddress}
+                  finishAddress={finishAddress}
+                  returnToBase={returnToBase}
+                  onToggleOrder={toggleOrder}
+                />
               )}
             </Box>
           </LegacyCard>
