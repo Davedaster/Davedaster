@@ -21,6 +21,7 @@ import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
+import { moveDraftRouteStop } from "../lib/routeStopOrder.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
@@ -116,6 +117,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/routes/${routeId}`);
   }
 
+  if (intent === "moveStop") {
+    try {
+      const stopId = String(formData.get("stopId") || "").trim();
+      const direction = String(formData.get("direction") || "") === "up" ? "up" : "down";
+      await moveDraftRouteStop(routeId, stopId, direction);
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Stop order update failed." }, { status: 400 });
+    }
+  }
+
   if (intent === "optimise") {
     try {
       await optimiseRoute(routeId);
@@ -188,6 +200,7 @@ export default function RouteDetails() {
   const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
   const canSendDriverRouteLink = route.status !== "DRAFT" && Boolean(route.driverId);
+  const canRearrangeDraft = route.status === "DRAFT";
 
   const driverOptions = [
     { label: "No driver assigned", value: "" },
@@ -199,7 +212,7 @@ export default function RouteDetails() {
 
   const slotMinutesNumber = Number(slotMinutes || route.customerSlotMinutes || 60);
 
-  const stopRows = route.stops.map((stop) => {
+  const stopRows = route.stops.map((stop, index) => {
     const deliveryGroup = stop.deliveryGroup;
     const orders = deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
     const estimatedArrival = stop.estimatedArrival ? new Date(stop.estimatedArrival) : null;
@@ -212,6 +225,22 @@ export default function RouteDetails() {
       deliveryGroup?.address || "No address",
       estimatedArrival && slotEnd ? formatEtaSlot(estimatedArrival, slotEnd) : "Pending",
       stop.isLocked ? "Locked" : "Open",
+      canRearrangeDraft ? (
+        <InlineStack gap="100">
+          <Form method="post">
+            <input type="hidden" name="intent" value="moveStop" />
+            <input type="hidden" name="stopId" value={stop.id} />
+            <input type="hidden" name="direction" value="up" />
+            <Button submit size="micro" disabled={index === 0}>Up</Button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="intent" value="moveStop" />
+            <input type="hidden" name="stopId" value={stop.id} />
+            <input type="hidden" name="direction" value="down" />
+            <Button submit size="micro" disabled={index === route.stops.length - 1}>Down</Button>
+          </Form>
+        </InlineStack>
+      ) : "Published",
     ];
   });
 
@@ -258,6 +287,11 @@ export default function RouteDetails() {
                   <Text as="p" variant="bodySm" tone="subdued">
                     Distance: {route.totalMileage ? `${route.totalMileage.toFixed(1)} km` : "Pending"} · Time: {route.totalDuration ? `${route.totalDuration} minutes` : "Pending"}
                   </Text>
+                  {route.status === "DRAFT" ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Draft only. You can rearrange drops and customers will not receive tracking links or delivery notifications until this route is published.
+                    </Text>
+                  ) : null}
                 </BlockStack>
                 <Badge tone={statusTone(route.status)}>{route.status}</Badge>
               </InlineStack>
@@ -372,8 +406,8 @@ export default function RouteDetails() {
 
           <LegacyCard title="Stops">
             <DataTable
-              columnContentTypes={["numeric", "text", "text", "text", "text", "text"]}
-              headings={["Stop", "Orders", "Postcode", "Address", "ETA slot", "Lock"]}
+              columnContentTypes={["numeric", "text", "text", "text", "text", "text", "text"]}
+              headings={["Stop", "Orders", "Postcode", "Address", "ETA slot", "Lock", "Move"]}
               rows={stopRows}
             />
           </LegacyCard>
