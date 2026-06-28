@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Map as TomTomMap, Marker as TomTomMarker, Popup as TomTomPopup } from "@tomtom-international/web-sdk-maps";
 
 type RouteMapPoint = {
@@ -120,13 +120,45 @@ export function RouteMap({
   const popupsRef = useRef<TomTomPopup[]>([]);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
+  const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
+  const activeApiKey = apiKey || loadedApiKey;
+
+  useEffect(() => {
+    if (apiKey) {
+      setLoadedApiKey(apiKey);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadKey() {
+      try {
+        const response = await fetch("/api/tomtom-key");
+        const data = await response.json() as { apiKey?: string };
+
+        if (!cancelled) {
+          setLoadedApiKey(data.apiKey || "");
+        }
+      } catch {
+        if (!cancelled) {
+          setLoadedApiKey("");
+        }
+      }
+    }
+
+    loadKey();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function setupMap() {
-      if (!mapElementRef.current || mapRef.current || !apiKey) {
+      if (!mapElementRef.current || mapRef.current || !activeApiKey) {
         return;
       }
 
@@ -137,7 +169,7 @@ export function RouteMap({
       }
 
       const map = tt.map({
-        key: apiKey,
+        key: activeApiKey,
         container: mapElementRef.current,
         center: DEFAULT_CENTER,
         zoom: 10,
@@ -155,7 +187,7 @@ export function RouteMap({
     return () => {
       cancelled = true;
     };
-  }, [apiKey]);
+  }, [activeApiKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,7 +195,7 @@ export function RouteMap({
     async function renderPoints() {
       const map = mapRef.current;
 
-      if (!map || !apiKey) {
+      if (!map || !activeApiKey) {
         return;
       }
 
@@ -252,7 +284,7 @@ export function RouteMap({
     return () => {
       cancelled = true;
     };
-  }, [apiKey, mappablePoints, onSelectPoint, showRouteLine]);
+  }, [activeApiKey, mappablePoints, onSelectPoint, showRouteLine]);
 
   useEffect(() => {
     return () => {
@@ -276,7 +308,7 @@ export function RouteMap({
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
         }}
       >
-        {apiKey ? <div ref={mapElementRef} style={{ height: "100%", width: "100%" }} /> : null}
+        {activeApiKey ? <div ref={mapElementRef} style={{ height: "100%", width: "100%" }} /> : null}
 
         <div style={{ position: "absolute", inset: 14, pointerEvents: "none", zIndex: 5 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
@@ -285,7 +317,7 @@ export function RouteMap({
           </div>
         </div>
 
-        {!apiKey ? (
+        {!activeApiKey ? (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 24, textAlign: "center", color: "#323841" }}>
             <div style={{ background: "rgba(255,255,255,0.95)", borderRadius: 14, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
               <strong>TomTom map key needed</strong>
