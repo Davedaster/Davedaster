@@ -95,7 +95,10 @@ function pickBestAddress(addresses: Array<string | ExpandedAddress>, searchText:
 export async function lookupAddress(postcode: string | null, searchText: string): Promise<AddressLookupResult> {
   const apiKey = process.env.GETADDRESS_API_KEY;
   const cleanPostcode = normalisePostcode(postcode);
-
+console.warn("POSTCODE DEBUG", {
+  original: postcode,
+  clean: cleanPostcode,
+});
   if (!apiKey || !cleanPostcode) {
     console.warn("getAddress lookup skipped", {
       hasApiKey: Boolean(apiKey),
