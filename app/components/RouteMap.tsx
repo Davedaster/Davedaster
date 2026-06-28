@@ -8,6 +8,8 @@ type RouteMapPoint = {
   longitude: number | null;
   selected?: boolean;
   status?: string;
+  tooltipTitle?: string;
+  tooltipLines?: string[];
 };
 
 type RouteMapProps = {
@@ -29,6 +31,8 @@ type DragState = {
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 1024;
+const MIN_ZOOM = 5;
+const MAX_ZOOM = 18;
 const DEFAULT_CENTER = {
   latitude: 50.5293,
   longitude: -3.6119,
@@ -55,7 +59,7 @@ function project(latitude: number, longitude: number, zoom: number) {
 
 function chooseZoom(points: Array<{ latitude: number; longitude: number }>) {
   if (points.length <= 1) {
-    return 11;
+    return 15;
   }
 
   const latitudes = points.map((point) => point.latitude);
@@ -64,12 +68,14 @@ function chooseZoom(points: Array<{ latitude: number; longitude: number }>) {
   const lngSpan = Math.max(...longitudes) - Math.min(...longitudes);
   const span = Math.max(latSpan, lngSpan);
 
-  if (span < 0.15) return 12;
-  if (span < 0.35) return 11;
-  if (span < 0.8) return 10;
-  if (span < 1.6) return 9;
-  if (span < 3.2) return 8;
-  return 7;
+  if (span < 0.04) return 15;
+  if (span < 0.08) return 14;
+  if (span < 0.15) return 13;
+  if (span < 0.35) return 12;
+  if (span < 0.8) return 11;
+  if (span < 1.6) return 10;
+  if (span < 3.2) return 9;
+  return 8;
 }
 
 function normalisedPoints(points: RouteMapPoint[]) {
@@ -87,6 +93,21 @@ function cleanPinLabel(label: string, fallback: number) {
   return cleaned || String(fallback);
 }
 
+function tooltipLinesForPoint(point: RouteMapPoint) {
+  if (point.tooltipLines?.length) {
+    return point.tooltipLines.filter(Boolean);
+  }
+
+  if (!point.title) {
+    return [];
+  }
+
+  return point.title
+    .split("·")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 export function RouteMap({
   points,
   height = 520,
@@ -96,9 +117,14 @@ export function RouteMap({
   onSelectPoint,
 }: RouteMapProps) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoomOffset, setZoomOffset] = useState(0);
   const [dragState, setDragState] = useState<DragState>(null);
+  const [hoveredPointId, setHoveredPointId] = useState<string | null>(null);
   const mappablePoints = normalisedPoints(points);
-  const zoom = chooseZoom(mappablePoints);
+  const baseZoom = chooseZoom(mappablePoints);
+  const zoom = clamp(baseZoom + zoomOffset, MIN_ZOOM, MAX_ZOOM);
+  const canZoomIn = zoom < MAX_ZOOM;
+  const canZoomOut = zoom > MIN_ZOOM;
   const centerLatitude = mappablePoints.length
     ? mappablePoints.reduce((total, point) => total + point.latitude, 0) / mappablePoints.length
     : DEFAULT_CENTER.latitude;
@@ -143,9 +169,17 @@ export function RouteMap({
     .map((point, index) => `${index === 0 ? "M" : "L"} ${point.left.toFixed(1)} ${point.top.toFixed(1)}`)
     .join(" ");
 
+  const changeZoom = (amount: number) => {
+    setZoomOffset((currentOffset) => clamp(baseZoom + currentOffset + amount, MIN_ZOOM, MAX_ZOOM) - baseZoom);
+  };
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div
+        onWheel={(event) => {
+          event.preventDefault();
+          changeZoom(event.deltaY < 0 ? 1 : -1);
+        }}
         onPointerDown={(event) => {
           if (event.button !== 0) {
             return;
@@ -228,12 +262,19 @@ export function RouteMap({
             const background = delivered ? "#16a34a" : failed ? "#b42318" : point.selected ? "#323841" : "#509AE6";
             const pinLabel = cleanPinLabel(point.label, index + 1);
             const pinSize = point.selected ? 50 : 46;
+            const tooltipLines = tooltipLinesForPoint(point);
+            const tooltipHeading = point.tooltipTitle || tooltipLines[0] || point.title || pinLabel;
+            const tooltipBody = point.tooltipTitle ? tooltipLines : tooltipLines.slice(1);
+            const showTooltip = hoveredPointId === point.id;
 
             return (
               <button
                 key={point.id}
                 type="button"
-                disabled={!onSelectPoint}
+                onMouseEnter={() => setHoveredPointId(point.id)}
+                onMouseLeave={() => setHoveredPointId((currentId) => currentId === point.id ? null : currentId)}
+                onFocus={() => setHoveredPointId(point.id)}
+                onBlur={() => setHoveredPointId((currentId) => currentId === point.id ? null : currentId)}
                 onClick={() => {
                   if (dragState?.hasMoved) {
                     return;
@@ -252,7 +293,7 @@ export function RouteMap({
                   background: "transparent",
                   cursor: onSelectPoint ? "pointer" : "grab",
                   padding: 0,
-                  zIndex: point.selected ? 5 : 4,
+                  zIndex: showTooltip ? 20 : point.selected ? 5 : 4,
                   touchAction: "none",
                 }}
               >
@@ -285,6 +326,32 @@ export function RouteMap({
                     {pinLabel}
                   </span>
                 </span>
+
+                {showTooltip ? (
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      bottom: pinSize + 10,
+                      transform: "translateX(-50%)",
+                      minWidth: 210,
+                      maxWidth: 270,
+                      background: "rgba(255,255,255,0.98)",
+                      border: "1px solid #d0d5dd",
+                      borderRadius: 14,
+                      boxShadow: "0 12px 30px rgba(50,56,65,0.22)",
+                      padding: "10px 12px",
+                      color: "#323841",
+                      textAlign: "left",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <span style={{ display: "block", fontSize: 13, fontWeight: 800, marginBottom: tooltipBody.length ? 6 : 0 }}>{tooltipHeading}</span>
+                    {tooltipBody.map((line, lineIndex) => (
+                      <span key={`${point.id}-tooltip-${lineIndex}`} style={{ display: "block", fontSize: 12, lineHeight: 1.35, color: "#475467", marginTop: lineIndex === 0 ? 0 : 3 }}>{line}</span>
+                    ))}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -295,6 +362,31 @@ export function RouteMap({
             <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#323841", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{title}</span>
             {badge ? <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#509AE6", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{badge}</span> : null}
           </div>
+        </div>
+
+        <div
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+          style={{ position: "absolute", right: 12, top: 58, display: "grid", gap: 8, zIndex: 30 }}
+        >
+          <button
+            type="button"
+            disabled={!canZoomIn}
+            onClick={() => changeZoom(1)}
+            aria-label="Zoom in"
+            style={{ width: 38, height: 38, border: "1px solid #d0d5dd", borderRadius: 12, background: "rgba(255,255,255,0.96)", color: "#323841", fontSize: 22, fontWeight: 800, boxShadow: "0 4px 12px rgba(0,0,0,0.14)", cursor: canZoomIn ? "pointer" : "not-allowed" }}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            disabled={!canZoomOut}
+            onClick={() => changeZoom(-1)}
+            aria-label="Zoom out"
+            style={{ width: 38, height: 38, border: "1px solid #d0d5dd", borderRadius: 12, background: "rgba(255,255,255,0.96)", color: "#323841", fontSize: 24, fontWeight: 800, lineHeight: 1, boxShadow: "0 4px 12px rgba(0,0,0,0.14)", cursor: canZoomOut ? "pointer" : "not-allowed" }}
+          >
+            −
+          </button>
         </div>
 
         <a
