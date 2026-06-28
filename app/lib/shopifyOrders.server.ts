@@ -141,20 +141,23 @@ function isFullyRefunded(order: ShopifyOrderNode) {
   return normalise(order.displayFinancialStatus) === "refunded";
 }
 
-function isPanelLineItem(item: ShopifyLineItem) {
-  return normalise(item.product?.productType) === "pvc panel";
-}
-
 function isSampleLineItem(item: ShopifyLineItem) {
+  const title = normalise(item.title);
   const sku = normalise(item.sku);
   const productType = normalise(item.product?.productType);
   const tags = item.product?.tags.map(normalise) || [];
 
   return (
     productType === "pvc panel sample" ||
+    productType.includes("sample") ||
+    title.includes("sample") ||
     sku.includes("samp") ||
     tags.includes("sample")
   );
+}
+
+function isPanelLineItem(item: ShopifyLineItem) {
+  return normalise(item.product?.productType) === "pvc panel" && !isSampleLineItem(item);
 }
 
 function lineItems(order: ShopifyOrderNode) {
