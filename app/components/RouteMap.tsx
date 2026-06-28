@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Map as LeafletMap, Marker as LeafletMarker, Polyline as LeafletPolyline } from "leaflet";
 
 type RouteMapPoint = {
@@ -106,6 +106,7 @@ export function RouteMap({
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<LeafletMarker[]>([]);
   const lineRef = useRef<LeafletPolyline | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
 
   useEffect(() => {
@@ -137,6 +138,7 @@ export function RouteMap({
       }).addTo(map);
 
       mapRef.current = map;
+      setMapReady(true);
     }
 
     setupMap();
@@ -152,7 +154,7 @@ export function RouteMap({
     async function renderPoints() {
       const map = mapRef.current;
 
-      if (!map) {
+      if (!map || !mapReady) {
         return;
       }
 
@@ -214,7 +216,7 @@ export function RouteMap({
     return () => {
       cancelled = true;
     };
-  }, [mappablePoints, onSelectPoint, showRouteLine]);
+  }, [mapReady, mappablePoints, onSelectPoint, showRouteLine]);
 
   useEffect(() => {
     return () => {
