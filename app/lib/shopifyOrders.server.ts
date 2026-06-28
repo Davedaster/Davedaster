@@ -91,6 +91,16 @@ export type DeliveryOrder = {
   hasManualOverride: boolean;
   manualAddress: string | null;
   manualAddressNotes: string | null;
+  orderSource?: "shopify" | "manual";
+};
+
+export type ManualDeliveryOrderInput = {
+  id?: string | null;
+  customerName: string;
+  address: string;
+  email?: string | null;
+  phone?: string | null;
+  lineItemSummary: string;
 };
 
 const INCLUDED_SHIPPING_TERMS = [
@@ -189,6 +199,32 @@ function hasWeakAddress(order: ShopifyOrderNode) {
   return !address.address1 || !address.zip;
 }
 
+function extractPostcode(value: string) {
+  const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
+
+  return match?.[0]?.toUpperCase() || "";
+}
+
+function manualOrderReference(input: ManualDeliveryOrderInput) {
+  const suppliedId = input.id?.trim();
+
+  if (suppliedId) {
+    return suppliedId.startsWith("manual:") ? suppliedId : `manual:${suppliedId}`;
+  }
+
+  const seed = `${input.customerName}-${input.address}-${input.lineItemSummary}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 44) || "order";
+
+  return `manual:${seed}-${Date.now()}`;
+}
+
+function manualOrderNumber(reference: string) {
+  return reference.replace("manual:", "MANUAL-").toUpperCase();
+}
+
 function applyOverride(order: DeliveryOrder, override: AddressOverride | undefined): DeliveryOrder {
   if (!override) {
     return order;
@@ -267,9 +303,44 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     hasManualOverride: false,
     manualAddress: null,
     manualAddressNotes: null,
+    orderSource: "shopify",
   };
 
   return applyOverride(deliveryOrder, override);
+}
+
+export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Promise<DeliveryOrder> {
+  const customerName = input.customerName.trim() || "Manual customer";
+  const addressSummary = input.address.trim();
+  const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
+  const reference = manualOrderReference(input);
+
+  return {
+    id: reference,
+    name: manualOrderNumber(reference),
+    createdAt: new Date().toISOString(),
+    customerName,
+    email: input.email?.trim() || null,
+    phone: input.phone?.trim() || null,
+    shippingMethod: "Manual route entry",
+    fulfilmentStatus: "unfulfilled",
+    financialStatus: "manual",
+    postcode: lookup.postcode || extractPostcode(addressSummary) || null,
+    addressSummary,
+    formattedAddress: lookup.formattedAddress || addressSummary,
+    hasDeliveryAddress: Boolean(addressSummary),
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: lookup.latitude && lookup.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: lookup.confidence,
+    latitude: lookup.latitude,
+    longitude: lookup.longitude,
+    lineItemSummary: input.lineItemSummary.trim(),
+    hasManualOverride: true,
+    manualAddress: addressSummary,
+    manualAddressNotes: "Manual order added from the planning map",
+    orderSource: "manual",
+  };
 }
 
 const DELIVERY_ORDERS_QUERY = `#graphql
