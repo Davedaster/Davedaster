@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 type RouteMapPoint = {
   id: string;
   label: string;
@@ -16,6 +18,14 @@ type RouteMapProps = {
   showRouteLine?: boolean;
   onSelectPoint?: (point: RouteMapPoint) => void;
 };
+
+type DragState = {
+  startX: number;
+  startY: number;
+  startPanX: number;
+  startPanY: number;
+  hasMoved: boolean;
+} | null;
 
 const TILE_SIZE = 256;
 const MAP_WIDTH = 1024;
@@ -71,6 +81,12 @@ function normalisedPoints(points: RouteMapPoint[]) {
   ));
 }
 
+function cleanPinLabel(label: string, fallback: number) {
+  const cleaned = label.trim().replace(/^#/, "");
+
+  return cleaned || String(fallback);
+}
+
 export function RouteMap({
   points,
   height = 520,
@@ -79,6 +95,8 @@ export function RouteMap({
   showRouteLine = true,
   onSelectPoint,
 }: RouteMapProps) {
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragState, setDragState] = useState<DragState>(null);
   const mappablePoints = normalisedPoints(points);
   const zoom = chooseZoom(mappablePoints);
   const centerLatitude = mappablePoints.length
@@ -89,8 +107,8 @@ export function RouteMap({
     : DEFAULT_CENTER.longitude;
   const center = project(centerLatitude, centerLongitude, zoom);
   const topLeft = {
-    x: center.x - MAP_WIDTH / 2,
-    y: center.y - height / 2,
+    x: center.x - MAP_WIDTH / 2 - pan.x,
+    y: center.y - height / 2 - pan.y,
   };
   const firstTileX = Math.floor(topLeft.x / TILE_SIZE);
   const lastTileX = Math.floor((topLeft.x + MAP_WIDTH) / TILE_SIZE);
@@ -128,6 +146,40 @@ export function RouteMap({
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div
+        onPointerDown={(event) => {
+          if (event.button !== 0) {
+            return;
+          }
+
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setDragState({
+            startX: event.clientX,
+            startY: event.clientY,
+            startPanX: pan.x,
+            startPanY: pan.y,
+            hasMoved: false,
+          });
+        }}
+        onPointerMove={(event) => {
+          if (!dragState) {
+            return;
+          }
+
+          const nextX = dragState.startPanX + event.clientX - dragState.startX;
+          const nextY = dragState.startPanY + event.clientY - dragState.startY;
+          const hasMoved = dragState.hasMoved || Math.abs(event.clientX - dragState.startX) > 4 || Math.abs(event.clientY - dragState.startY) > 4;
+
+          setPan({ x: nextX, y: nextY });
+          setDragState({ ...dragState, hasMoved });
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+
+          window.setTimeout(() => setDragState(null), 0);
+        }}
+        onPointerCancel={() => setDragState(null)}
         style={{
           position: "relative",
           height,
@@ -136,6 +188,9 @@ export function RouteMap({
           border: "1px solid #d0d5dd",
           background: "#d6ecff",
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
+          cursor: dragState ? "grabbing" : "grab",
+          touchAction: "none",
+          userSelect: "none",
         }}
       >
         <div style={{ position: "absolute", inset: 0, left: "50%", width: MAP_WIDTH, transform: "translateX(-50%)" }}>
@@ -147,6 +202,7 @@ export function RouteMap({
               loading="lazy"
               width={TILE_SIZE}
               height={TILE_SIZE}
+              draggable={false}
               style={{
                 position: "absolute",
                 left: tile.left,
@@ -170,13 +226,21 @@ export function RouteMap({
             const delivered = point.status === "DELIVERED" || point.status === "COLLECTED";
             const failed = point.status === "FAILED";
             const background = delivered ? "#16a34a" : failed ? "#b42318" : point.selected ? "#323841" : "#509AE6";
+            const pinLabel = cleanPinLabel(point.label, index + 1);
+            const pinSize = point.selected ? 50 : 46;
 
             return (
               <button
                 key={point.id}
                 type="button"
                 disabled={!onSelectPoint}
-                onClick={() => onSelectPoint?.(point)}
+                onClick={() => {
+                  if (dragState?.hasMoved) {
+                    return;
+                  }
+
+                  onSelectPoint?.(point);
+                }}
                 aria-label={point.title || point.label}
                 title={point.title || point.label}
                 style={{
@@ -186,17 +250,18 @@ export function RouteMap({
                   transform: "translate(-50%, -100%)",
                   border: 0,
                   background: "transparent",
-                  cursor: onSelectPoint ? "pointer" : "default",
+                  cursor: onSelectPoint ? "pointer" : "grab",
                   padding: 0,
                   zIndex: point.selected ? 5 : 4,
+                  touchAction: "none",
                 }}
               >
                 <span
                   style={{
                     display: "grid",
                     placeItems: "center",
-                    width: point.selected ? 38 : 32,
-                    height: point.selected ? 38 : 32,
+                    width: pinSize,
+                    height: pinSize,
                     borderRadius: "50% 50% 50% 0",
                     transform: "rotate(-45deg)",
                     background,
@@ -208,12 +273,16 @@ export function RouteMap({
                     style={{
                       transform: "rotate(45deg)",
                       color: "#ffffff",
-                      fontSize: 12,
+                      fontSize: pinLabel.length > 4 ? 10 : 11,
                       fontWeight: 800,
                       lineHeight: 1,
+                      maxWidth: pinSize - 12,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {point.label || index + 1}
+                    {pinLabel}
                   </span>
                 </span>
               </button>
