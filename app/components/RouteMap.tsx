@@ -38,9 +38,7 @@ function normalisedPoints(points: RouteMapPoint[]) {
 }
 
 function cleanPinLabel(point: RouteMapPoint, fallback: number) {
-  const cleaned = point.label.trim().replace("#", "");
-
-  return cleaned || String(fallback);
+  return point.label.trim().replace("#", "") || String(fallback);
 }
 
 function escapeHtml(value: string) {
@@ -74,14 +72,8 @@ function tooltipHtml(point: RouteMapPoint) {
 }
 
 function markerColour(point: RouteMapPoint) {
-  if (point.status === "DELIVERED" || point.status === "COLLECTED") {
-    return "#16a34a";
-  }
-
-  if (point.status === "FAILED") {
-    return "#b42318";
-  }
-
+  if (point.status === "DELIVERED" || point.status === "COLLECTED") return "#16a34a";
+  if (point.status === "FAILED") return "#b42318";
   return point.selected ? "#323841" : "#509AE6";
 }
 
@@ -95,13 +87,6 @@ function styles() {
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
     .bpd-tooltip-line { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.35; color: #475467; }
   `;
-}
-
-function emptyFeatureCollection() {
-  return {
-    type: "FeatureCollection" as const,
-    features: [],
-  };
 }
 
 function buildFeatureCollection(points: Array<RouteMapPoint & { latitude: number; longitude: number }>) {
@@ -122,6 +107,16 @@ function buildFeatureCollection(points: Array<RouteMapPoint & { latitude: number
       },
     })),
   };
+}
+
+function boundsFromCoordinates(coordinates: number[][]) {
+  const longitudes = coordinates.map((coordinate) => coordinate[0]);
+  const latitudes = coordinates.map((coordinate) => coordinate[1]);
+
+  return [
+    [Math.min(...longitudes), Math.min(...latitudes)],
+    [Math.max(...longitudes), Math.max(...latitudes)],
+  ];
 }
 
 export function RouteMap({
@@ -160,37 +155,23 @@ export function RouteMap({
       try {
         const response = await fetch("/api/tomtom-key");
         const data = await response.json() as { apiKey?: string };
-
-        if (!cancelled) {
-          setLoadedApiKey(data.apiKey || "");
-        }
+        if (!cancelled) setLoadedApiKey(data.apiKey || "");
       } catch {
-        if (!cancelled) {
-          setLoadedApiKey("");
-        }
+        if (!cancelled) setLoadedApiKey("");
       }
     }
 
     loadKey();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [apiKey]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function setupMap() {
-      if (!mapElementRef.current || mapRef.current || !activeApiKey) {
-        return;
-      }
-
+      if (!mapElementRef.current || mapRef.current || !activeApiKey) return;
       const tt = await import("@tomtom-international/web-sdk-maps");
-
-      if (cancelled || !mapElementRef.current) {
-        return;
-      }
+      if (cancelled || !mapElementRef.current) return;
 
       const map = tt.map({
         key: activeApiKey,
@@ -204,26 +185,18 @@ export function RouteMap({
 
       map.addControl(new tt.NavigationControl(), "bottom-right");
       map.once("load", () => {
-        if (!cancelled) {
-          setMapReady(true);
-        }
+        if (!cancelled) setMapReady(true);
       });
       mapRef.current = map;
     }
 
     setupMap();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeApiKey]);
 
   useEffect(() => {
     const map = mapRef.current;
-
-    if (!map || !mapReady) {
-      return;
-    }
+    if (!map || !mapReady) return;
 
     const sourceId = sourceIdRef.current;
     const routeSourceId = routeSourceIdRef.current;
@@ -235,17 +208,8 @@ export function RouteMap({
     const featureCollection = buildFeatureCollection(mappablePoints);
     const routeCoordinates = mappablePoints.map((point) => [point.longitude, point.latitude]);
 
-    const removeLayer = (layerId: string) => {
-      if (map.getLayer(layerId)) {
-        map.removeLayer(layerId);
-      }
-    };
-
-    const removeSource = (id: string) => {
-      if (map.getSource(id)) {
-        map.removeSource(id);
-      }
-    };
+    const removeLayer = (layerId: string) => { if (map.getLayer(layerId)) map.removeLayer(layerId); };
+    const removeSource = (id: string) => { if (map.getSource(id)) map.removeSource(id); };
 
     removeLayer(clusterCountLayerId);
     removeLayer(clustersLayerId);
@@ -254,6 +218,7 @@ export function RouteMap({
     removeLayer(routeLayerId);
     removeSource(sourceId);
     removeSource(routeSourceId);
+    popupRef.current?.remove();
 
     map.addSource(sourceId, {
       type: "geojson",
@@ -269,26 +234,15 @@ export function RouteMap({
         data: {
           type: "Feature",
           properties: {},
-          geometry: {
-            type: "LineString",
-            coordinates: routeCoordinates,
-          },
+          geometry: { type: "LineString", coordinates: routeCoordinates },
         },
       });
-
       map.addLayer({
         id: routeLayerId,
         type: "line",
         source: routeSourceId,
-        layout: {
-          "line-join": "round",
-          "line-cap": "round",
-        },
-        paint: {
-          "line-color": "#509AE6",
-          "line-width": 4,
-          "line-opacity": 0.85,
-        },
+        layout: { "line-join": "round", "line-cap": "round" },
+        paint: { "line-color": "#509AE6", "line-width": 4, "line-opacity": 0.85 },
       });
     }
 
@@ -311,14 +265,8 @@ export function RouteMap({
       type: "symbol",
       source: sourceId,
       filter: ["has", "point_count"],
-      layout: {
-        "text-field": ["get", "point_count_abbreviated"],
-        "text-size": 14,
-        "text-font": ["Noto-Bold"],
-      },
-      paint: {
-        "text-color": "#ffffff",
-      },
+      layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 14 },
+      paint: { "text-color": "#ffffff" },
     });
 
     map.addLayer({
@@ -340,32 +288,22 @@ export function RouteMap({
       type: "symbol",
       source: sourceId,
       filter: ["!", ["has", "point_count"]],
-      layout: {
-        "text-field": ["get", "label"],
-        "text-size": 11,
-        "text-font": ["Noto-Bold"],
-        "text-allow-overlap": true,
-      },
-      paint: {
-        "text-color": "#ffffff",
-      },
+      layout: { "text-field": ["get", "label"], "text-size": 11, "text-allow-overlap": true },
+      paint: { "text-color": "#ffffff" },
     });
+
+    const setPointer = () => { map.getCanvas().style.cursor = "pointer"; };
+    const clearPointer = () => { map.getCanvas().style.cursor = ""; };
 
     const handleClusterClick = (event: any) => {
       const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
-      const clusterId = features[0]?.properties?.cluster_id;
+      const cluster = features[0];
+      const clusterId = cluster?.properties?.cluster_id;
       const source = map.getSource(sourceId);
-
-      if (!source || typeof clusterId === "undefined") {
-        return;
-      }
+      if (!cluster || !source || typeof clusterId === "undefined") return;
 
       source.getClusterExpansionZoom(clusterId, (error: Error | null, zoom: number) => {
-        if (error) {
-          return;
-        }
-
-        map.easeTo({ center: features[0].geometry.coordinates, zoom });
+        if (!error) map.easeTo({ center: cluster.geometry.coordinates, zoom });
       });
     };
 
@@ -373,20 +311,13 @@ export function RouteMap({
       const feature = event.features?.[0];
       const id = feature?.properties?.id;
       const point = mappablePoints.find((mapPoint) => mapPoint.id === id);
-
-      if (point) {
-        onSelectPoint?.(point);
-      }
+      if (point) onSelectPoint?.(point);
     };
 
     const handlePinEnter = async (event: any) => {
-      map.getCanvas().style.cursor = "pointer";
+      setPointer();
       const feature = event.features?.[0];
-
-      if (!feature) {
-        return;
-      }
-
+      if (!feature) return;
       const tt = await import("@tomtom-international/web-sdk-maps");
       popupRef.current?.remove();
       popupRef.current = new tt.Popup({ closeButton: false, closeOnClick: false, className: "bpd-tomtom-popup", offset: 18 })
@@ -396,29 +327,28 @@ export function RouteMap({
     };
 
     const handlePinLeave = () => {
-      map.getCanvas().style.cursor = "";
+      clearPointer();
       popupRef.current?.remove();
     };
 
     map.on("click", clustersLayerId, handleClusterClick);
     map.on("click", pinsLayerId, handlePinClick);
-    map.on("mouseenter", clustersLayerId, () => { map.getCanvas().style.cursor = "pointer"; });
-    map.on("mouseleave", clustersLayerId, () => { map.getCanvas().style.cursor = ""; });
+    map.on("mouseenter", clustersLayerId, setPointer);
+    map.on("mouseleave", clustersLayerId, clearPointer);
     map.on("mouseenter", pinsLayerId, handlePinEnter);
     map.on("mouseleave", pinsLayerId, handlePinLeave);
 
     if (routeCoordinates.length === 1) {
       map.flyTo({ center: routeCoordinates[0], zoom: Math.max(map.getZoom(), 14) });
     } else if (routeCoordinates.length > 1) {
-      const bounds = routeCoordinates.reduce((lngLatBounds: any, coordinate) => lngLatBounds.extend(coordinate), new (map as any).LngLatBounds?.(routeCoordinates[0], routeCoordinates[0]));
-      if (bounds) {
-        map.fitBounds(bounds, { padding: 52, maxZoom: 14 });
-      }
+      map.fitBounds(boundsFromCoordinates(routeCoordinates), { padding: 52, maxZoom: 14 });
     }
 
     return () => {
       map.off("click", clustersLayerId, handleClusterClick);
       map.off("click", pinsLayerId, handlePinClick);
+      map.off("mouseenter", clustersLayerId, setPointer);
+      map.off("mouseleave", clustersLayerId, clearPointer);
       map.off("mouseenter", pinsLayerId, handlePinEnter);
       map.off("mouseleave", pinsLayerId, handlePinLeave);
       popupRef.current?.remove();
