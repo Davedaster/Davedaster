@@ -136,6 +136,10 @@ export async function lookupAddress(postcode: string | null, searchText: string)
   }
 
   const payload = await response.json() as GetAddressFindResponse;
+console.log(
+  "getAddress payload",
+  JSON.stringify(payload).slice(0, 2000)
+);
   const addresses = payload.addresses || [];
   const bestMatch = pickBestAddress(addresses, searchText);
   const firstAddress = addresses[0] ? formatGetAddressResult(addresses[0]) : null;
