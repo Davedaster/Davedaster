@@ -11,6 +11,7 @@ RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm cache 
 
 COPY . .
 
+RUN npx prisma generate
 RUN npm run build
 
 ENV NODE_ENV=production
