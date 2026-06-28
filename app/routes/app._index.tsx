@@ -38,7 +38,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { RouteMap } from "../components/RouteMap";
 import { lookupAddress } from "../lib/getAddress.server";
-import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
+import { createRouteDraft } from "../lib/routeDrafts.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
@@ -54,6 +54,15 @@ interface Stop {
 
 type ManualPlanningOrder = ManualDeliveryOrderInput & {
   id: string;
+};
+
+const defaultRoutePlanningSettings = {
+  routeDate: new Date().toISOString().slice(0, 10),
+  plannedStartTime: "05:00",
+  timePerDropMinutes: 10,
+  customerSlotMinutes: 60,
+  startAddress: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
+  finishAddress: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
 };
 
 type PlanningOptimisationResult = {
