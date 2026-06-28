@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -35,7 +35,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { createRouteDraft } from "../lib/routeDrafts.server";
+import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
 
@@ -59,13 +59,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const orders = await getDeliveryOrders(admin);
 
-  return json({ orders, addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY) });
+  return json({
+    orders,
+    addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
+    defaults: defaultRoutePlanningSettings,
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const routeName = String(formData.get("routeName") || "").trim();
+  const routeDate = String(formData.get("routeDate") || "").trim();
+  const plannedStartTime = String(formData.get("plannedStartTime") || "").trim();
+  const timePerDropMinutes = Number(formData.get("timePerDropMinutes") || defaultRoutePlanningSettings.timePerDropMinutes);
+  const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || defaultRoutePlanningSettings.customerSlotMinutes);
+  const startAddress = String(formData.get("startAddress") || "").trim();
+  const finishAddress = String(formData.get("finishAddress") || "").trim();
   const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
     .split(",")
     .map((id) => id.trim())
@@ -85,7 +95,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ ok: false, error: "Selected orders could not be found." }, { status: 400 });
   }
 
-  await createRouteDraft({ orders: selectedOrders, routeName });
+  await createRouteDraft({
+    orders: selectedOrders,
+    routeName,
+    routeDate,
+    plannedStartTime,
+    timePerDropMinutes,
+    customerSlotMinutes,
+    startAddress,
+    finishAddress,
+  });
 
   return redirect("/app/routes");
 };
@@ -144,13 +163,20 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
   );
 }
 
-function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number): Stop {
+function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedStartTime: string, timePerDropMinutes: string): Stop {
+  const [hours, minutes = "0"] = plannedStartTime.split(":");
+  const startMinutes = Number(hours) * 60 + Number(minutes);
+  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
+  const etaMinutes = startMinutes + ((stopNumber - 1) * dropMinutes);
+  const etaHours = Math.floor(etaMinutes / 60) % 24;
+  const etaMinuteValue = etaMinutes % 60;
+
   return {
     id: order.id,
     orderNumber: order.name,
     customerName: order.customerName,
     postcode: order.postcode || "",
-    eta: `${String(5 + stopNumber).padStart(2, "0")}:00`,
+    eta: `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`,
     isLocked: false,
   };
 }
@@ -310,9 +336,16 @@ function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryO
 }
 
 export default function OrdersMap() {
-  const { orders, addressLookupEnabled } = useLoaderData<typeof loader>();
+  const { orders, addressLookupEnabled, defaults } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [routeName, setRouteName] = useState("");
+  const [routeDate, setRouteDate] = useState(defaults.routeDate);
+  const [plannedStartTime, setPlannedStartTime] = useState(defaults.plannedStartTime);
+  const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(defaults.timePerDropMinutes));
+  const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
+  const [startAddress, setStartAddress] = useState(defaults.startAddress);
+  const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
 
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
@@ -347,7 +380,7 @@ export default function OrdersMap() {
         return currentStops.filter((stop) => stop.id !== order.id);
       }
 
-      return [...currentStops, deliveryOrderToStop(order, currentStops.length + 1)];
+      return [...currentStops, deliveryOrderToStop(order, currentStops.length + 1, plannedStartTime, timePerDropMinutes)];
     });
   };
 
@@ -376,6 +409,9 @@ export default function OrdersMap() {
                       getAddress.io lookup is not enabled yet. Add GETADDRESS_API_KEY to the app environment before testing live coordinates.
                     </Text>
                   ) : null}
+                  {actionData && "error" in actionData ? (
+                    <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text>
+                  ) : null}
                 </BlockStack>
                 <Badge tone="info">{orders.length} orders</Badge>
               </InlineStack>
@@ -399,15 +435,27 @@ export default function OrdersMap() {
         <Layout.Section variant="oneThird">
           <LegacyCard title="Current Route" actions={[{ content: "Optimise", onAction: () => {} }]}>
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
-              <BlockStack gap="100">
-                <InlineStack align="space-between">
-                  <Text as="span" variant="bodySm">Stops: {stops.length}</Text>
-                  <Text as="span" variant="bodySm">Mileage: pending</Text>
-                </InlineStack>
-                <InlineStack align="space-between">
-                  <Text as="span" variant="bodySm">Time: pending</Text>
-                  <Badge tone="info">Draft</Badge>
-                </InlineStack>
+              <BlockStack gap="300">
+                <BlockStack gap="100">
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodySm">Stops: {stops.length}</Text>
+                    <Text as="span" variant="bodySm">Mileage: pending</Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodySm">Time: pending</Text>
+                    <Badge tone="info">Draft</Badge>
+                  </InlineStack>
+                </BlockStack>
+
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">Route planning</Text>
+                  <TextField label="Route date" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
+                  <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
+                  <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
+                  <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
+                  <TextField label="Driver start location" value={startAddress} onChange={setStartAddress} autoComplete="off" multiline={2} />
+                  <TextField label="Driver finish location" value={finishAddress} onChange={setFinishAddress} autoComplete="off" multiline={2} />
+                </BlockStack>
               </BlockStack>
             </Box>
             <DndContext
@@ -424,6 +472,12 @@ export default function OrdersMap() {
             <Box padding="300">
               <Form method="post">
                 <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
+                <input type="hidden" name="routeDate" value={routeDate} />
+                <input type="hidden" name="plannedStartTime" value={plannedStartTime} />
+                <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
+                <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
+                <input type="hidden" name="startAddress" value={startAddress} />
+                <input type="hidden" name="finishAddress" value={finishAddress} />
                 <BlockStack gap="300">
                   <TextField
                     label="Draft route name, optional"
