@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { CustomerEtaConfidenceCard } from "../components/CustomerEtaConfidenceCard";
 import { CustomerSupportCard } from "../components/CustomerSupportCard";
-import { formatEtaSlot } from "../lib/etaSlots.server";
+import { formatEtaSlot } from "../lib/etaSlots";
 import { getCustomerTracking } from "../lib/tracking.server";
 
 const TRACKING_REFRESHED_KEY = "routeBuddyTrackingRefreshed";
