@@ -56,6 +56,12 @@ type ManualPlanningOrder = ManualDeliveryOrderInput & {
   id: string;
 };
 
+type StopEta = {
+  id: string;
+  eta: string;
+  arrivalMinutes: number;
+};
+
 const defaultRoutePlanningSettings = {
   routeDate: new Date().toISOString().slice(0, 10),
   plannedStartTime: "05:00",
@@ -68,6 +74,8 @@ const defaultRoutePlanningSettings = {
 type PlanningOptimisationResult = {
   ok: true;
   orderedIds: string[];
+  stopEtas: StopEta[];
+  routeFinishEta: string | null;
   totalDistanceKm: number | null;
   totalDurationMinutes: number | null;
   returnToBase: boolean;
@@ -160,6 +168,16 @@ function extractPlanningStopId(waypointName: string) {
   return key.replace(/^STOP_/, "");
 }
 
+function routeArrivalToMinutes(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  const rounded = Math.round(value);
+
+  return rounded > 24 * 60 ? Math.round(rounded / 60) : rounded;
+}
+
 async function getSelectedPlanningOrders(admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"], selectedOrderIds: string[], manualOrders: ManualPlanningOrder[]) {
   const [shopifyOrders, manualDeliveryOrders] = await Promise.all([
     getDeliveryOrders(admin),
@@ -203,7 +221,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "optimisePlanning") {
     try {
       const start = await resolvePlanningEndpoint(startAddress);
-      const finish = returnToBase ? await resolvePlanningEndpoint(finishAddress || startAddress) : null;
+      const finish = returnToBase
+        ? start
+        : await resolvePlanningEndpoint(finishAddress || startAddress);
       const optimisableStops = selectedOrders.filter((order) => typeof order.latitude === "number" && typeof order.longitude === "number");
 
       if (optimisableStops.length !== selectedOrders.length) {
@@ -219,7 +239,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           order.longitude!,
           Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : defaultRoutePlanningSettings.timePerDropMinutes,
         )),
-        ...(finish ? [buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0)] : []),
+        buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0),
       ];
       const optimised = await optimiseLocations(locations);
 
@@ -227,16 +247,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         throw new Error("RouteXL returned an infeasible route. Check the selected stops and try again.");
       }
 
-      const orderedIds = optimised.waypoints
-        .slice(1, finish ? -1 : undefined)
-        .map((waypoint) => extractPlanningStopId(waypoint.name))
-        .filter((id) => selectedOrderIds.includes(id));
+      const stopWaypoints = optimised.waypoints
+        .slice(1, -1)
+        .map((waypoint) => ({ ...waypoint, id: extractPlanningStopId(waypoint.name) }))
+        .filter((waypoint) => selectedOrderIds.includes(waypoint.id));
+      const orderedIds = stopWaypoints.map((waypoint) => waypoint.id);
+      const stopEtas = stopWaypoints.map((waypoint) => {
+        const arrivalMinutes = routeArrivalToMinutes(waypoint.arrivalMinutes);
+
+        return {
+          id: waypoint.id,
+          arrivalMinutes,
+          eta: formatEtaTime(plannedStartTime, arrivalMinutes),
+        };
+      });
+      const finalWaypoint = optimised.waypoints[optimised.waypoints.length - 1];
+      const totalDurationMinutes = routeArrivalToMinutes(finalWaypoint?.arrivalMinutes ?? optimised.totalDurationMinutes);
 
       return json<PlanningOptimisationResult>({
         ok: true,
         orderedIds,
+        stopEtas,
+        routeFinishEta: finalWaypoint ? formatEtaTime(plannedStartTime, totalDurationMinutes) : null,
         totalDistanceKm: optimised.totalDistanceKm,
-        totalDurationMinutes: optimised.totalDurationMinutes,
+        totalDurationMinutes,
         returnToBase,
       });
     } catch (error) {
@@ -252,7 +286,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     timePerDropMinutes,
     customerSlotMinutes,
     startAddress,
-    finishAddress: returnToBase ? finishAddress : selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || finishAddress,
+    finishAddress: returnToBase
+      ? startAddress
+      : finishAddress || selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || startAddress,
   });
 
   return redirect("/app/routes");
@@ -452,11 +488,11 @@ function DeliveryMap({
           label: "START",
           status: "START",
         }}
-        routeFinish={returnToBase ? {
-          address: finishAddress || startAddress,
+        routeFinish={{
+          address: returnToBase ? startAddress : finishAddress || startAddress,
           label: "FINISH",
           status: "FINISH",
-        } : null}
+        }}
         onSelectPoint={(point) => {
           const order = ordersById.get(point.id);
           if (order) {
@@ -521,6 +557,7 @@ export default function OrdersMap() {
   const [manualItems, setManualItems] = useState("");
   const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
   const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
+  const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
 
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
   const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
@@ -535,14 +572,20 @@ export default function OrdersMap() {
       return;
     }
 
+    const etaById = new Map(optimisationFetcher.data.stopEtas.map((stopEta) => [stopEta.id, stopEta.eta]));
     const orderedStops = optimisationFetcher.data.orderedIds
       .map((id) => stops.find((stop) => stop.id === id))
-      .filter((stop): stop is Stop => Boolean(stop));
+      .filter((stop): stop is Stop => Boolean(stop))
+      .map((stop) => ({
+        ...stop,
+        eta: etaById.get(stop.id) || stop.eta,
+      }));
     const missingStops = stops.filter((stop) => !optimisationFetcher.data?.ok || !optimisationFetcher.data.orderedIds.includes(stop.id));
 
-    setStops(refreshStopEtas([...orderedStops, ...missingStops], plannedStartTime, timePerDropMinutes));
+    setStops([...orderedStops, ...missingStops]);
     setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
     setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
+    setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
   }, [optimisationFetcher.data]);
 
   useEffect(() => {
@@ -559,6 +602,7 @@ export default function OrdersMap() {
   const clearOptimisedStats = () => {
     setRouteDistanceKm(null);
     setRouteDurationMinutes(null);
+    setRouteFinishEta(null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -609,7 +653,7 @@ export default function OrdersMap() {
     formData.set("timePerDropMinutes", timePerDropMinutes);
     formData.set("customerSlotMinutes", customerSlotMinutes);
     formData.set("startAddress", startAddress);
-    formData.set("finishAddress", finishAddress);
+    formData.set("finishAddress", returnToBase ? startAddress : finishAddress);
     formData.set("returnToBase", returnToBase ? "true" : "false");
 
     optimisationFetcher.submit(formData, { method: "post" });
@@ -718,7 +762,8 @@ export default function OrdersMap() {
                     <Badge tone={routeDistanceKm === null ? "info" : "success"}>{routeDistanceKm === null ? "Not optimised" : "Optimised"}</Badge>
                   </InlineStack>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {returnToBase ? "Route includes return to base." : "Route ends at the last drop."}
+                    {returnToBase ? "Route includes return to base." : "Route ends at the custom finish location."}
+                    {routeFinishEta ? ` Finish ETA: ${routeFinishEta}.` : ""}
                   </Text>
                   {optimisationError ? <Text as="p" variant="bodySm" tone="critical">{optimisationError}</Text> : null}
                 </BlockStack>
@@ -726,12 +771,12 @@ export default function OrdersMap() {
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Route planning</Text>
                   <TextField label="Route date" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
-                  <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
+                  <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={(value) => { setPlannedStartTime(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={(value) => { setTimePerDropMinutes(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
                   <TextField label="Driver start location" value={startAddress} onChange={(value) => { setStartAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} />
                   <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
-                  {returnToBase ? <TextField label="Driver finish location" value={finishAddress} onChange={(value) => { setFinishAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} /> : null}
+                  {!returnToBase ? <TextField label="Custom finish location" value={finishAddress} onChange={(value) => { setFinishAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} /> : null}
                   <Button onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0}>Optimise selected route</Button>
                 </BlockStack>
               </BlockStack>
@@ -780,7 +825,7 @@ export default function OrdersMap() {
                 <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
                 <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
                 <input type="hidden" name="startAddress" value={startAddress} />
-                <input type="hidden" name="finishAddress" value={finishAddress} />
+                <input type="hidden" name="finishAddress" value={returnToBase ? startAddress : finishAddress} />
                 <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
                 <BlockStack gap="300">
                   <TextField
