@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Map as LeafletMap, Marker as LeafletMarker, Polyline as LeafletPolyline } from "leaflet";
+import { useEffect, useMemo, useRef } from "react";
+import type { Map as TomTomMap, Marker as TomTomMarker, Popup as TomTomPopup } from "@tomtom-international/web-sdk-maps";
 
 type RouteMapPoint = {
   id: string;
@@ -20,9 +20,10 @@ type RouteMapProps = {
   badge?: string;
   showRouteLine?: boolean;
   onSelectPoint?: (point: RouteMapPoint) => void;
+  apiKey?: string | null;
 };
 
-const DEFAULT_CENTER: [number, number] = [50.5293, -3.6119];
+const DEFAULT_CENTER: [number, number] = [-3.6119, 50.5293];
 
 function normalisedPoints(points: RouteMapPoint[]) {
   return points.filter((point): point is RouteMapPoint & { latitude: number; longitude: number } => (
@@ -83,15 +84,25 @@ function markerColour(point: RouteMapPoint) {
 
 function styles() {
   return `
-    .bpd-leaflet-map .leaflet-container { height: 100%; width: 100%; font-family: inherit; }
-    .bpd-leaflet-map .leaflet-control-zoom a { color: #323841; font-weight: 800; }
-    .bpd-leaflet-pin { display: grid; place-items: center; color: #fff; width: 46px; height: 46px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.24); font-size: 11px; font-weight: 800; line-height: 1; }
-    .bpd-leaflet-pin span { transform: rotate(45deg); max-width: 34px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bpd-leaflet-tooltip { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
-    .bpd-leaflet-tooltip::before { display: none; }
+    .bpd-tomtom-map .mapboxgl-map { font-family: inherit; }
+    .bpd-tomtom-map .mapboxgl-ctrl-group button { width: 36px; height: 36px; }
+    .bpd-tomtom-pin { display: grid; place-items: center; color: #fff; width: 46px; height: 46px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.24); font-size: 11px; font-weight: 800; line-height: 1; cursor: pointer; }
+    .bpd-tomtom-pin span { transform: rotate(45deg); max-width: 34px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bpd-tomtom-popup .mapboxgl-popup-content { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
+    .bpd-tomtom-popup .mapboxgl-popup-tip { display: none; }
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
     .bpd-tooltip-line { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.35; color: #475467; }
   `;
+}
+
+function makeMarkerElement(point: RouteMapPoint, label: string) {
+  const element = document.createElement("button");
+  element.type = "button";
+  element.className = "bpd-tomtom-pin";
+  element.style.background = markerColour(point);
+  element.innerHTML = `<span>${escapeHtml(label)}</span>`;
+
+  return element;
 }
 
 export function RouteMap({
@@ -101,44 +112,42 @@ export function RouteMap({
   badge,
   showRouteLine = true,
   onSelectPoint,
+  apiKey,
 }: RouteMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<LeafletMap | null>(null);
-  const markersRef = useRef<LeafletMarker[]>([]);
-  const lineRef = useRef<LeafletPolyline | null>(null);
-  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<TomTomMap | null>(null);
+  const markersRef = useRef<TomTomMarker[]>([]);
+  const popupsRef = useRef<TomTomPopup[]>([]);
+  const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
+  const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function setupMap() {
-      if (!mapElementRef.current || mapRef.current) {
+      if (!mapElementRef.current || mapRef.current || !apiKey) {
         return;
       }
 
-      const leaflet = await import("leaflet");
+      const tt = await import("@tomtom-international/web-sdk-maps");
 
       if (cancelled || !mapElementRef.current) {
         return;
       }
 
-      const map = leaflet.map(mapElementRef.current, {
+      const map = tt.map({
+        key: apiKey,
+        container: mapElementRef.current,
         center: DEFAULT_CENTER,
         zoom: 10,
-        zoomControl: true,
-        scrollWheelZoom: true,
-        dragging: true,
-        tap: true,
+        dragPan: true,
+        scrollZoom: true,
+        touchZoomRotate: true,
       });
 
-      leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap",
-      }).addTo(map);
-
+      map.addControl(new tt.NavigationControl(), "bottom-right");
       mapRef.current = map;
-      setMapReady(true);
     }
 
     setupMap();
@@ -146,7 +155,7 @@ export function RouteMap({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [apiKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,80 +163,107 @@ export function RouteMap({
     async function renderPoints() {
       const map = mapRef.current;
 
-      if (!map || !mapReady) {
+      if (!map || !apiKey) {
         return;
       }
 
-      const leaflet = await import("leaflet");
+      const tt = await import("@tomtom-international/web-sdk-maps");
 
       if (cancelled) {
         return;
       }
 
       markersRef.current.forEach((marker) => marker.remove());
+      popupsRef.current.forEach((popup) => popup.remove());
       markersRef.current = [];
-      lineRef.current?.remove();
-      lineRef.current = null;
+      popupsRef.current = [];
 
-      const markerPositions: [number, number][] = [];
-
-      mappablePoints.forEach((point, index) => {
-        const position: [number, number] = [point.latitude, point.longitude];
-        const label = cleanPinLabel(point, index + 1);
-        const icon = leaflet.divIcon({
-          className: "",
-          html: `<div class="bpd-leaflet-pin" style="background:${markerColour(point)}"><span>${escapeHtml(label)}</span></div>`,
-          iconSize: [46, 46],
-          iconAnchor: [23, 46],
-        });
-        const marker = leaflet.marker(position, { icon }).addTo(map);
-
-        marker.bindTooltip(tooltipHtml(point), {
-          className: "bpd-leaflet-tooltip",
-          direction: "top",
-          offset: [0, -42],
-          opacity: 1,
-          sticky: true,
-        });
-
-        marker.on("click", () => onSelectPoint?.(point));
-        markersRef.current.push(marker);
-        markerPositions.push(position);
-      });
-
-      if (showRouteLine && markerPositions.length > 1) {
-        lineRef.current = leaflet.polyline(markerPositions, {
-          color: "#509AE6",
-          weight: 4,
-          opacity: 0.9,
-          dashArray: "10 8",
-        }).addTo(map);
+      const sourceId = routeSourceIdRef.current;
+      const layerId = routeLayerIdRef.current;
+      if (map.getLayer(layerId)) {
+        map.removeLayer(layerId);
+      }
+      if (map.getSource(sourceId)) {
+        map.removeSource(sourceId);
       }
 
-      if (markerPositions.length === 1) {
-        map.setView(markerPositions[0], Math.max(map.getZoom(), 14), { animate: true });
-      } else if (markerPositions.length > 1) {
-        map.fitBounds(leaflet.latLngBounds(markerPositions), { padding: [42, 42], maxZoom: 14, animate: true });
+      const coordinates = mappablePoints.map((point) => [point.longitude, point.latitude] as [number, number]);
+
+      mappablePoints.forEach((point, index) => {
+        const label = cleanPinLabel(point, index + 1);
+        const element = makeMarkerElement(point, label);
+        const popup = new tt.Popup({ closeButton: false, closeOnClick: false, className: "bpd-tomtom-popup", offset: 38 }).setHTML(tooltipHtml(point));
+        const marker = new tt.Marker({ element, anchor: "bottom" })
+          .setLngLat([point.longitude, point.latitude])
+          .addTo(map);
+
+        element.addEventListener("mouseenter", () => popup.setLngLat([point.longitude, point.latitude]).addTo(map));
+        element.addEventListener("mouseleave", () => popup.remove());
+        element.addEventListener("focus", () => popup.setLngLat([point.longitude, point.latitude]).addTo(map));
+        element.addEventListener("blur", () => popup.remove());
+        element.addEventListener("click", () => onSelectPoint?.(point));
+
+        markersRef.current.push(marker);
+        popupsRef.current.push(popup);
+      });
+
+      if (showRouteLine && coordinates.length > 1) {
+        map.addSource(sourceId, {
+          type: "geojson",
+          data: {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates,
+            },
+          },
+        });
+        map.addLayer({
+          id: layerId,
+          type: "line",
+          source: sourceId,
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#509AE6",
+            "line-width": 4,
+            "line-opacity": 0.9,
+          },
+        });
+      }
+
+      if (coordinates.length === 1) {
+        map.flyTo({ center: coordinates[0], zoom: Math.max(map.getZoom(), 14) });
+      } else if (coordinates.length > 1) {
+        const bounds = coordinates.reduce((lngLatBounds, coordinate) => lngLatBounds.extend(coordinate), new tt.LngLatBounds(coordinates[0], coordinates[0]));
+        map.fitBounds(bounds, { padding: 52, maxZoom: 14 });
       }
     }
 
-    renderPoints();
+    if (mapRef.current?.loaded()) {
+      renderPoints();
+    } else {
+      mapRef.current?.once("load", renderPoints);
+    }
 
     return () => {
       cancelled = true;
     };
-  }, [mapReady, mappablePoints, onSelectPoint, showRouteLine]);
+  }, [apiKey, mappablePoints, onSelectPoint, showRouteLine]);
 
   useEffect(() => {
     return () => {
       markersRef.current.forEach((marker) => marker.remove());
-      lineRef.current?.remove();
+      popupsRef.current.forEach((popup) => popup.remove());
       mapRef.current?.remove();
     };
   }, []);
 
   return (
-    <div className="bpd-leaflet-map" style={{ display: "grid", gap: 10 }}>
+    <div className="bpd-tomtom-map" style={{ display: "grid", gap: 10 }}>
       <style>{styles()}</style>
       <div
         style={{
@@ -240,14 +276,23 @@ export function RouteMap({
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
         }}
       >
-        <div ref={mapElementRef} style={{ height: "100%", width: "100%" }} />
+        {apiKey ? <div ref={mapElementRef} style={{ height: "100%", width: "100%" }} /> : null}
 
-        <div style={{ position: "absolute", inset: 14, pointerEvents: "none", zIndex: 500 }}>
+        <div style={{ position: "absolute", inset: 14, pointerEvents: "none", zIndex: 5 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
             <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#323841", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{title}</span>
             {badge ? <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#509AE6", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{badge}</span> : null}
           </div>
         </div>
+
+        {!apiKey ? (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 24, textAlign: "center", color: "#323841" }}>
+            <div style={{ background: "rgba(255,255,255,0.95)", borderRadius: 14, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+              <strong>TomTom map key needed</strong>
+              <p style={{ margin: "8px 0 0" }}>Add TOMTOM_API_KEY in Railway to load the live map.</p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {mappablePoints.length === 0 ? (
