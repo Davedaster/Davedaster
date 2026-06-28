@@ -3,7 +3,6 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
 import { getDriverRoute } from "../lib/driverRoutes.server";
-import { formatEtaSlot } from "../lib/etaSlots.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -32,6 +31,13 @@ function formatDate(value: string | Date) {
   }).format(new Date(value));
 }
 
+function formatTime(value: string | Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function formatSlot(estimatedArrival: string | Date | null) {
   if (!estimatedArrival) {
     return "ETA pending";
@@ -40,7 +46,7 @@ function formatSlot(estimatedArrival: string | Date | null) {
   const start = new Date(estimatedArrival);
   const end = new Date(start.getTime() + 60 * 60 * 1000);
 
-  return formatEtaSlot(start, end);
+  return `${formatTime(start)} - ${formatTime(end)}`;
 }
 
 function splitLineItems(summary?: string | null) {
