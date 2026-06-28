@@ -37,6 +37,14 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
     throw new Error("Route not found.");
   }
 
+  if (route.status === "DRAFT") {
+    throw new Error("Publish the route before sending customer notifications.");
+  }
+
+  if (route.notificationsSent) {
+    throw new Error("Customer notifications have already been sent for this route.");
+  }
+
   const canSendSms = isTwilioEnabled();
   const canSendEmail = isResendEnabled();
 
@@ -59,7 +67,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
         driverName: route.driver?.name,
         deliveryDate: route.date,
         estimatedArrival: stop.estimatedArrival,
-        slotMinutes: 60,
+        slotMinutes: route.customerSlotMinutes,
         trackingUrl: trackingUrlForRoute(route.id, order.shopifyOrderId),
       };
 
