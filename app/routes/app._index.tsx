@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useFetcher, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -14,9 +14,10 @@ import {
   Badge,
   EmptyState,
   TextField,
+  Checkbox,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -36,7 +37,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { RouteMap } from "../components/RouteMap";
+import { lookupAddress } from "../lib/getAddress.server";
 import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
+import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
 
@@ -53,6 +56,23 @@ type ManualPlanningOrder = ManualDeliveryOrderInput & {
   id: string;
 };
 
+type PlanningOptimisationResult = {
+  ok: true;
+  orderedIds: string[];
+  totalDistanceKm: number | null;
+  totalDurationMinutes: number | null;
+  returnToBase: boolean;
+} | {
+  ok: false;
+  error: string;
+};
+
+const DEFAULT_SHOP_LOCATION = {
+  address: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
+  latitude: 50.5293,
+  longitude: -3.6119,
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const orders = await getDeliveryOrders(admin);
@@ -60,6 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     orders,
     addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
+    routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD),
     defaults: defaultRoutePlanningSettings,
   });
 };
@@ -91,9 +112,61 @@ function parseManualOrders(value: FormDataEntryValue | null): ManualPlanningOrde
   }
 }
 
+function extractPostcode(value: string) {
+  const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
+
+  return match?.[0]?.toUpperCase() || "";
+}
+
+async function resolvePlanningEndpoint(address: string | null | undefined) {
+  const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
+
+  if (trimmedAddress.toLowerCase() === DEFAULT_SHOP_LOCATION.address.toLowerCase()) {
+    return {
+      address: DEFAULT_SHOP_LOCATION.address,
+      latitude: DEFAULT_SHOP_LOCATION.latitude,
+      longitude: DEFAULT_SHOP_LOCATION.longitude,
+    };
+  }
+
+  const lookup = await lookupAddress(extractPostcode(trimmedAddress), trimmedAddress);
+
+  if (typeof lookup.latitude !== "number" || typeof lookup.longitude !== "number") {
+    throw new Error(`Could not find coordinates for ${trimmedAddress}.`);
+  }
+
+  return {
+    address: lookup.formattedAddress || trimmedAddress,
+    latitude: lookup.latitude,
+    longitude: lookup.longitude,
+  };
+}
+
+function planningStopKey(orderId: string) {
+  return `STOP_${orderId}`;
+}
+
+function extractPlanningStopId(waypointName: string) {
+  const key = waypointName.split(",")[0]?.trim() || waypointName.trim();
+  return key.replace(/^STOP_/, "");
+}
+
+async function getSelectedPlanningOrders(admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"], selectedOrderIds: string[], manualOrders: ManualPlanningOrder[]) {
+  const [shopifyOrders, manualDeliveryOrders] = await Promise.all([
+    getDeliveryOrders(admin),
+    Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
+  ]);
+  const ordersById = new Map([...shopifyOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
+
+  return selectedOrderIds
+    .map((id) => ordersById.get(id))
+    .filter((order): order is DeliveryOrder => Boolean(order));
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = String(formData.get("intent") || "saveRoute");
   const routeName = String(formData.get("routeName") || "").trim();
   const routeDate = String(formData.get("routeDate") || "").trim();
   const plannedStartTime = String(formData.get("plannedStartTime") || "").trim();
@@ -101,6 +174,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || defaultRoutePlanningSettings.customerSlotMinutes);
   const startAddress = String(formData.get("startAddress") || "").trim();
   const finishAddress = String(formData.get("finishAddress") || "").trim();
+  const returnToBase = String(formData.get("returnToBase") || "") === "true";
   const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
   const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
     .split(",")
@@ -108,20 +182,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .filter(Boolean);
 
   if (!selectedOrderIds.length) {
-    return json({ ok: false, error: "Select at least one order before saving a draft route." }, { status: 400 });
+    return json({ ok: false, error: "Select at least one order before saving or optimising a route." }, { status: 400 });
   }
 
-  const [shopifyOrders, manualDeliveryOrders] = await Promise.all([
-    getDeliveryOrders(admin),
-    Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
-  ]);
-  const ordersById = new Map([...shopifyOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
-  const selectedOrders = selectedOrderIds
-    .map((id) => ordersById.get(id))
-    .filter((order): order is DeliveryOrder => Boolean(order));
+  const selectedOrders = await getSelectedPlanningOrders(admin, selectedOrderIds, manualOrders);
 
   if (!selectedOrders.length) {
     return json({ ok: false, error: "Selected orders could not be found." }, { status: 400 });
+  }
+
+  if (intent === "optimisePlanning") {
+    try {
+      const start = await resolvePlanningEndpoint(startAddress);
+      const finish = returnToBase ? await resolvePlanningEndpoint(finishAddress || startAddress) : null;
+      const optimisableStops = selectedOrders.filter((order) => typeof order.latitude === "number" && typeof order.longitude === "number");
+
+      if (optimisableStops.length !== selectedOrders.length) {
+        throw new Error("Every selected stop needs latitude and longitude before RouteXL can optimise the planning route.");
+      }
+
+      const locations = [
+        buildRouteXLLocation("Route start", start.address, start.latitude, start.longitude, 0),
+        ...optimisableStops.map((order) => buildRouteXLLocation(
+          planningStopKey(order.id),
+          order.formattedAddress || order.addressSummary,
+          order.latitude!,
+          order.longitude!,
+          Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : defaultRoutePlanningSettings.timePerDropMinutes,
+        )),
+        ...(finish ? [buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0)] : []),
+      ];
+      const optimised = await optimiseLocations(locations);
+
+      if (!optimised.feasible) {
+        throw new Error("RouteXL returned an infeasible route. Check the selected stops and try again.");
+      }
+
+      const orderedIds = optimised.waypoints
+        .slice(1, finish ? -1 : undefined)
+        .map((waypoint) => extractPlanningStopId(waypoint.name))
+        .filter((id) => selectedOrderIds.includes(id));
+
+      return json<PlanningOptimisationResult>({
+        ok: true,
+        orderedIds,
+        totalDistanceKm: optimised.totalDistanceKm,
+        totalDurationMinutes: optimised.totalDurationMinutes,
+        returnToBase,
+      });
+    } catch (error) {
+      return json<PlanningOptimisationResult>({ ok: false, error: error instanceof Error ? error.message : "Planning optimisation failed." }, { status: 400 });
+    }
   }
 
   await createRouteDraft({
@@ -132,7 +243,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     timePerDropMinutes,
     customerSlotMinutes,
     startAddress,
-    finishAddress,
+    finishAddress: returnToBase ? finishAddress : selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || finishAddress,
   });
 
   return redirect("/app/routes");
@@ -192,22 +303,36 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
   );
 }
 
-function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedStartTime: string, timePerDropMinutes: string): Stop {
-  const [hours, minutes = "0"] = plannedStartTime.split(":");
+function formatEtaTime(startTime: string, offsetMinutes: number) {
+  const [hours, minutes = "0"] = startTime.split(":");
   const startMinutes = Number(hours) * 60 + Number(minutes);
-  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
-  const etaMinutes = startMinutes + ((stopNumber - 1) * dropMinutes);
+  const etaMinutes = startMinutes + offsetMinutes;
   const etaHours = Math.floor(etaMinutes / 60) % 24;
   const etaMinuteValue = etaMinutes % 60;
+
+  return `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`;
+}
+
+function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedStartTime: string, timePerDropMinutes: string): Stop {
+  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
 
   return {
     id: order.id,
     orderNumber: order.name,
     customerName: order.customerName,
     postcode: order.postcode || "",
-    eta: `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`,
+    eta: formatEtaTime(plannedStartTime, (stopNumber - 1) * dropMinutes),
     isLocked: false,
   };
+}
+
+function refreshStopEtas(stops: Stop[], plannedStartTime: string, timePerDropMinutes: string) {
+  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
+
+  return stops.map((stop, index) => ({
+    ...stop,
+    eta: formatEtaTime(plannedStartTime, index * dropMinutes),
+  }));
 }
 
 function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
@@ -263,26 +388,40 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
-function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryOrder[]; selectedIds: Set<string>; onToggleOrder: (order: DeliveryOrder) => void }) {
+function DeliveryMap({ orders, selectedIds, routeStopIds, onToggleOrder }: { orders: DeliveryOrder[]; selectedIds: Set<string>; routeStopIds: string[]; onToggleOrder: (order: DeliveryOrder) => void }) {
   const ordersWithCoordinates = orders.filter(hasCoordinates);
   const ordersWithoutCoordinates = orders.filter((order) => !hasCoordinates(order));
   const ordersById = new Map(orders.map((order) => [order.id, order]));
-  const mapPoints = ordersWithCoordinates.map((order) => ({
-    id: order.id,
-    label: order.name.replace("#", ""),
-    title: `${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
-    latitude: order.latitude,
-    longitude: order.longitude,
-    selected: selectedIds.has(order.id),
-  }));
+  const routeStopSet = new Set(routeStopIds);
+  const routePoints = routeStopIds
+    .map((id) => ordersById.get(id))
+    .filter((order): order is DeliveryOrder => Boolean(order) && hasCoordinates(order))
+    .map((order, index) => ({
+      id: order.id,
+      label: String(index + 1),
+      title: `${index + 1}. ${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
+      latitude: order.latitude,
+      longitude: order.longitude,
+      selected: true,
+    }));
+  const unselectedPoints = ordersWithCoordinates
+    .filter((order) => !routeStopSet.has(order.id))
+    .map((order) => ({
+      id: order.id,
+      label: order.name.replace("#", ""),
+      title: `${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
+      latitude: order.latitude,
+      longitude: order.longitude,
+      selected: selectedIds.has(order.id),
+    }));
 
   return (
     <BlockStack gap="300">
       <RouteMap
-        title="Delivery planning map"
-        badge={`${ordersWithCoordinates.length} pins`}
-        points={mapPoints}
-        showRouteLine={false}
+        title="Live planning map"
+        badge={`${routeStopIds.length} selected`}
+        points={[...routePoints, ...unselectedPoints]}
+        showRouteLine={routePoints.length > 1}
         onSelectPoint={(point) => {
           const order = ordersById.get(point.id);
           if (order) {
@@ -310,9 +449,26 @@ function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryO
   );
 }
 
+function formatDuration(minutes: number | null) {
+  if (minutes === null || !Number.isFinite(minutes)) {
+    return "Pending";
+  }
+
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const mins = rounded % 60;
+
+  if (!hours) {
+    return `${mins} min`;
+  }
+
+  return `${hours} hr ${mins} min`;
+}
+
 export default function OrdersMap() {
-  const { orders, addressLookupEnabled, defaults } = useLoaderData<typeof loader>();
+  const { orders, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const optimisationFetcher = useFetcher<PlanningOptimisationResult>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [routeName, setRouteName] = useState("");
   const [routeDate, setRouteDate] = useState(defaults.routeDate);
@@ -321,18 +477,43 @@ export default function OrdersMap() {
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
   const [startAddress, setStartAddress] = useState(defaults.startAddress);
   const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
+  const [returnToBase, setReturnToBase] = useState(true);
   const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
   const [manualCustomerName, setManualCustomerName] = useState("");
   const [manualAddress, setManualAddress] = useState("");
   const [manualEmail, setManualEmail] = useState("");
   const [manualPhone, setManualPhone] = useState("");
   const [manualItems, setManualItems] = useState("");
+  const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
+  const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
 
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
   const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
+  const ordersById = useMemo(() => new Map(allOrders.map((order) => [order.id, order])), [allOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
   const manualOrdersJson = JSON.stringify(manualOrders);
+  const optimisationRunning = optimisationFetcher.state !== "idle";
+  const optimisationError = optimisationFetcher.data && !optimisationFetcher.data.ok ? optimisationFetcher.data.error : null;
+
+  useEffect(() => {
+    if (!optimisationFetcher.data?.ok) {
+      return;
+    }
+
+    const orderedStops = optimisationFetcher.data.orderedIds
+      .map((id) => stops.find((stop) => stop.id === id))
+      .filter((stop): stop is Stop => Boolean(stop));
+    const missingStops = stops.filter((stop) => !optimisationFetcher.data?.ok || !optimisationFetcher.data.orderedIds.includes(stop.id));
+
+    setStops(refreshStopEtas([...orderedStops, ...missingStops], plannedStartTime, timePerDropMinutes));
+    setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
+    setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
+  }, [optimisationFetcher.data]);
+
+  useEffect(() => {
+    setStops((currentStops) => refreshStopEtas(currentStops, plannedStartTime, timePerDropMinutes));
+  }, [plannedStartTime, timePerDropMinutes]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -340,6 +521,11 @@ export default function OrdersMap() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  const clearOptimisedStats = () => {
+    setRouteDistanceKm(null);
+    setRouteDurationMinutes(null);
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -349,8 +535,9 @@ export default function OrdersMap() {
         const oldIndex = items.findIndex((i) => i.id === active.id);
         const newIndex = items.findIndex((i) => i.id === over.id);
 
-        return arrayMove(items, oldIndex, newIndex);
+        return refreshStopEtas(arrayMove(items, oldIndex, newIndex), plannedStartTime, timePerDropMinutes);
       });
+      clearOptimisedStats();
     }
   };
 
@@ -361,19 +548,37 @@ export default function OrdersMap() {
 
     setStops((currentStops) => {
       if (currentStops.some((stop) => stop.id === order.id)) {
-        return currentStops.filter((stop) => stop.id !== order.id);
+        return refreshStopEtas(currentStops.filter((stop) => stop.id !== order.id), plannedStartTime, timePerDropMinutes);
       }
 
-      return [...currentStops, deliveryOrderToStop(order, currentStops.length + 1, plannedStartTime, timePerDropMinutes)];
+      return refreshStopEtas([...currentStops, deliveryOrderToStop(order, currentStops.length + 1, plannedStartTime, timePerDropMinutes)], plannedStartTime, timePerDropMinutes);
     });
+    clearOptimisedStats();
   };
 
   const removeStop = (id: string) => {
-    setStops(stops.filter((s) => s.id !== id));
+    setStops(refreshStopEtas(stops.filter((s) => s.id !== id), plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
   };
 
   const toggleLock = (id: string) => {
     setStops(stops.map((s) => s.id === id ? { ...s, isLocked: !s.isLocked } : s));
+  };
+
+  const optimisePlanningRoute = () => {
+    const formData = new FormData();
+    formData.set("intent", "optimisePlanning");
+    formData.set("selectedOrderIds", selectedOrderIds);
+    formData.set("manualOrdersJson", manualOrdersJson);
+    formData.set("routeDate", routeDate);
+    formData.set("plannedStartTime", plannedStartTime);
+    formData.set("timePerDropMinutes", timePerDropMinutes);
+    formData.set("customerSlotMinutes", customerSlotMinutes);
+    formData.set("startAddress", startAddress);
+    formData.set("finishAddress", finishAddress);
+    formData.set("returnToBase", returnToBase ? "true" : "false");
+
+    optimisationFetcher.submit(formData, { method: "post" });
   };
 
   const addManualOrder = () => {
@@ -397,7 +602,8 @@ export default function OrdersMap() {
     const deliveryOrder = manualOrderToDeliveryOrder(manualOrder);
 
     setManualOrders((currentOrders) => [...currentOrders, manualOrder]);
-    setStops((currentStops) => [...currentStops, deliveryOrderToStop(deliveryOrder, currentStops.length + 1, plannedStartTime, timePerDropMinutes)]);
+    setStops((currentStops) => refreshStopEtas([...currentStops, deliveryOrderToStop(deliveryOrder, currentStops.length + 1, plannedStartTime, timePerDropMinutes)], plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
     setManualCustomerName("");
     setManualAddress("");
     setManualEmail("");
@@ -407,7 +613,8 @@ export default function OrdersMap() {
 
   const removeManualOrder = (id: string) => {
     setManualOrders((currentOrders) => currentOrders.filter((order) => order.id !== id));
-    setStops((currentStops) => currentStops.filter((stop) => stop.id !== id));
+    setStops((currentStops) => refreshStopEtas(currentStops.filter((stop) => stop.id !== id), plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
   };
 
   return (
@@ -420,11 +627,16 @@ export default function OrdersMap() {
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Showing Rapid Delivery, Free Rapid Delivery and Local Delivery orders from the last 7 working days. Manual orders can be added on this screen too.
+                    Click delivery pins to build a route, then optimise it live before saving the draft.
                   </Text>
                   {!addressLookupEnabled ? (
                     <Text as="p" variant="bodySm" tone="critical">
                       getAddress.io lookup is not enabled yet. Add GETADDRESS_API_KEY to the app environment before testing live coordinates.
+                    </Text>
+                  ) : null}
+                  {!routexlEnabled ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      RouteXL is not enabled yet. Add ROUTEXL_USERNAME and ROUTEXL_PASSWORD before using live planning optimisation.
                     </Text>
                   ) : null}
                   {actionData && "error" in actionData ? (
@@ -444,35 +656,41 @@ export default function OrdersMap() {
                   <p>No orders matched the current delivery filters.</p>
                 </EmptyState>
               ) : (
-                <DeliveryMap orders={allOrders} selectedIds={selectedIds} onToggleOrder={toggleOrder} />
+                <DeliveryMap orders={allOrders} selectedIds={selectedIds} routeStopIds={stops.map((stop) => stop.id)} onToggleOrder={toggleOrder} />
               )}
             </Box>
           </LegacyCard>
         </Layout.Section>
 
         <Layout.Section variant="oneThird">
-          <LegacyCard title="Current Route" actions={[{ content: "Optimise", onAction: () => {} }]}>
+          <LegacyCard title="Current Route">
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="300">
                 <BlockStack gap="100">
                   <InlineStack align="space-between">
                     <Text as="span" variant="bodySm">Stops: {stops.length}</Text>
-                    <Text as="span" variant="bodySm">Mileage: pending</Text>
+                    <Text as="span" variant="bodySm">Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}</Text>
                   </InlineStack>
                   <InlineStack align="space-between">
-                    <Text as="span" variant="bodySm">Time: pending</Text>
-                    <Badge tone="info">Draft</Badge>
+                    <Text as="span" variant="bodySm">Complete route time: {formatDuration(routeDurationMinutes)}</Text>
+                    <Badge tone={routeDistanceKm === null ? "info" : "success"}>{routeDistanceKm === null ? "Not optimised" : "Optimised"}</Badge>
                   </InlineStack>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {returnToBase ? "Route includes return to base." : "Route ends at the last drop."}
+                  </Text>
+                  {optimisationError ? <Text as="p" variant="bodySm" tone="critical">{optimisationError}</Text> : null}
                 </BlockStack>
 
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Route planning</Text>
                   <TextField label="Route date" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
                   <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
-                  <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
+                  <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={(value) => { setTimePerDropMinutes(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
-                  <TextField label="Driver start location" value={startAddress} onChange={setStartAddress} autoComplete="off" multiline={2} />
-                  <TextField label="Driver finish location" value={finishAddress} onChange={setFinishAddress} autoComplete="off" multiline={2} />
+                  <TextField label="Driver start location" value={startAddress} onChange={(value) => { setStartAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} />
+                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
+                  {returnToBase ? <TextField label="Driver finish location" value={finishAddress} onChange={(value) => { setFinishAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} /> : null}
+                  <Button onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0}>Optimise selected route</Button>
                 </BlockStack>
               </BlockStack>
             </Box>
@@ -512,6 +730,7 @@ export default function OrdersMap() {
             </DndContext>
             <Box padding="300">
               <Form method="post">
+                <input type="hidden" name="intent" value="saveRoute" />
                 <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
                 <input type="hidden" name="manualOrdersJson" value={manualOrdersJson} />
                 <input type="hidden" name="routeDate" value={routeDate} />
@@ -520,6 +739,7 @@ export default function OrdersMap() {
                 <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
                 <input type="hidden" name="startAddress" value={startAddress} />
                 <input type="hidden" name="finishAddress" value={finishAddress} />
+                <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
                 <BlockStack gap="300">
                   <TextField
                     label="Draft route name, optional"
