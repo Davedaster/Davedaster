@@ -91,6 +91,12 @@ export async function lookupAddress(postcode: string | null, searchText: string)
   const cleanPostcode = normalisePostcode(postcode);
 
   if (!apiKey || !cleanPostcode) {
+    console.warn("getAddress lookup skipped", {
+      hasApiKey: Boolean(apiKey),
+      postcode: postcode || "",
+      cleanPostcode,
+    });
+
     return {
       formattedAddress: searchText || "No address found",
       postcode: postcode || "",
@@ -101,11 +107,18 @@ export async function lookupAddress(postcode: string | null, searchText: string)
     };
   }
 
-  const response = await fetch(
-    `https://api.getAddress.io/find/${encodeURIComponent(cleanPostcode)}?api-key=${encodeURIComponent(apiKey)}&expand=true`,
-  );
+  const url = `https://api.getAddress.io/find/${encodeURIComponent(cleanPostcode)}?api-key=${encodeURIComponent(apiKey)}&expand=true`;
+  const response = await fetch(url);
 
   if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    console.warn("getAddress lookup failed", {
+      postcode: cleanPostcode,
+      status: response.status,
+      statusText: response.statusText,
+      body: body.slice(0, 500),
+    });
+
     return {
       formattedAddress: searchText || cleanPostcode,
       postcode: postcode || "",
@@ -120,6 +133,14 @@ export async function lookupAddress(postcode: string | null, searchText: string)
   const addresses = payload.addresses || [];
   const bestMatch = pickBestAddress(addresses, searchText);
   const firstAddress = addresses[0] ? formatGetAddressResult(addresses[0]) : null;
+
+  if (typeof payload.latitude !== "number" || typeof payload.longitude !== "number") {
+    console.warn("getAddress lookup returned no coordinates", {
+      postcode: cleanPostcode,
+      returnedPostcode: payload.postcode || "",
+      addressCount: addresses.length,
+    });
+  }
 
   return {
     formattedAddress: bestMatch?.address || firstAddress || searchText || cleanPostcode,
