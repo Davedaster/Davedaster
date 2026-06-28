@@ -26,7 +26,13 @@ type GetAddressFindResponse = {
 };
 
 function normalisePostcode(postcode: string | null | undefined) {
-  return (postcode || "").replace(/\s+/g, "").trim().toUpperCase();
+  const compact = (postcode || "").replace(/\s+/g, "").trim().toUpperCase();
+
+  if (compact.length > 3) {
+    return `${compact.slice(0, -3)} ${compact.slice(-3)}`;
+  }
+
+  return compact;
 }
 
 function normaliseText(value: string | null | undefined) {
