@@ -132,6 +132,7 @@ model OrderStop {
   deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
   shopifyOrderId    String
   shopifyOrderNumber String
+  orderSource       String   @default("shopify") // shopify, manual
   customerName      String?
   customerEmail     String?
   customerPhone     String?

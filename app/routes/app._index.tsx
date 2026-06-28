@@ -37,7 +37,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { authenticate } from "../shopify.server";
-import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
+import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
 
 interface Stop {
   id: string;
@@ -47,6 +47,10 @@ interface Stop {
   eta: string;
   isLocked: boolean;
 }
+
+type ManualPlanningOrder = ManualDeliveryOrderInput & {
+  id: string;
+};
 
 const UK_BOUNDS = {
   north: 58.8,
@@ -66,6 +70,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 };
 
+function parseManualOrders(value: FormDataEntryValue | null): ManualPlanningOrder[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as ManualPlanningOrder[];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((order) => ({
+        id: String(order.id || "").trim(),
+        customerName: String(order.customerName || "").trim(),
+        address: String(order.address || "").trim(),
+        email: String(order.email || "").trim(),
+        phone: String(order.phone || "").trim(),
+        lineItemSummary: String(order.lineItemSummary || "").trim(),
+      }))
+      .filter((order) => order.id && order.customerName && order.address && order.lineItemSummary);
+  } catch {
+    return [];
+  }
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
@@ -76,6 +107,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || defaultRoutePlanningSettings.customerSlotMinutes);
   const startAddress = String(formData.get("startAddress") || "").trim();
   const finishAddress = String(formData.get("finishAddress") || "").trim();
+  const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
   const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
     .split(",")
     .map((id) => id.trim())
@@ -85,8 +117,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ ok: false, error: "Select at least one order before saving a draft route." }, { status: 400 });
   }
 
-  const orders = await getDeliveryOrders(admin);
-  const ordersById = new Map(orders.map((order) => [order.id, order]));
+  const [shopifyOrders, manualDeliveryOrders] = await Promise.all([
+    getDeliveryOrders(admin),
+    Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
+  ]);
+  const ordersById = new Map([...shopifyOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
   const selectedOrders = selectedOrderIds
     .map((id) => ordersById.get(id))
     .filter((order): order is DeliveryOrder => Boolean(order));
@@ -181,7 +216,40 @@ function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedSt
   };
 }
 
+function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
+  return {
+    id: order.id,
+    name: order.id.replace("manual:", "MANUAL-").toUpperCase(),
+    createdAt: new Date().toISOString(),
+    customerName: order.customerName,
+    email: order.email || null,
+    phone: order.phone || null,
+    shippingMethod: "Manual route entry",
+    fulfilmentStatus: "unfulfilled",
+    financialStatus: "manual",
+    postcode: "Manual",
+    addressSummary: order.address,
+    formattedAddress: order.address,
+    hasDeliveryAddress: true,
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: "NEEDS_LOCATION_CHECK",
+    addressConfidence: "LOW",
+    latitude: null,
+    longitude: null,
+    lineItemSummary: order.lineItemSummary,
+    hasManualOverride: true,
+    manualAddress: order.address,
+    manualAddressNotes: "Manual order added from the planning map",
+    orderSource: "manual",
+  };
+}
+
 function addressLabel(order: DeliveryOrder) {
+  if (order.orderSource === "manual") {
+    return "Manual order";
+  }
+
   if (order.hasManualOverride) {
     return "Manual address";
   }
@@ -325,7 +393,7 @@ function DeliveryMap({ orders, selectedIds, onToggleOrder }: { orders: DeliveryO
                 <Text as="span" variant="bodySm">
                   {order.name} · {order.customerName} · {order.postcode || "No postcode"}
                 </Text>
-                <Badge tone="warning">{addressLabel(order)}</Badge>
+                <Badge tone={order.orderSource === "manual" ? "info" : "warning"}>{addressLabel(order)}</Badge>
               </InlineStack>
             ))}
           </BlockStack>
@@ -346,9 +414,18 @@ export default function OrdersMap() {
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
   const [startAddress, setStartAddress] = useState(defaults.startAddress);
   const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
+  const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
+  const [manualCustomerName, setManualCustomerName] = useState("");
+  const [manualAddress, setManualAddress] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
+  const [manualItems, setManualItems] = useState("");
 
+  const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
+  const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
+  const manualOrdersJson = JSON.stringify(manualOrders);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -371,7 +448,7 @@ export default function OrdersMap() {
   };
 
   const toggleOrder = (order: DeliveryOrder) => {
-    if (!hasCoordinates(order)) {
+    if (!hasCoordinates(order) && order.orderSource !== "manual") {
       return;
     }
 
@@ -392,6 +469,40 @@ export default function OrdersMap() {
     setStops(stops.map((s) => s.id === id ? { ...s, isLocked: !s.isLocked } : s));
   };
 
+  const addManualOrder = () => {
+    const customerName = manualCustomerName.trim();
+    const address = manualAddress.trim();
+    const lineItemSummary = manualItems.trim();
+
+    if (!customerName || !address || !lineItemSummary) {
+      return;
+    }
+
+    const nextNumber = manualOrders.length + 1;
+    const manualOrder: ManualPlanningOrder = {
+      id: `manual:${Date.now()}-${nextNumber}`,
+      customerName,
+      address,
+      email: manualEmail.trim(),
+      phone: manualPhone.trim(),
+      lineItemSummary,
+    };
+    const deliveryOrder = manualOrderToDeliveryOrder(manualOrder);
+
+    setManualOrders((currentOrders) => [...currentOrders, manualOrder]);
+    setStops((currentStops) => [...currentStops, deliveryOrderToStop(deliveryOrder, currentStops.length + 1, plannedStartTime, timePerDropMinutes)]);
+    setManualCustomerName("");
+    setManualAddress("");
+    setManualEmail("");
+    setManualPhone("");
+    setManualItems("");
+  };
+
+  const removeManualOrder = (id: string) => {
+    setManualOrders((currentOrders) => currentOrders.filter((order) => order.id !== id));
+    setStops((currentStops) => currentStops.filter((stop) => stop.id !== id));
+  };
+
   return (
     <Page title="Orders Map" fullWidth>
       <Layout>
@@ -402,7 +513,7 @@ export default function OrdersMap() {
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Showing Rapid Delivery, Free Rapid Delivery and Local Delivery orders from the last 7 working days.
+                    Showing Rapid Delivery, Free Rapid Delivery and Local Delivery orders from the last 7 working days. Manual orders can be added on this screen too.
                   </Text>
                   {!addressLookupEnabled ? (
                     <Text as="p" variant="bodySm" tone="critical">
@@ -413,12 +524,12 @@ export default function OrdersMap() {
                     <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text>
                   ) : null}
                 </BlockStack>
-                <Badge tone="info">{orders.length} orders</Badge>
+                <Badge tone="info">{allOrders.length} orders</Badge>
               </InlineStack>
             </Box>
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
-              {orders.length === 0 ? (
+              {allOrders.length === 0 ? (
                 <EmptyState
                   heading="No matching delivery orders found"
                   image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
@@ -426,7 +537,7 @@ export default function OrdersMap() {
                   <p>No orders matched the current delivery filters.</p>
                 </EmptyState>
               ) : (
-                <DeliveryMap orders={orders} selectedIds={selectedIds} onToggleOrder={toggleOrder} />
+                <DeliveryMap orders={allOrders} selectedIds={selectedIds} onToggleOrder={toggleOrder} />
               )}
             </Box>
           </LegacyCard>
@@ -458,6 +569,29 @@ export default function OrdersMap() {
                 </BlockStack>
               </BlockStack>
             </Box>
+
+            <Box padding="300" borderBlockEndWidth="025" borderColor="border">
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingSm">Add manual order</Text>
+                <TextField label="Customer name" value={manualCustomerName} onChange={setManualCustomerName} autoComplete="off" />
+                <TextField label="Address" value={manualAddress} onChange={setManualAddress} autoComplete="off" multiline={2} />
+                <TextField label="Email" type="email" value={manualEmail} onChange={setManualEmail} autoComplete="off" />
+                <TextField label="Phone" value={manualPhone} onChange={setManualPhone} autoComplete="off" />
+                <TextField label="What they ordered" value={manualItems} onChange={setManualItems} autoComplete="off" multiline={2} />
+                <Button onClick={addManualOrder} disabled={!manualCustomerName.trim() || !manualAddress.trim() || !manualItems.trim()}>Add manual order to route</Button>
+                {manualOrders.length ? (
+                  <BlockStack gap="100">
+                    {manualOrders.map((order) => (
+                      <InlineStack key={order.id} align="space-between">
+                        <Text as="span" variant="bodySm">{order.customerName} · {order.lineItemSummary}</Text>
+                        <Button variant="tertiary" tone="critical" onClick={() => removeManualOrder(order.id)}>Remove</Button>
+                      </InlineStack>
+                    ))}
+                  </BlockStack>
+                ) : null}
+              </BlockStack>
+            </Box>
+
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -472,6 +606,7 @@ export default function OrdersMap() {
             <Box padding="300">
               <Form method="post">
                 <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
+                <input type="hidden" name="manualOrdersJson" value={manualOrdersJson} />
                 <input type="hidden" name="routeDate" value={routeDate} />
                 <input type="hidden" name="plannedStartTime" value={plannedStartTime} />
                 <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
