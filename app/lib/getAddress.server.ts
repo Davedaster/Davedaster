@@ -24,11 +24,11 @@ function normalisePostcode(postcode: string | null | undefined) {
 }
 
 function buildSearchQuery(postcode: string, searchText: string) {
-  const parts = [searchText, postcode, "United Kingdom"]
-    .map((part) => part.trim())
-    .filter(Boolean);
+  if (postcode) {
+    return `${postcode}, United Kingdom`;
+  }
 
-  return Array.from(new Set(parts)).join(", ");
+  return searchText;
 }
 
 export async function lookupAddress(postcode: string | null, searchText: string): Promise<AddressLookupResult> {
