@@ -75,7 +75,13 @@ export default function Routes() {
                           {route.name}
                         </Text>
                         <Text as="p" variant="bodySm" tone="subdued">
-                          {formatDate(route.date)} · {route.stops.length} stops
+                          {formatDate(route.date)} · Start {route.plannedStartTime || "05:00"} · {route.timePerDropMinutes || 10} min/drop · {route.stops.length} stops
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Start: {route.startAddress || "Bathroom Panels Direct"}
+                        </Text>
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Finish: {route.finishAddress || "Bathroom Panels Direct"}
                         </Text>
                         <Text as="p" variant="bodySm" tone="subdued">
                           {route.stops

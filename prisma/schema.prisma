@@ -60,6 +60,15 @@ model Route {
   driverAccessToken String?  @unique
   driverAccessTokenCreatedAt DateTime?
   driverRouteLinkSentAt DateTime?
+  startAddress      String?
+  startLatitude     Float?
+  startLongitude    Float?
+  finishAddress     String?
+  finishLatitude    Float?
+  finishLongitude   Float?
+  plannedStartTime  String   @default("05:00")
+  timePerDropMinutes Int     @default(10)
+  customerSlotMinutes Int    @default(60)
   totalMileage      Float?
   totalDuration     Int?     // in seconds or minutes
   notificationsSent Boolean  @default(false)
