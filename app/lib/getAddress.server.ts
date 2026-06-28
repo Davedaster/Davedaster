@@ -118,7 +118,7 @@ console.warn("POSTCODE DEBUG", {
 
   const url = `https://api.getAddress.io/find/${encodeURIComponent(cleanPostcode)}?api-key=${encodeURIComponent(apiKey)}&expand=true`;
   const response = await fetch(url);
-
+console.warn("GETADDRESS URL", url);
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     console.warn("getAddress lookup failed", {
