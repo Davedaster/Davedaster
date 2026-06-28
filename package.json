@@ -38,8 +38,8 @@
     "@shopify/polaris-icons": "^9.3.1",
     "@shopify/shopify-app-remix": "^4.1.0",
     "@shopify/shopify-app-session-storage-prisma": "^8.0.0",
+    "@tomtom-international/web-sdk-maps": "^6.25.0",
     "isbot": "^5.1.0",
-    "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "vite-tsconfig-paths": "^5.0.1"
@@ -49,7 +49,6 @@
     "@remix-run/route-config": "^2.16.1",
     "@shopify/api-codegen-preset": "^1.1.1",
     "@types/eslint": "^9.6.1",
-    "@types/leaflet": "^1.9.16",
     "@types/node": "^22.2.0",
     "@types/react": "^18.2.31",
     "@types/react-dom": "^18.2.14",
