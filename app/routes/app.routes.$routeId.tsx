@@ -57,8 +57,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "publish") {
     try {
+      await calculateEtaSlots(routeId);
       await publishRoute(routeId);
       await tagPublishedRouteOrders(admin, routeId);
+      await sendBookedSlotNotifications(routeId);
       return redirect(`/app/routes/${routeId}`);
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Route publishing failed." }, { status: 400 });
@@ -231,7 +233,7 @@ export default function RouteDetails() {
       title={route.name}
       backAction={{ content: "Routes", url: "/app/routes" }}
       primaryAction={canPublish ? {
-        content: "Publish route",
+        content: "Publish route and notify customers",
         disabled: route.stops.length === 0,
         onAction: () => document.getElementById("publish-route-form")?.requestSubmit(),
       } : undefined}
@@ -264,6 +266,12 @@ export default function RouteDetails() {
 
               {actionData && "error" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
+              ) : null}
+
+              {route.status === "DRAFT" ? (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Draft routes are private. Customers do not receive delivery notifications or tracker links until you publish the route.
+                </Text>
               ) : null}
 
               {!routexlEnabled ? (
@@ -381,7 +389,7 @@ export default function RouteDetails() {
           <LegacyCard title="History">
             <DataTable
               columnContentTypes={["text", "text", "text"]}
-              headings={["Time", "Action", "Details"]}
+              headings={["Date", "Action", "Details"]}
               rows={historyRows}
             />
           </LegacyCard>

@@ -39,6 +39,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { RouteMap } from "../components/RouteMap";
 import { lookupAddress } from "../lib/getAddress.server";
 import { createRouteDraft, defaultRoutePlanningSettings } from "../lib/routeDrafts.server";
+import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
@@ -75,13 +76,16 @@ const DEFAULT_SHOP_LOCATION = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const orders = await getDeliveryOrders(admin);
+  const [orders, defaults] = await Promise.all([
+    getDeliveryOrders(admin),
+    getRoutePlanningDefaults(),
+  ]);
 
   return json({
     orders,
     addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
     routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD),
-    defaults: defaultRoutePlanningSettings,
+    defaults,
   });
 };
 
@@ -477,7 +481,7 @@ export default function OrdersMap() {
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
   const [startAddress, setStartAddress] = useState(defaults.startAddress);
   const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
-  const [returnToBase, setReturnToBase] = useState(true);
+  const [returnToBase, setReturnToBase] = useState(defaults.returnToBaseDefault ?? true);
   const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
   const [manualCustomerName, setManualCustomerName] = useState("");
   const [manualAddress, setManualAddress] = useState("");
@@ -489,7 +493,6 @@ export default function OrdersMap() {
 
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
   const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
-  const ordersById = useMemo(() => new Map(allOrders.map((order) => [order.id, order])), [allOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
   const manualOrdersJson = JSON.stringify(manualOrders);
@@ -747,7 +750,7 @@ export default function OrdersMap() {
                     value={routeName}
                     onChange={setRouteName}
                     autoComplete="off"
-                    placeholder="Example, Chris, North Route"
+                    placeholder="Example, London route or Northern route"
                   />
                   <Button fullWidth submit variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
                 </BlockStack>
