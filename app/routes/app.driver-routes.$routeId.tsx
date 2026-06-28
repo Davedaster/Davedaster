@@ -21,7 +21,7 @@ import type { PointerEvent } from "react";
 
 import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { markStopFailedDelivery } from "../lib/failedDelivery.server";
-import { formatEtaSlot } from "../lib/etaSlots.server";
+import { formatEtaSlot } from "../lib/etaSlots";
 import { getDriverRoute, startDriverRoute } from "../lib/driverRoutes.server";
 import { saveProofOfDelivery } from "../lib/proofOfDelivery.server";
 import { deleteProofPhoto } from "../lib/proofPhotos.server";
