@@ -3,11 +3,11 @@ import { useEffect, useState } from 'react';
 const SUPPORT_EMAIL = 'deliveries@bathroompanelsdirect.co.uk';
 
 function buildSupportEmailHref(trackingUrl: string) {
-  const subject = 'Delivery tracking enquiry';
+  const subject = 'Panel delivery tracking enquiry';
   const body = [
     'Hi Bathroom Panels Direct,',
     '',
-    'I need help with my delivery tracking.',
+    'I need help with my panel delivery tracking.',
     '',
     'Order number:',
     '',
@@ -35,11 +35,11 @@ function safePlaceSavedMessage() {
   const status = new URLSearchParams(window.location.search).get('instructions');
 
   if (status === 'saved') {
-    return 'Delivery instructions saved for the driver.';
+    return 'Panel delivery instructions saved for the driver.';
   }
 
   if (status === 'closed') {
-    return 'This delivery has already been updated, so instructions can no longer be changed here.';
+    return 'This panel delivery has already been updated, so instructions can no longer be changed here.';
   }
 
   if (status === 'missing') {
@@ -115,7 +115,7 @@ export function CustomerSupportCard() {
       </p>
       <h3 style={{ margin: '0 0 10px' }}>Customer support</h3>
       <p style={{ margin: '0 0 8px', color: '#667085' }}>
-        Our delivery team is here to help with delivery updates and tracking enquiries.
+        Our delivery team is here to help with panel delivery updates and tracking enquiries.
       </p>
       <p style={{ margin: '0 0 8px', color: '#667085', fontSize: 14 }}>
         Support email: <strong style={{ color: '#323841' }}>{SUPPORT_EMAIL}</strong>
@@ -127,7 +127,7 @@ export function CustomerSupportCard() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <a
           href={buildSupportEmailHref(trackingUrl)}
-          aria-label={`Email delivery support at ${SUPPORT_EMAIL}`}
+          aria-label={`Email panel delivery support at ${SUPPORT_EMAIL}`}
           style={{
             background: '#509AE6',
             color: '#ffffff',
@@ -161,7 +161,7 @@ export function CustomerSupportCard() {
       <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #BFDDF8' }}>
         <h3 style={{ margin: '0 0 8px' }}>Not going to be in?</h3>
         <p style={{ margin: '0 0 12px', color: '#667085', fontSize: 14 }}>
-          Deliveries cannot be rearranged from this page. If nobody is available, our driver will use these instructions and leave your order in a suitable safe place where possible.
+          Panel deliveries cannot be rearranged from this page. If nobody is available, our driver will use these instructions and leave your order in a suitable safe place where possible.
         </p>
         {safePlaceMessage ? (
           <p style={{ margin: '0 0 12px', color: '#16a34a', fontSize: 14, fontWeight: 800 }}>
@@ -199,7 +199,7 @@ export function CustomerSupportCard() {
             disabled={!safePlaceAction}
             style={{ border: '1px solid #509AE6', background: '#509AE6', color: '#ffffff', padding: '10px 14px', borderRadius: 999, fontWeight: 700, cursor: safePlaceAction ? 'pointer' : 'not-allowed', opacity: safePlaceAction ? 1 : 0.6 }}
           >
-            Save delivery instructions
+            Save panel delivery instructions
           </button>
         </form>
       </div>
