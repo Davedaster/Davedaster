@@ -116,7 +116,7 @@ console.warn("POSTCODE DEBUG", {
     };
   }
 
-  const url = `https://api.getAddress.io/find/${encodeURIComponent(cleanPostcode)}?api-key=${encodeURIComponent(apiKey)}&expand=true`;
+  const url = `https://api.getaddress.io/find/${encodeURIComponent(cleanPostcode)}?api-key=${encodeURIComponent(apiKey)}&expand=true`;
   const response = await fetch(url);
 console.warn("GETADDRESS URL", url);
   if (!response.ok) {
