@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useSearchParams } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -76,7 +76,6 @@ function statusTone(status: string) {
 export default function ReturnsPage() {
   const { tickets, assignableStops, query } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const [searchParams] = useSearchParams();
   const [selectedStopId, setSelectedStopId] = useState("");
   const [orderNumber, setOrderNumber] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -86,6 +85,7 @@ export default function ReturnsPage() {
   const [postcode, setPostcode] = useState("");
   const [itemsText, setItemsText] = useState("");
   const [notes, setNotes] = useState("");
+  const [searchQuery, setSearchQuery] = useState(query);
 
   const stopOptions = useMemo(() => [
     { label: "Not assigned to a route stop yet", value: "" },
@@ -168,7 +168,8 @@ export default function ReturnsPage() {
                   <TextField
                     label="Search"
                     name="q"
-                    defaultValue={searchParams.get("q") || query}
+                    value={searchQuery}
+                    onChange={setSearchQuery}
                     autoComplete="off"
                     placeholder="Order number, name, address or postcode"
                   />
