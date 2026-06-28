@@ -13,6 +13,14 @@ type RouteMapPoint = {
   tooltipLines?: string[];
 };
 
+type RouteEndpoint = {
+  address: string;
+  label: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  status: "START" | "FINISH";
+};
+
 type RouteMapProps = {
   points: RouteMapPoint[];
   height?: number;
@@ -21,13 +29,22 @@ type RouteMapProps = {
   showRouteLine?: boolean;
   onSelectPoint?: (point: RouteMapPoint) => void;
   apiKey?: string | null;
+  routeStart?: RouteEndpoint | null;
+  routeFinish?: RouteEndpoint | null;
 };
 
 type MappablePoint = RouteMapPoint & { latitude: number; longitude: number };
+type MappableEndpoint = RouteEndpoint & { id: string; latitude: number; longitude: number };
+type RouteCoordinatePoint = { latitude: number; longitude: number };
 type TomTomMapRef = any;
 type TomTomPopupRef = any;
 
 const DEFAULT_CENTER: [number, number] = [-3.6119, 50.5293];
+const DEFAULT_SHOP_LOCATION = {
+  address: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
+  latitude: 50.5293,
+  longitude: -3.6119,
+};
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -86,6 +103,10 @@ function markerColour(point: RouteMapPoint) {
   return point.selected ? "#323841" : "#509AE6";
 }
 
+function endpointColour(endpoint: MappableEndpoint) {
+  return endpoint.status === "START" ? "#16a34a" : "#b42318";
+}
+
 function styles() {
   return `
     .bpd-tomtom-map .mapboxgl-map { font-family: inherit; }
@@ -118,6 +139,34 @@ function buildFeatureCollection(points: MappablePoint[]) {
   };
 }
 
+function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: endpoints.map((endpoint, index) => {
+      const sameAsPrevious = endpoints
+        .slice(0, index)
+        .some((other) => other.latitude === endpoint.latitude && other.longitude === endpoint.longitude);
+      const displayLongitude = sameAsPrevious ? endpoint.longitude + 0.00025 : endpoint.longitude;
+      const displayLatitude = sameAsPrevious ? endpoint.latitude + 0.00015 : endpoint.latitude;
+
+      return {
+        type: "Feature" as const,
+        id: endpoint.id,
+        properties: {
+          id: endpoint.id,
+          label: endpoint.label,
+          colour: endpointColour(endpoint),
+          tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(endpoint.label)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
+        },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [displayLongitude, displayLatitude],
+        },
+      };
+    }),
+  };
+}
+
 function boundsForCoordinates(coordinates: number[][]) {
   const lngValues = coordinates.map((coordinate) => coordinate[0]);
   const latValues = coordinates.map((coordinate) => coordinate[1]);
@@ -128,7 +177,7 @@ function boundsForCoordinates(coordinates: number[][]) {
   ];
 }
 
-function straightLineCoordinates(points: MappablePoint[]) {
+function straightLineCoordinates(points: RouteCoordinatePoint[]) {
   return points.map((point) => [point.longitude, point.latitude]);
 }
 
@@ -136,11 +185,11 @@ function selectedRoutePoints(points: MappablePoint[]) {
   return points.filter((point) => point.selected);
 }
 
-function routeRequestKey(points: MappablePoint[]) {
+function routeRequestKey(points: RouteCoordinatePoint[]) {
   return points.map((point) => `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`).join(":");
 }
 
-function tomTomRouteUrl(points: MappablePoint[], apiKey: string) {
+function tomTomRouteUrl(points: RouteCoordinatePoint[], apiKey: string) {
   const locations = routeRequestKey(points);
   const params = new URLSearchParams({
     key: apiKey,
@@ -150,6 +199,16 @@ function tomTomRouteUrl(points: MappablePoint[], apiKey: string) {
   });
 
   return `https://api.tomtom.com/routing/1/calculateRoute/${locations}/json?${params.toString()}`;
+}
+
+function tomTomGeocodeUrl(address: string, apiKey: string) {
+  const params = new URLSearchParams({
+    key: apiKey,
+    countrySet: "GB",
+    limit: "1",
+  });
+
+  return `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(address)}.json?${params.toString()}`;
 }
 
 function coordinatesFromTomTomRoute(payload: any) {
@@ -167,6 +226,57 @@ function coordinatesFromTomTomRoute(payload: any) {
   return coordinates;
 }
 
+function isDefaultShopAddress(address: string) {
+  const normalisedAddress = address.trim().toLowerCase();
+
+  return normalisedAddress === DEFAULT_SHOP_LOCATION.address.toLowerCase() ||
+    (normalisedAddress.includes("olympus") && normalisedAddress.includes("tq12 2sn"));
+}
+
+async function resolveEndpoint(endpoint: RouteEndpoint | null | undefined, apiKey: string): Promise<MappableEndpoint | null> {
+  if (!endpoint?.address.trim()) {
+    return null;
+  }
+
+  if (typeof endpoint.latitude === "number" && typeof endpoint.longitude === "number") {
+    return {
+      ...endpoint,
+      id: `route-${endpoint.status.toLowerCase()}`,
+      latitude: endpoint.latitude,
+      longitude: endpoint.longitude,
+    };
+  }
+
+  if (isDefaultShopAddress(endpoint.address)) {
+    return {
+      ...endpoint,
+      id: `route-${endpoint.status.toLowerCase()}`,
+      latitude: DEFAULT_SHOP_LOCATION.latitude,
+      longitude: DEFAULT_SHOP_LOCATION.longitude,
+    };
+  }
+
+  const response = await fetch(tomTomGeocodeUrl(endpoint.address, apiKey));
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json();
+  const position = payload?.results?.[0]?.position;
+
+  if (typeof position?.lat !== "number" || typeof position?.lon !== "number") {
+    return null;
+  }
+
+  return {
+    ...endpoint,
+    id: `route-${endpoint.status.toLowerCase()}`,
+    latitude: position.lat,
+    longitude: position.lon,
+  };
+}
+
 export function RouteMap({
   points,
   height = 520,
@@ -175,6 +285,8 @@ export function RouteMap({
   showRouteLine = true,
   onSelectPoint,
   apiKey,
+  routeStart,
+  routeFinish,
 }: RouteMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<TomTomMapRef | null>(null);
@@ -182,18 +294,29 @@ export function RouteMap({
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
+  const endpointSourceIdRef = useRef(`route-endpoints-${Math.random().toString(36).slice(2)}`);
   const clustersLayerIdRef = useRef(`clusters-${Math.random().toString(36).slice(2)}`);
   const clusterCountLayerIdRef = useRef(`cluster-count-${Math.random().toString(36).slice(2)}`);
   const pinsLayerIdRef = useRef(`pins-${Math.random().toString(36).slice(2)}`);
   const pinLabelLayerIdRef = useRef(`pin-labels-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
+  const endpointPinsLayerIdRef = useRef(`route-endpoint-pins-${Math.random().toString(36).slice(2)}`);
+  const endpointLabelLayerIdRef = useRef(`route-endpoint-labels-${Math.random().toString(36).slice(2)}`);
   const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
   const [mapReady, setMapReady] = useState(false);
   const [roadRouteCoordinates, setRoadRouteCoordinates] = useState<number[][]>([]);
+  const [resolvedStart, setResolvedStart] = useState<MappableEndpoint | null>(null);
+  const [resolvedFinish, setResolvedFinish] = useState<MappableEndpoint | null>(null);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
   const selectedPoints = useMemo(() => selectedRoutePoints(mappablePoints), [mappablePoints]);
-  const selectedRouteKey = useMemo(() => routeRequestKey(selectedPoints), [selectedPoints]);
   const activeApiKey = apiKey || loadedApiKey;
+  const routeEndpoints = useMemo(() => [resolvedStart, resolvedFinish].filter((endpoint): endpoint is MappableEndpoint => Boolean(endpoint)), [resolvedStart, resolvedFinish]);
+  const routePathPoints = useMemo(() => [
+    ...(resolvedStart ? [resolvedStart] : []),
+    ...selectedPoints,
+    ...(resolvedFinish ? [resolvedFinish] : []),
+  ], [resolvedStart, resolvedFinish, selectedPoints]);
+  const routePathKey = useMemo(() => routeRequestKey(routePathPoints), [routePathPoints]);
 
   useEffect(() => {
     if (apiKey) {
@@ -224,6 +347,34 @@ export function RouteMap({
       cancelled = true;
     };
   }, [apiKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveRouteEndpoints() {
+      if (!activeApiKey) {
+        setResolvedStart(null);
+        setResolvedFinish(null);
+        return;
+      }
+
+      const [start, finish] = await Promise.all([
+        resolveEndpoint(routeStart, activeApiKey),
+        resolveEndpoint(routeFinish, activeApiKey),
+      ]);
+
+      if (!cancelled) {
+        setResolvedStart(start);
+        setResolvedFinish(finish);
+      }
+    }
+
+    resolveRouteEndpoints();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeApiKey, routeStart?.address, routeStart?.latitude, routeStart?.longitude, routeFinish?.address, routeFinish?.latitude, routeFinish?.longitude]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,15 +420,15 @@ export function RouteMap({
     let cancelled = false;
 
     async function loadRoadRoute() {
-      if (!showRouteLine || !activeApiKey || selectedPoints.length < 2) {
+      if (!showRouteLine || !activeApiKey || routePathPoints.length < 2 || selectedPoints.length < 1) {
         setRoadRouteCoordinates([]);
         return;
       }
 
-      const fallback = straightLineCoordinates(selectedPoints);
+      const fallback = straightLineCoordinates(routePathPoints);
 
       try {
-        const response = await fetch(tomTomRouteUrl(selectedPoints, activeApiKey));
+        const response = await fetch(tomTomRouteUrl(routePathPoints, activeApiKey));
 
         if (!response.ok) {
           throw new Error(`TomTom route failed with status ${response.status}`);
@@ -301,7 +452,7 @@ export function RouteMap({
     return () => {
       cancelled = true;
     };
-  }, [activeApiKey, selectedRouteKey, selectedPoints, showRouteLine]);
+  }, [activeApiKey, routePathKey, routePathPoints, selectedPoints.length, showRouteLine]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -312,13 +463,17 @@ export function RouteMap({
 
     const sourceId = sourceIdRef.current;
     const routeSourceId = routeSourceIdRef.current;
+    const endpointSourceId = endpointSourceIdRef.current;
     const clustersLayerId = clustersLayerIdRef.current;
     const clusterCountLayerId = clusterCountLayerIdRef.current;
     const pinsLayerId = pinsLayerIdRef.current;
     const pinLabelLayerId = pinLabelLayerIdRef.current;
     const routeLayerId = routeLayerIdRef.current;
+    const endpointPinsLayerId = endpointPinsLayerIdRef.current;
+    const endpointLabelLayerId = endpointLabelLayerIdRef.current;
     const featureCollection = buildFeatureCollection(mappablePoints);
-    const fallbackRouteCoordinates = straightLineCoordinates(selectedPoints);
+    const endpointFeatureCollection = buildEndpointFeatureCollection(routeEndpoints);
+    const fallbackRouteCoordinates = straightLineCoordinates(routePathPoints);
     const routeCoordinates = roadRouteCoordinates.length > 1 ? roadRouteCoordinates : fallbackRouteCoordinates;
 
     const removeLayer = (layerId: string) => {
@@ -337,8 +492,11 @@ export function RouteMap({
     removeLayer(clustersLayerId);
     removeLayer(pinLabelLayerId);
     removeLayer(pinsLayerId);
+    removeLayer(endpointLabelLayerId);
+    removeLayer(endpointPinsLayerId);
     removeLayer(routeLayerId);
     removeSource(sourceId);
+    removeSource(endpointSourceId);
     removeSource(routeSourceId);
 
     map.addSource(sourceId, {
@@ -349,7 +507,7 @@ export function RouteMap({
       clusterRadius: 50,
     });
 
-    if (showRouteLine && selectedPoints.length > 1 && routeCoordinates.length > 1) {
+    if (showRouteLine && selectedPoints.length > 0 && routeCoordinates.length > 1) {
       map.addSource(routeSourceId, {
         type: "geojson",
         data: {
@@ -385,7 +543,7 @@ export function RouteMap({
       filter: ["has", "point_count"],
       paint: {
         "circle-color": ["step", ["get", "point_count"], "#509AE6", 5, "#f97316", 13, "#b42318"],
-        "circle-radius": ["step", ["get", "point_count"], 22, 5, 27, 13, 32],
+        "circle-radius": ["step", ["get", "point_count"], 19, 5, 23, 13, 27],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": 3,
         "circle-opacity": 0.95,
@@ -435,6 +593,38 @@ export function RouteMap({
       },
     });
 
+    map.addSource(endpointSourceId, {
+      type: "geojson",
+      data: endpointFeatureCollection,
+    });
+
+    map.addLayer({
+      id: endpointPinsLayerId,
+      type: "circle",
+      source: endpointSourceId,
+      paint: {
+        "circle-color": ["get", "colour"],
+        "circle-radius": 21,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 4,
+        "circle-opacity": 0.98,
+      },
+    });
+
+    map.addLayer({
+      id: endpointLabelLayerId,
+      type: "symbol",
+      source: endpointSourceId,
+      layout: {
+        "text-field": ["get", "label"],
+        "text-size": 10,
+        "text-allow-overlap": true,
+      },
+      paint: {
+        "text-color": "#ffffff",
+      },
+    });
+
     const handleClusterClick = (event: any) => {
       const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
       const feature = features[0];
@@ -464,7 +654,7 @@ export function RouteMap({
       }
     };
 
-    const handlePinEnter = async (event: any) => {
+    const showPopup = async (event: any) => {
       map.getCanvas().style.cursor = "pointer";
       const feature = event.features?.[0];
 
@@ -480,7 +670,7 @@ export function RouteMap({
         .addTo(map);
     };
 
-    const handlePinLeave = () => {
+    const hidePopup = () => {
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
     };
@@ -497,11 +687,16 @@ export function RouteMap({
     map.on("click", pinsLayerId, handlePinClick);
     map.on("mouseenter", clustersLayerId, handleClusterEnter);
     map.on("mouseleave", clustersLayerId, handleClusterLeave);
-    map.on("mouseenter", pinsLayerId, handlePinEnter);
-    map.on("mouseleave", pinsLayerId, handlePinLeave);
+    map.on("mouseenter", pinsLayerId, showPopup);
+    map.on("mouseleave", pinsLayerId, hidePopup);
+    map.on("mouseenter", endpointPinsLayerId, showPopup);
+    map.on("mouseleave", endpointPinsLayerId, hidePopup);
 
     if (!hasInitialFitRef.current) {
-      const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : mappablePoints.map((point) => [point.longitude, point.latitude]);
+      const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
+        ...routeEndpoints.map((endpoint) => [endpoint.longitude, endpoint.latitude]),
+        ...mappablePoints.map((point) => [point.longitude, point.latitude]),
+      ];
 
       if (fittingCoordinates.length === 1) {
         map.flyTo({ center: fittingCoordinates[0], zoom: Math.max(map.getZoom(), 14) });
@@ -517,11 +712,13 @@ export function RouteMap({
       map.off("click", pinsLayerId, handlePinClick);
       map.off("mouseenter", clustersLayerId, handleClusterEnter);
       map.off("mouseleave", clustersLayerId, handleClusterLeave);
-      map.off("mouseenter", pinsLayerId, handlePinEnter);
-      map.off("mouseleave", pinsLayerId, handlePinLeave);
+      map.off("mouseenter", pinsLayerId, showPopup);
+      map.off("mouseleave", pinsLayerId, hidePopup);
+      map.off("mouseenter", endpointPinsLayerId, showPopup);
+      map.off("mouseleave", endpointPinsLayerId, hidePopup);
       popupRef.current?.remove();
     };
-  }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, selectedPoints, showRouteLine]);
+  }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
 
   useEffect(() => {
     return () => {
@@ -570,4 +767,4 @@ export function RouteMap({
   );
 }
 
-export type { RouteMapPoint };
+export type { RouteMapPoint, RouteEndpoint };
