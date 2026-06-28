@@ -120,6 +120,18 @@ export async function getDriverRouteByToken(token: string) {
       driver: true,
       stops: {
         include: {
+          returnTickets: {
+            include: {
+              lines: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           deliveryGroup: {
             include: {
               orders: true,
