@@ -177,14 +177,15 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
               latitude: order.latitude,
               longitude: order.longitude,
               addressStatus: order.addressStatus,
-              addressSource: order.hasManualOverride ? "manual" : "getaddress",
+              addressSource: order.orderSource === "manual" ? "manual" : order.hasManualOverride ? "manual" : "getaddress",
               addressConfidence: order.addressConfidence,
               manualAddress: order.manualAddress,
-              useManualAddress: order.hasManualOverride,
+              useManualAddress: order.hasManualOverride || order.orderSource === "manual",
               orders: {
                 create: {
                   shopifyOrderId: order.id,
                   shopifyOrderNumber: order.name,
+                  orderSource: order.orderSource || "shopify",
                   customerName: order.customerName,
                   customerEmail: order.email,
                   customerPhone: order.phone,
