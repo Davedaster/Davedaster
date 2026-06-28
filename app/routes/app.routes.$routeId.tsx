@@ -19,7 +19,7 @@ import { useState } from "react";
 import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots.server";
-import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute } from "../lib/routeDrafts.server";
+import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
@@ -93,6 +93,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/routes/${routeId}`);
   }
 
+  if (intent === "updatePlanning") {
+    try {
+      await updateRoutePlanningSettings(routeId, {
+        routeDate: String(formData.get("routeDate") || "").trim(),
+        plannedStartTime: String(formData.get("plannedStartTime") || "").trim(),
+        timePerDropMinutes: Number(formData.get("timePerDropMinutes") || 10),
+        customerSlotMinutes: Number(formData.get("customerSlotMinutes") || 60),
+        startAddress: String(formData.get("startAddress") || "").trim(),
+        finishAddress: String(formData.get("finishAddress") || "").trim(),
+      });
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Route planning update failed." }, { status: 400 });
+    }
+  }
+
   if (intent === "assignDriver") {
     const driverIdValue = String(formData.get("driverId") || "").trim();
     await assignDriverToRoute(routeId, driverIdValue || null);
@@ -111,15 +127,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "calculateEtas") {
     try {
-      const startTime = String(formData.get("startTime") || "05:00");
-      const stopMinutes = Number(formData.get("stopMinutes") || 10);
-      const slotMinutes = Number(formData.get("slotMinutes") || 60);
+      const startTime = String(formData.get("startTime") || "").trim();
+      const stopMinutes = Number(formData.get("stopMinutes") || 0);
+      const slotMinutes = Number(formData.get("slotMinutes") || 0);
 
       await calculateEtaSlots(
         routeId,
-        startTime,
-        Number.isFinite(stopMinutes) ? stopMinutes : 10,
-        Number.isFinite(slotMinutes) ? slotMinutes : 60,
+        startTime || undefined,
+        Number.isFinite(stopMinutes) && stopMinutes > 0 ? stopMinutes : undefined,
+        Number.isFinite(slotMinutes) && slotMinutes > 0 ? slotMinutes : undefined,
       );
       return redirect(`/app/routes/${routeId}`);
     } catch (error) {
@@ -136,6 +152,10 @@ function formatDate(value: string | Date) {
     month: "short",
     year: "numeric",
   }).format(new Date(value));
+}
+
+function dateInputValue(value: string | Date) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 function statusTone(status: string) {
@@ -155,9 +175,15 @@ export default function RouteDetails() {
   const actionData = useActionData<typeof action>();
   const [routeName, setRouteName] = useState(route.name);
   const [driverId, setDriverId] = useState(route.driverId || "");
-  const [startTime, setStartTime] = useState("05:00");
-  const [stopMinutes, setStopMinutes] = useState("10");
-  const [slotMinutes, setSlotMinutes] = useState("60");
+  const [routeDate, setRouteDate] = useState(dateInputValue(route.date));
+  const [plannedStartTime, setPlannedStartTime] = useState(route.plannedStartTime || "05:00");
+  const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(route.timePerDropMinutes || 10));
+  const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(route.customerSlotMinutes || 60));
+  const [startAddress, setStartAddress] = useState(route.startAddress || "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom");
+  const [finishAddress, setFinishAddress] = useState(route.finishAddress || "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom");
+  const [startTime, setStartTime] = useState(route.plannedStartTime || "05:00");
+  const [stopMinutes, setStopMinutes] = useState(String(route.timePerDropMinutes || 10));
+  const [slotMinutes, setSlotMinutes] = useState(String(route.customerSlotMinutes || 60));
   const canPublish = route.status === "DRAFT";
   const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
@@ -171,7 +197,7 @@ export default function RouteDetails() {
     })),
   ];
 
-  const slotMinutesNumber = Number(slotMinutes);
+  const slotMinutesNumber = Number(slotMinutes || route.customerSlotMinutes || 60);
 
   const stopRows = route.stops.map((stop) => {
     const deliveryGroup = stop.deliveryGroup;
@@ -261,6 +287,22 @@ export default function RouteDetails() {
                   </InlineStack>
                 </Form>
               ) : null}
+
+              <Form method="post">
+                <input type="hidden" name="intent" value="updatePlanning" />
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingSm">Planning settings</Text>
+                  <InlineStack gap="200" blockAlign="end">
+                    <TextField label="Route date" name="routeDate" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
+                    <TextField label="Driver start time" name="plannedStartTime" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
+                    <TextField label="Minutes per drop" name="timePerDropMinutes" type="number" value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
+                    <TextField label="Customer slot minutes" name="customerSlotMinutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
+                  </InlineStack>
+                  <TextField label="Driver start location" name="startAddress" value={startAddress} onChange={setStartAddress} autoComplete="off" multiline={2} />
+                  <TextField label="Driver finish location" name="finishAddress" value={finishAddress} onChange={setFinishAddress} autoComplete="off" multiline={2} />
+                  <Button submit>Save planning settings</Button>
+                </BlockStack>
+              </Form>
 
               <Form method="post">
                 <input type="hidden" name="intent" value="assignDriver" />
