@@ -18,7 +18,7 @@ import { useState } from "react";
 
 import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
-import { formatEtaSlot } from "../lib/etaSlots.server";
+import { formatEtaSlot } from "../lib/etaSlots";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
 import { moveDraftRouteStop } from "../lib/routeStopOrder.server";
@@ -310,13 +310,7 @@ export default function RouteDetails() {
                 <Form method="post">
                   <input type="hidden" name="intent" value="rename" />
                   <InlineStack gap="200" blockAlign="end">
-                    <TextField
-                      label="Route name"
-                      name="name"
-                      value={routeName}
-                      onChange={setRouteName}
-                      autoComplete="off"
-                    />
+                    <TextField label="Route name" name="name" value={routeName} onChange={setRouteName} autoComplete="off" />
                     <Button submit>Save name</Button>
                   </InlineStack>
                 </Form>
@@ -341,13 +335,7 @@ export default function RouteDetails() {
               <Form method="post">
                 <input type="hidden" name="intent" value="assignDriver" />
                 <InlineStack gap="200" blockAlign="end">
-                  <Select
-                    label="Driver"
-                    name="driverId"
-                    options={driverOptions}
-                    value={driverId}
-                    onChange={setDriverId}
-                  />
+                  <Select label="Driver" name="driverId" options={driverOptions} value={driverId} onChange={setDriverId} />
                   <Button submit>Save driver</Button>
                 </InlineStack>
               </Form>
@@ -366,30 +354,9 @@ export default function RouteDetails() {
               <Form method="post">
                 <input type="hidden" name="intent" value="calculateEtas" />
                 <InlineStack gap="200" blockAlign="end">
-                  <TextField
-                    label="Driver start time"
-                    name="startTime"
-                    type="time"
-                    value={startTime}
-                    onChange={setStartTime}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Minutes per stop"
-                    name="stopMinutes"
-                    type="number"
-                    value={stopMinutes}
-                    onChange={setStopMinutes}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Customer slot minutes"
-                    name="slotMinutes"
-                    type="number"
-                    value={slotMinutes}
-                    onChange={setSlotMinutes}
-                    autoComplete="off"
-                  />
+                  <TextField label="Driver start time" name="startTime" type="time" value={startTime} onChange={setStartTime} autoComplete="off" />
+                  <TextField label="Minutes per stop" name="stopMinutes" type="number" value={stopMinutes} onChange={setStopMinutes} autoComplete="off" />
+                  <TextField label="Customer slot minutes" name="slotMinutes" type="number" value={slotMinutes} onChange={setSlotMinutes} autoComplete="off" />
                   <Button submit disabled={route.stops.length === 0}>Calculate ETA slots</Button>
                 </InlineStack>
               </Form>
