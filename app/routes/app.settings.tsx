@@ -14,6 +14,7 @@ import {
   BlockStack,
   Badge,
   InlineStack,
+  Box,
 } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 
@@ -29,6 +30,7 @@ import {
   saveAppCredentialsPatch,
   type AppCredentials,
 } from "../lib/appCredentials.server";
+import { defaultCountry, formatStructuredAddress, type StructuredAddress } from "../lib/addressFields";
 import { getRouteSettings, saveRouteSettings } from "../lib/routeSettings.server";
 import { authenticate } from "../shopify.server";
 
@@ -57,6 +59,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 function formValue(formData: FormData, key: keyof AppCredentials) {
   return String(formData.get(key) || "").trim();
+}
+
+function structuredAddressFromForm(formData: FormData, prefix: string): StructuredAddress {
+  return {
+    building: String(formData.get(`${prefix}Building`) || "").trim(),
+    addressLine1: String(formData.get(`${prefix}AddressLine1`) || "").trim(),
+    addressLine2: String(formData.get(`${prefix}AddressLine2`) || "").trim(),
+    town: String(formData.get(`${prefix}Town`) || "").trim(),
+    county: String(formData.get(`${prefix}County`) || "").trim(),
+    postcode: String(formData.get(`${prefix}Postcode`) || "").trim(),
+    country: String(formData.get(`${prefix}Country`) || defaultCountry).trim(),
+  };
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -120,8 +134,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     plannedStartTime: String(formData.get("plannedStartTime") || ""),
     timePerDropMinutes: Number(formData.get("timePerDropMinutes") || 10),
     customerSlotMinutes: Number(formData.get("customerSlotMinutes") || 60),
-    startAddress: String(formData.get("startAddress") || ""),
-    finishAddress: String(formData.get("finishAddress") || ""),
+    startStructuredAddress: structuredAddressFromForm(formData, "start"),
     returnToBaseDefault: String(formData.get("returnToBaseDefault") || "") === "true",
   });
 
@@ -132,6 +145,38 @@ function statusBadge(enabled: boolean, label: string) {
   return <Badge tone={enabled ? "success" : "warning"}>{`${label} ${enabled ? "enabled" : "not set up"}`}</Badge>;
 }
 
+function StructuredAddressFields({
+  address,
+  onChange,
+  prefix,
+}: {
+  address: StructuredAddress;
+  onChange: (address: StructuredAddress) => void;
+  prefix: string;
+}) {
+  const setField = (field: keyof StructuredAddress) => (value: string) => {
+    onChange({ ...address, [field]: value });
+  };
+
+  return (
+    <BlockStack gap="300">
+      <FormLayout.Group>
+        <TextField label="House number, unit or building name" name={`${prefix}Building`} value={address.building} onChange={setField("building")} autoComplete="off" />
+        <TextField label="Street / address line 1" name={`${prefix}AddressLine1`} value={address.addressLine1} onChange={setField("addressLine1")} autoComplete="off" />
+      </FormLayout.Group>
+      <TextField label="Address line 2, optional" name={`${prefix}AddressLine2`} value={address.addressLine2} onChange={setField("addressLine2")} autoComplete="off" />
+      <FormLayout.Group>
+        <TextField label="Town / city" name={`${prefix}Town`} value={address.town} onChange={setField("town")} autoComplete="off" />
+        <TextField label="County" name={`${prefix}County`} value={address.county} onChange={setField("county")} autoComplete="off" />
+      </FormLayout.Group>
+      <FormLayout.Group>
+        <TextField label="Postcode" name={`${prefix}Postcode`} value={address.postcode} onChange={setField("postcode")} autoComplete="off" />
+        <TextField label="Country" name={`${prefix}Country`} value={address.country} onChange={setField("country")} autoComplete="off" />
+      </FormLayout.Group>
+    </BlockStack>
+  );
+}
+
 export default function Settings() {
   const { routeSettings, storedCredentials, credentialStatus } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -140,16 +185,14 @@ export default function Settings() {
   const [plannedStartTime, setPlannedStartTime] = useState(currentSettings.plannedStartTime);
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(currentSettings.timePerDropMinutes));
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(currentSettings.customerSlotMinutes));
-  const [startAddress, setStartAddress] = useState(currentSettings.startAddress);
-  const [finishAddress, setFinishAddress] = useState(currentSettings.finishAddress);
+  const [startStructuredAddress, setStartStructuredAddress] = useState<StructuredAddress>(currentSettings.startStructuredAddress);
   const [returnToBaseDefault, setReturnToBaseDefault] = useState(currentSettings.returnToBaseDefault);
 
   useEffect(() => {
     setPlannedStartTime(currentSettings.plannedStartTime);
     setTimePerDropMinutes(String(currentSettings.timePerDropMinutes));
     setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes));
-    setStartAddress(currentSettings.startAddress);
-    setFinishAddress(currentSettings.finishAddress);
+    setStartStructuredAddress(currentSettings.startStructuredAddress);
     setReturnToBaseDefault(currentSettings.returnToBaseDefault);
   }, [currentSettings]);
 
@@ -170,7 +213,7 @@ export default function Settings() {
               <input type="hidden" name="intent" value="saveRouteSettings" />
               <BlockStack gap="400">
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  These values are used automatically on the Orders Map when building a new delivery route. The default start and finish location should normally be the Newton Abbot depot.
+                  These values are used automatically on the Orders Map when building a new delivery route. The default start point should normally be the Newton Abbot depot.
                 </Text>
 
                 {actionData?.ok && actionData.savedSection === "Route settings" ? (
@@ -183,10 +226,28 @@ export default function Settings() {
                     <TextField label="Default minutes per drop" name="timePerDropMinutes" value={timePerDropMinutes} onChange={setTimePerDropMinutes} type="number" autoComplete="off" />
                   </FormLayout.Group>
                   <TextField label="Default customer delivery slot minutes" name="customerSlotMinutes" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} type="number" autoComplete="off" helpText="60 means customers get a one hour delivery slot." />
-                  <TextField label="Default start address" name="startAddress" value={startAddress} onChange={setStartAddress} multiline={2} autoComplete="off" />
-                  <Checkbox label="Return to base by default" checked={returnToBaseDefault} onChange={setReturnToBaseDefault} helpText="When ticked, planning optimisation includes the finish address in total route miles and time." />
+
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingMd">Default route start address</Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Enter the address in separate parts. The app combines these into one clean address and converts it to coordinates using the same lookup method as customer orders.
+                    </Text>
+                    <StructuredAddressFields address={startStructuredAddress} onChange={setStartStructuredAddress} prefix="start" />
+                    <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                      <BlockStack gap="100">
+                        <Text as="p" variant="bodySm" fontWeight="bold">Saved address format</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">{formatStructuredAddress(startStructuredAddress) || currentSettings.startAddress}</Text>
+                        {currentSettings.startLatitude && currentSettings.startLongitude ? (
+                          <Text as="p" variant="bodySm" tone="subdued">Coordinates saved: {currentSettings.startLatitude}, {currentSettings.startLongitude}</Text>
+                        ) : (
+                          <Text as="p" variant="bodySm" tone="critical">Coordinates not saved yet. Save the route settings after entering the address.</Text>
+                        )}
+                      </BlockStack>
+                    </Box>
+                  </BlockStack>
+
+                  <Checkbox label="Return to base by default" checked={returnToBaseDefault} onChange={setReturnToBaseDefault} helpText="When ticked, new routes finish at the same address as the start point unless you set a custom finish on the planning page." />
                   <input type="hidden" name="returnToBaseDefault" value={returnToBaseDefault ? "true" : "false"} />
-                  <TextField label="Default finish address" name="finishAddress" value={finishAddress} onChange={setFinishAddress} multiline={2} autoComplete="off" helpText="Usually the same as the start address, unless the driver normally finishes somewhere else." />
                   <Button submit variant="primary">Save route settings</Button>
                 </FormLayout>
               </BlockStack>
@@ -247,7 +308,7 @@ export default function Settings() {
                       <Button submit variant="primary">Save</Button>
                     </InlineStack>
                   </InlineStack>
-                  <TextField label="getAddress.io API key" name="getAddressApiKey" value={credentials.getAddressApiKey} onChange={setCredential("getAddressApiKey")} type="password" autoComplete="off" helpText="Kept here for address lookup support if we switch the lookup back on." />
+                  <TextField label="getAddress.io API key" name="getAddressApiKey" value={credentials.getAddressApiKey} onChange={setCredential("getAddressApiKey")} type="password" autoComplete="off" helpText="Stored for address lookup support. Order, manual and route endpoint addresses use the app address lookup flow." />
                 </BlockStack>
               </Form>
 
