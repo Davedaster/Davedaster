@@ -1,6 +1,11 @@
 const GOV_BANK_HOLIDAYS_URL = "https://www.gov.uk/bank-holidays.json";
 const CACHE_MS = 24 * 60 * 60 * 1000;
 
+export type FulfilmentDateOptions = {
+  days?: number;
+  useWorkingDaysOnly?: boolean;
+};
+
 type GovBankHolidayPayload = {
   "england-and-wales"?: {
     events?: Array<{
@@ -25,6 +30,10 @@ function dateOnly(value: string | Date) {
 
 function isoDate(value: Date) {
   return value.toISOString().slice(0, 10);
+}
+
+function normaliseDays(value: number | null | undefined) {
+  return Number.isFinite(value) && typeof value === "number" ? Math.max(1, Math.round(value)) : 7;
 }
 
 async function getEnglandWalesBankHolidayDates() {
@@ -78,12 +87,25 @@ function isWorkingDay(date: Date, bankHolidayDates: Set<string>) {
   return !bankHolidayDates.has(isoDate(date));
 }
 
-export async function fulfilByDateFromOrderDate(orderDate: string | Date, workingDays = 7) {
+function addCalendarDays(orderDate: string | Date, days: number) {
+  const date = dateOnly(orderDate);
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return isoDate(date);
+}
+
+export async function fulfilByDateFromOrderDate(orderDate: string | Date, options: FulfilmentDateOptions = {}) {
+  const days = normaliseDays(options.days);
+
+  if (options.useWorkingDaysOnly === false) {
+    return addCalendarDays(orderDate, days);
+  }
+
   const bankHolidayDates = await getEnglandWalesBankHolidayDates();
   const date = dateOnly(orderDate);
   let daysAdded = 0;
 
-  while (daysAdded < workingDays) {
+  while (daysAdded < days) {
     date.setUTCDate(date.getUTCDate() + 1);
 
     if (isWorkingDay(date, bankHolidayDates)) {
