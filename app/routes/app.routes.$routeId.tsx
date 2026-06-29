@@ -21,7 +21,7 @@ import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
-import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
+import { sendBookedSlotNotifications, sendManualRouteNotification } from "../lib/routeNotifications.server";
 import { moveDraftRouteStop } from "../lib/routeStopOrder.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
@@ -46,6 +46,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
   return json({ route, drivers, routexlEnabled: hasRouteXLCredentials(credentials) });
 };
+
+function notificationResultMessage(label: string, result: { smsSent: number; emailsSent: number; skipped: number; failed?: number }) {
+  return `${label}: ${result.smsSent} SMS, ${result.emailsSent} emails, ${result.skipped} skipped${result.failed ? `, ${result.failed} failed` : ""}.`;
+}
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -74,6 +78,35 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect(`/app/routes/${routeId}`);
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "sendOutForDelivery") {
+    try {
+      const result = await sendManualRouteNotification({ routeId, templateId: "outForDelivery" });
+      return json({ ok: true, message: notificationResultMessage("Out for delivery sent", result), errors: result.errors });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Out for delivery message failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "sendDelayUpdate") {
+    try {
+      const delayMinutes = Number(String(formData.get("delayMinutes") || "45"));
+      const result = await sendManualRouteNotification({ routeId, templateId: "delayUpdate", delayMinutes, pendingOnly: true });
+      return json({ ok: true, message: notificationResultMessage("Delay update sent", result), errors: result.errors });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Delay update failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "sendNextDropTracking") {
+    try {
+      const stopId = String(formData.get("stopId") || "").trim();
+      const result = await sendManualRouteNotification({ routeId, templateId: "nextDropTracking", stopId });
+      return json({ ok: true, message: notificationResultMessage("Next drop message sent", result), errors: result.errors });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Next drop message failed." }, { status: 400 });
     }
   }
 
@@ -198,11 +231,14 @@ export default function RouteDetails() {
   const [startTime, setStartTime] = useState(route.plannedStartTime || "05:00");
   const [stopMinutes, setStopMinutes] = useState(String(route.timePerDropMinutes || 10));
   const [slotMinutes, setSlotMinutes] = useState(String(route.customerSlotMinutes || 60));
+  const [delayMinutes, setDelayMinutes] = useState("45");
+  const [nextDropStopId, setNextDropStopId] = useState(route.stops.find((stop) => stop.status === "PENDING")?.id || "");
   const canPublish = route.status === "DRAFT";
   const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
   const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
   const canSendDriverRouteLink = route.status !== "DRAFT" && Boolean(route.driverId);
   const canRearrangeDraft = route.status === "DRAFT";
+  const canSendManualMessages = route.status !== "DRAFT" && route.stops.length > 0;
 
   const driverOptions = [
     { label: "No driver assigned", value: "" },
@@ -210,6 +246,16 @@ export default function RouteDetails() {
       label: driver.name,
       value: driver.id,
     })),
+  ];
+
+  const pendingStopOptions = [
+    { label: "Choose pending stop", value: "" },
+    ...route.stops
+      .filter((stop) => stop.status === "PENDING")
+      .map((stop) => ({
+        label: `Stop ${stop.orderIndex} · ${stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders"}`,
+        value: stop.id,
+      })),
   ];
 
   const slotMinutesNumber = Number(slotMinutes || route.customerSlotMinutes || 60);
@@ -301,6 +347,12 @@ export default function RouteDetails() {
               {actionData && "error" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
               ) : null}
+              {actionData?.ok && "message" in actionData ? (
+                <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text>
+              ) : null}
+              {actionData?.ok && "errors" in actionData && actionData.errors?.length ? (
+                <Text as="p" variant="bodySm" tone="critical">{actionData.errors.slice(0, 3).join(" ")}</Text>
+              ) : null}
 
               {!routexlEnabled ? (
                 <Text as="p" variant="bodySm" tone="critical">
@@ -369,6 +421,37 @@ export default function RouteDetails() {
 
               <Form id="send-notifications-form" method="post">
                 <input type="hidden" name="intent" value="sendNotifications" />
+              </Form>
+            </BlockStack>
+          </LegacyCard>
+
+          <LegacyCard title="Manual customer messages" sectioned>
+            <BlockStack gap="300">
+              <Text as="p" variant="bodySm" tone="subdued">
+                These buttons send the editable templates from the Notifications page. Nothing sends unless you press a button.
+              </Text>
+              {route.status === "DRAFT" ? (
+                <Text as="p" variant="bodySm" tone="critical">Publish this route before sending manual customer messages.</Text>
+              ) : null}
+              <InlineStack gap="200" blockAlign="end">
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sendOutForDelivery" />
+                  <Button submit disabled={!canSendManualMessages}>Send out for delivery</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sendDelayUpdate" />
+                  <InlineStack gap="200" blockAlign="end">
+                    <TextField label="Delay minutes" name="delayMinutes" type="number" value={delayMinutes} onChange={setDelayMinutes} autoComplete="off" />
+                    <Button submit disabled={!canSendManualMessages}>Send delay update</Button>
+                  </InlineStack>
+                </Form>
+              </InlineStack>
+              <Form method="post">
+                <input type="hidden" name="intent" value="sendNextDropTracking" />
+                <InlineStack gap="200" blockAlign="end">
+                  <Select label="Next drop stop" name="stopId" options={pendingStopOptions} value={nextDropStopId} onChange={setNextDropStopId} />
+                  <Button submit disabled={!canSendManualMessages || !nextDropStopId}>Send you are next</Button>
+                </InlineStack>
               </Form>
             </BlockStack>
           </LegacyCard>
