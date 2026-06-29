@@ -139,31 +139,54 @@ function buildFeatureCollection(points: MappablePoint[]) {
   };
 }
 
+function endpointCoordinateKey(endpoint: MappableEndpoint) {
+  return `${endpoint.latitude.toFixed(6)},${endpoint.longitude.toFixed(6)}`;
+}
+
+function mergedEndpointMarkers(endpoints: MappableEndpoint[]) {
+  const groups = new Map<string, MappableEndpoint[]>();
+
+  for (const endpoint of endpoints) {
+    const key = endpointCoordinateKey(endpoint);
+    groups.set(key, [...(groups.get(key) || []), endpoint]);
+  }
+
+  return [...groups.values()].map((group) => {
+    const firstEndpoint = group[0];
+    const hasStart = group.some((endpoint) => endpoint.status === "START");
+    const hasFinish = group.some((endpoint) => endpoint.status === "FINISH");
+    const label = hasStart && hasFinish ? "START/FINISH" : firstEndpoint.label;
+    const address = firstEndpoint.address;
+
+    return {
+      ...firstEndpoint,
+      id: hasStart && hasFinish ? "route-start-finish" : firstEndpoint.id,
+      label,
+      status: hasStart ? "START" as const : firstEndpoint.status,
+      address,
+    };
+  });
+}
+
 function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
+  const markers = mergedEndpointMarkers(endpoints);
+
   return {
     type: "FeatureCollection" as const,
-    features: endpoints.map((endpoint, index) => {
-      const sameAsPrevious = endpoints
-        .slice(0, index)
-        .some((other) => other.latitude === endpoint.latitude && other.longitude === endpoint.longitude);
-      const displayLongitude = sameAsPrevious ? endpoint.longitude + 0.00025 : endpoint.longitude;
-      const displayLatitude = sameAsPrevious ? endpoint.latitude + 0.00015 : endpoint.latitude;
-
-      return {
-        type: "Feature" as const,
+    features: markers.map((endpoint) => ({
+      type: "Feature" as const,
+      id: endpoint.id,
+      properties: {
         id: endpoint.id,
-        properties: {
-          id: endpoint.id,
-          label: endpoint.label,
-          colour: endpointColour(endpoint),
-          tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(endpoint.label)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
-        },
-        geometry: {
-          type: "Point" as const,
-          coordinates: [displayLongitude, displayLatitude],
-        },
-      };
-    }),
+        label: endpoint.label,
+        colour: endpointColour(endpoint),
+        tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(endpoint.label)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
+      },
+      geometry: {
+        type: "Point" as const,
+        coordinates: [endpoint.longitude, endpoint.latitude],
+      },
+    })),
   };
 }
 
