@@ -16,6 +16,7 @@ import {
 } from "@shopify/polaris";
 import { useState } from "react";
 
+import { getAppCredentials, hasRouteXLCredentials } from "../lib/appCredentials.server";
 import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots";
@@ -33,16 +34,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  const [route, drivers] = await Promise.all([
+  const [route, drivers, credentials] = await Promise.all([
     getRoute(routeId),
     listActiveDrivers(),
+    getAppCredentials(),
   ]);
 
   if (!route) {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route, drivers, routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD) });
+  return json({ route, drivers, routexlEnabled: hasRouteXLCredentials(credentials) });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -205,7 +207,7 @@ export default function RouteDetails() {
   const driverOptions = [
     { label: "No driver assigned", value: "" },
     ...drivers.map((driver) => ({
-      label: `${driver.name}${driver.vehicleName ? `, ${driver.vehicleName}` : ""}${driver.vehicleRegistration ? `, ${driver.vehicleRegistration}` : ""}`,
+      label: driver.name,
       value: driver.id,
     })),
   ];
@@ -302,7 +304,7 @@ export default function RouteDetails() {
 
               {!routexlEnabled ? (
                 <Text as="p" variant="bodySm" tone="critical">
-                  RouteXL is not enabled yet. Add ROUTEXL_USERNAME and ROUTEXL_PASSWORD to the app environment before optimising live routes.
+                  RouteXL is not enabled yet. Add the RouteXL username and password in Settings, API Credentials before optimising live routes.
                 </Text>
               ) : null}
 
