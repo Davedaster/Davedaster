@@ -7,6 +7,8 @@ export type RouteSettings = {
   plannedStartTime: string;
   timePerDropMinutes: number;
   customerSlotMinutes: number;
+  fulfilmentWindowDays: number;
+  useWorkingDaysOnly: boolean;
   startAddress: string;
   startStructuredAddress: StructuredAddress;
   startLatitude: number | null;
@@ -23,6 +25,8 @@ const fallbackRouteSettings: RouteSettings = {
   plannedStartTime: defaultRoutePlanningSettings.plannedStartTime,
   timePerDropMinutes: defaultRoutePlanningSettings.timePerDropMinutes,
   customerSlotMinutes: defaultRoutePlanningSettings.customerSlotMinutes,
+  fulfilmentWindowDays: 7,
+  useWorkingDaysOnly: true,
   startAddress: defaultDepotAddress.formattedAddress,
   startStructuredAddress: defaultDepotAddress,
   startLatitude: defaultDepotAddress.latitude,
@@ -99,6 +103,8 @@ function normaliseRouteSettings(value: Partial<RouteSettings> | null | undefined
     plannedStartTime: normaliseTime(value?.plannedStartTime, fallbackRouteSettings.plannedStartTime),
     timePerDropMinutes: normalisePositiveNumber(value?.timePerDropMinutes, fallbackRouteSettings.timePerDropMinutes),
     customerSlotMinutes: normalisePositiveNumber(value?.customerSlotMinutes, fallbackRouteSettings.customerSlotMinutes),
+    fulfilmentWindowDays: normalisePositiveNumber(value?.fulfilmentWindowDays, fallbackRouteSettings.fulfilmentWindowDays),
+    useWorkingDaysOnly: normaliseBoolean(value?.useWorkingDaysOnly, fallbackRouteSettings.useWorkingDaysOnly),
     startAddress,
     startStructuredAddress,
     startLatitude: normaliseCoordinate(value?.startLatitude, fallbackRouteSettings.startLatitude),
@@ -200,6 +206,8 @@ export async function getRoutePlanningDefaults() {
     plannedStartTime: routeSettings.plannedStartTime,
     timePerDropMinutes: routeSettings.timePerDropMinutes,
     customerSlotMinutes: routeSettings.customerSlotMinutes,
+    fulfilmentWindowDays: routeSettings.fulfilmentWindowDays,
+    useWorkingDaysOnly: routeSettings.useWorkingDaysOnly,
     startAddress: routeSettings.startAddress,
     startStructuredAddress: routeSettings.startStructuredAddress,
     startLatitude: routeSettings.startLatitude,
