@@ -45,6 +45,7 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-split";
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -155,7 +156,7 @@ function mergedEndpointMarkers(endpoints: MappableEndpoint[]) {
     const firstEndpoint = group[0];
     const hasStart = group.some((endpoint) => endpoint.status === "START");
     const hasFinish = group.some((endpoint) => endpoint.status === "FINISH");
-    const label = hasStart && hasFinish ? "START/FINISH" : firstEndpoint.label;
+    const label = hasStart && hasFinish ? "" : firstEndpoint.label;
     const address = firstEndpoint.address;
 
     return {
@@ -173,21 +174,85 @@ function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
 
   return {
     type: "FeatureCollection" as const,
-    features: markers.map((endpoint) => ({
-      type: "Feature" as const,
-      id: endpoint.id,
-      properties: {
+    features: markers.map((endpoint) => {
+      const isStartFinish = endpoint.id === "route-start-finish";
+      const tooltipLabel = isStartFinish ? "Start and finish" : endpoint.label;
+
+      return {
+        type: "Feature" as const,
         id: endpoint.id,
-        label: endpoint.label,
-        colour: endpointColour(endpoint),
-        tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(endpoint.label)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
-      },
-      geometry: {
-        type: "Point" as const,
-        coordinates: [endpoint.longitude, endpoint.latitude],
-      },
-    })),
+        properties: {
+          id: endpoint.id,
+          label: endpoint.label,
+          markerType: isStartFinish ? "startFinish" : "single",
+          colour: endpointColour(endpoint),
+          tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(tooltipLabel)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
+        },
+        geometry: {
+          type: "Point" as const,
+          coordinates: [endpoint.longitude, endpoint.latitude],
+        },
+      };
+    }),
   };
+}
+
+function createSplitEndpointImage() {
+  const size = 46;
+  const center = size / 2;
+  const radius = 20;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  context.clearRect(0, 0, size, size);
+
+  context.beginPath();
+  context.moveTo(center, center);
+  context.arc(center, center, radius, Math.PI / 2, Math.PI * 1.5);
+  context.closePath();
+  context.fillStyle = "#16a34a";
+  context.fill();
+
+  context.beginPath();
+  context.moveTo(center, center);
+  context.arc(center, center, radius, -Math.PI / 2, Math.PI / 2);
+  context.closePath();
+  context.fillStyle = "#b42318";
+  context.fill();
+
+  context.beginPath();
+  context.arc(center, center, radius, 0, Math.PI * 2);
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 5;
+  context.stroke();
+
+  return context.getImageData(0, 0, size, size);
+}
+
+function ensureSplitEndpointImage(map: TomTomMapRef) {
+  try {
+    if (map.hasImage?.(SPLIT_ENDPOINT_IMAGE_ID)) {
+      return true;
+    }
+
+    const image = createSplitEndpointImage();
+
+    if (!image) {
+      return false;
+    }
+
+    map.addImage(SPLIT_ENDPOINT_IMAGE_ID, image);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function boundsForCoordinates(coordinates: number[][]) {
@@ -324,6 +389,7 @@ export function RouteMap({
   const pinLabelLayerIdRef = useRef(`pin-labels-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const endpointPinsLayerIdRef = useRef(`route-endpoint-pins-${Math.random().toString(36).slice(2)}`);
+  const splitEndpointLayerIdRef = useRef(`route-split-endpoint-${Math.random().toString(36).slice(2)}`);
   const endpointLabelLayerIdRef = useRef(`route-endpoint-labels-${Math.random().toString(36).slice(2)}`);
   const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
   const [mapReady, setMapReady] = useState(false);
@@ -493,6 +559,7 @@ export function RouteMap({
     const pinLabelLayerId = pinLabelLayerIdRef.current;
     const routeLayerId = routeLayerIdRef.current;
     const endpointPinsLayerId = endpointPinsLayerIdRef.current;
+    const splitEndpointLayerId = splitEndpointLayerIdRef.current;
     const endpointLabelLayerId = endpointLabelLayerIdRef.current;
     const featureCollection = buildFeatureCollection(mappablePoints);
     const endpointFeatureCollection = buildEndpointFeatureCollection(routeEndpoints);
@@ -516,6 +583,7 @@ export function RouteMap({
     removeLayer(pinLabelLayerId);
     removeLayer(pinsLayerId);
     removeLayer(endpointLabelLayerId);
+    removeLayer(splitEndpointLayerId);
     removeLayer(endpointPinsLayerId);
     removeLayer(routeLayerId);
     removeSource(sourceId);
@@ -621,10 +689,13 @@ export function RouteMap({
       data: endpointFeatureCollection,
     });
 
+    const splitEndpointImageReady = ensureSplitEndpointImage(map);
+
     map.addLayer({
       id: endpointPinsLayerId,
       type: "circle",
       source: endpointSourceId,
+      filter: splitEndpointImageReady ? ["!=", ["get", "markerType"], "startFinish"] : undefined,
       paint: {
         "circle-color": ["get", "colour"],
         "circle-radius": 21,
@@ -634,10 +705,25 @@ export function RouteMap({
       },
     });
 
+    if (splitEndpointImageReady) {
+      map.addLayer({
+        id: splitEndpointLayerId,
+        type: "symbol",
+        source: endpointSourceId,
+        filter: ["==", ["get", "markerType"], "startFinish"],
+        layout: {
+          "icon-image": SPLIT_ENDPOINT_IMAGE_ID,
+          "icon-size": 1,
+          "icon-allow-overlap": true,
+        },
+      });
+    }
+
     map.addLayer({
       id: endpointLabelLayerId,
       type: "symbol",
       source: endpointSourceId,
+      filter: ["==", ["get", "markerType"], "single"],
       layout: {
         "text-field": ["get", "label"],
         "text-size": 10,
@@ -715,6 +801,11 @@ export function RouteMap({
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
 
+    if (splitEndpointImageReady) {
+      map.on("mouseenter", splitEndpointLayerId, showPopup);
+      map.on("mouseleave", splitEndpointLayerId, hidePopup);
+    }
+
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
         ...routeEndpoints.map((endpoint) => [endpoint.longitude, endpoint.latitude]),
@@ -739,6 +830,12 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
+
+      if (splitEndpointImageReady) {
+        map.off("mouseenter", splitEndpointLayerId, showPopup);
+        map.off("mouseleave", splitEndpointLayerId, hidePopup);
+      }
+
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
