@@ -44,7 +44,7 @@ export async function listDrivers() {
 }
 
 export async function listActiveDrivers() {
-  return prisma.driver.findMany({
+  const drivers = await prisma.driver.findMany({
     where: {
       isActive: true,
     },
@@ -52,6 +52,12 @@ export async function listActiveDrivers() {
       name: "asc",
     },
   });
+
+  return drivers.map((driver) => ({
+    ...driver,
+    vehicleName: null,
+    vehicleRegistration: null,
+  }));
 }
 
 export async function createDriver(input: DriverInput) {
