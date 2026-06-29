@@ -1,3 +1,9 @@
 import { json } from "@remix-run/node";
 
-export const loader = async () => json({ apiKey: process.env.TOMTOM_API_KEY || "" });
+import { getAppCredentials } from "../lib/appCredentials.server";
+
+export const loader = async () => {
+  const credentials = await getAppCredentials();
+
+  return json({ apiKey: credentials.tomtomApiKey || "" });
+};
