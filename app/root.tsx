@@ -21,10 +21,19 @@ const planningPanelStyles = `
     touch-action: none;
   }
 
+  html.bpd-map-scroll-locked-html {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+  }
+
   .bpd-scroll-container-locked {
     overflow: hidden !important;
     overscroll-behavior: contain !important;
     touch-action: none !important;
+  }
+
+  .bpd-scroll-container-locked::-webkit-scrollbar {
+    display: none !important;
   }
 
   .bpd-tomtom-map,
@@ -65,40 +74,62 @@ const planningPanelScript = `
   (() => {
     let touchingMap = false;
     let lockedScrollY = 0;
+    let unlockTimer = null;
+    let lastMapMoveAt = 0;
     const lockedScrollContainers = [];
 
     const isMapTouch = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
+
+    const cancelScheduledUnlock = () => {
+      if (unlockTimer) {
+        window.clearTimeout(unlockTimer);
+        unlockTimer = null;
+      }
+    };
+
+    const lockScrollableElement = (element) => {
+      if (!element || element.dataset?.bpdScrollLocked === 'true') {
+        return;
+      }
+
+      const style = window.getComputedStyle(element);
+      const canScrollY = element.scrollHeight > element.clientHeight + 2;
+      const canScrollX = element.scrollWidth > element.clientWidth + 2;
+      const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
+
+      if (!(canScrollY || canScrollX) || !scrollable || element.closest?.('.bpd-tomtom-map')) {
+        return;
+      }
+
+      lockedScrollContainers.push({
+        element,
+        overflow: element.style.overflow,
+        overflowY: element.style.overflowY,
+        overflowX: element.style.overflowX,
+        overscrollBehavior: element.style.overscrollBehavior,
+        touchAction: element.style.touchAction,
+        scrollTop: element.scrollTop,
+        scrollLeft: element.scrollLeft,
+      });
+
+      element.dataset.bpdScrollLocked = 'true';
+      element.classList.add('bpd-scroll-container-locked');
+      element.style.overflow = 'hidden';
+      element.style.overflowY = 'hidden';
+      element.style.overflowX = 'hidden';
+      element.style.overscrollBehavior = 'contain';
+      element.style.touchAction = 'none';
+    };
 
     const lockScrollableContainers = (target) => {
       let element = target?.parentElement;
 
       while (element && element !== document.body && element !== document.documentElement) {
-        const style = window.getComputedStyle(element);
-        const canScrollY = element.scrollHeight > element.clientHeight + 2;
-        const canScrollX = element.scrollWidth > element.clientWidth + 2;
-        const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
-
-        if ((canScrollY || canScrollX) && scrollable && !element.classList.contains('bpd-tomtom-map')) {
-          lockedScrollContainers.push({
-            element,
-            overflow: element.style.overflow,
-            overflowY: element.style.overflowY,
-            overflowX: element.style.overflowX,
-            overscrollBehavior: element.style.overscrollBehavior,
-            touchAction: element.style.touchAction,
-            scrollTop: element.scrollTop,
-            scrollLeft: element.scrollLeft,
-          });
-          element.classList.add('bpd-scroll-container-locked');
-          element.style.overflow = 'hidden';
-          element.style.overflowY = 'hidden';
-          element.style.overflowX = 'hidden';
-          element.style.overscrollBehavior = 'contain';
-          element.style.touchAction = 'none';
-        }
-
+        lockScrollableElement(element);
         element = element.parentElement;
       }
+
+      document.querySelectorAll('[style*="overflow"], .Polaris-Frame, .Polaris-Page, main, section').forEach(lockScrollableElement);
     };
 
     const unlockScrollableContainers = () => {
@@ -117,26 +148,30 @@ const planningPanelScript = `
         lock.element.style.touchAction = lock.touchAction;
         lock.element.scrollTop = lock.scrollTop;
         lock.element.scrollLeft = lock.scrollLeft;
+        delete lock.element.dataset.bpdScrollLocked;
       }
     };
 
     const lockPageForMap = (target) => {
+      cancelScheduledUnlock();
+
       if (!document.body.classList.contains('bpd-map-scroll-locked')) {
         lockedScrollY = window.scrollY || window.pageYOffset || 0;
         document.body.dataset.bpdMapScrollY = String(lockedScrollY);
         document.body.style.top = '-' + lockedScrollY + 'px';
         document.body.classList.add('bpd-map-scroll-locked');
+        document.documentElement.classList.add('bpd-map-scroll-locked-html');
         document.documentElement.style.overscrollBehaviorY = 'none';
         document.body.style.overscrollBehaviorY = 'none';
       }
 
-      if (lockedScrollContainers.length === 0) {
-        lockScrollableContainers(target);
-      }
+      lockScrollableContainers(target);
     };
 
-    const unlockPageForMap = () => {
+    const unlockPageForMapNow = () => {
+      cancelScheduledUnlock();
       unlockScrollableContainers();
+      document.documentElement.classList.remove('bpd-map-scroll-locked-html');
 
       if (!document.body.classList.contains('bpd-map-scroll-locked')) {
         return;
@@ -151,12 +186,19 @@ const planningPanelScript = `
       window.scrollTo(0, Number.isFinite(restoreY) ? restoreY : 0);
     };
 
+    const scheduleMapUnlock = () => {
+      cancelScheduledUnlock();
+      const movedRecently = Date.now() - lastMapMoveAt < 350;
+      unlockTimer = window.setTimeout(unlockPageForMapNow, movedRecently ? 1400 : 650);
+    };
+
     const blockMapPullRefresh = (event) => {
       if (!touchingMap && !isMapTouch(event.target)) {
         return;
       }
 
       touchingMap = true;
+      lastMapMoveAt = Date.now();
       lockPageForMap(event.target);
 
       if (event.cancelable) {
@@ -168,6 +210,7 @@ const planningPanelScript = `
       touchingMap = isMapTouch(event.target);
 
       if (touchingMap) {
+        lastMapMoveAt = Date.now();
         lockPageForMap(event.target);
 
         if (event.cancelable) {
@@ -179,18 +222,23 @@ const planningPanelScript = `
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
 
     document.addEventListener('touchend', () => {
+      if (touchingMap) {
+        touchingMap = false;
+        scheduleMapUnlock();
+        return;
+      }
+
       touchingMap = false;
-      unlockPageForMap();
     }, { passive: true, capture: true });
 
     document.addEventListener('touchcancel', () => {
       touchingMap = false;
-      unlockPageForMap();
+      scheduleMapUnlock();
     }, { passive: true, capture: true });
 
     window.addEventListener('blur', () => {
       touchingMap = false;
-      unlockPageForMap();
+      unlockPageForMapNow();
     });
 
     const tidyCustomerTracking = () => {
