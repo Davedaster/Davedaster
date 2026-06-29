@@ -11,6 +11,7 @@ type ShopifyAdmin = {
 
 type ShopifyLineItem = {
   title: string;
+  quantity: number;
   sku: string | null;
   product: {
     productType: string | null;
@@ -91,6 +92,8 @@ export type DeliveryOrder = {
   latitude: number | null;
   longitude: number | null;
   lineItemSummary: string;
+  lineItemLines: string[];
+  fulfilByDate?: string | null;
   hasManualOverride: boolean;
   manualAddress: string | null;
   manualAddressNotes: string | null;
@@ -143,6 +146,14 @@ function isPanelLineItem(item: ShopifyLineItem) {
 
 function lineItems(order: ShopifyOrderNode) {
   return order.lineItems.edges.map((edge) => edge.node);
+}
+
+function lineItemLines(items: ShopifyLineItem[]) {
+  return items.map((item) => {
+    const quantity = Number(item.quantity || 0);
+
+    return quantity > 1 ? `${quantity} × ${item.title}` : item.title;
+  });
 }
 
 function getCustomerName(order: ShopifyOrderNode) {
@@ -233,6 +244,7 @@ export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
 
 export async function toDeliveryOrder(order: ShopifyOrderNode, override?: AddressOverride): Promise<DeliveryOrder> {
   const items = lineItems(order);
+  const itemLines = lineItemLines(items);
   const hasPanel = items.some(isPanelLineItem);
   const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
   const shippingMethod = shippingTitle(order);
@@ -268,7 +280,9 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     addressConfidence: lookupHasCoordinates ? "HIGH" : lookup?.confidence || "LOW",
     latitude: lookup?.latitude || null,
     longitude: lookup?.longitude || null,
-    lineItemSummary: items.map((item) => item.title).join(", "),
+    lineItemSummary: itemLines.join(", "),
+    lineItemLines: itemLines,
+    fulfilByDate: null,
     hasManualOverride: false,
     manualAddress: null,
     manualAddressNotes: null,
@@ -283,6 +297,10 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
   const addressSummary = input.address.trim();
   const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
   const reference = manualOrderReference(input);
+  const lineItemLines = input.lineItemSummary
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 
   return {
     id: reference,
@@ -305,6 +323,8 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
     latitude: lookup.latitude,
     longitude: lookup.longitude,
     lineItemSummary: input.lineItemSummary.trim(),
+    lineItemLines: lineItemLines.length ? lineItemLines : [input.lineItemSummary.trim()].filter(Boolean),
+    fulfilByDate: null,
     hasManualOverride: true,
     manualAddress: addressSummary,
     manualAddressNotes: "Manual order added from the planning map",
@@ -356,6 +376,7 @@ const DELIVERY_ORDERS_QUERY = `#graphql
             edges {
               node {
                 title
+                quantity
                 sku
                 product {
                   productType
