@@ -69,6 +69,14 @@ function normaliseBoolean(value: unknown, fallback: boolean) {
 }
 
 function normaliseCoordinate(value: unknown, fallback: number | null) {
+  if (value === null || typeof value === "undefined") {
+    return fallback;
+  }
+
+  if (typeof value === "string" && !value.trim()) {
+    return fallback;
+  }
+
   const numericValue = typeof value === "number" ? value : Number(value);
 
   if (!Number.isFinite(numericValue)) {
