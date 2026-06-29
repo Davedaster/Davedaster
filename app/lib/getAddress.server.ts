@@ -38,18 +38,40 @@ function normalisePostcode(postcode: string | null | undefined) {
   return compact;
 }
 
-function buildSearchQuery(postcode: string, searchText: string) {
+function addUniqueQuery(queries: string[], query: string) {
+  const cleaned = query.replace(/\s+/g, " ").trim();
+
+  if (cleaned && !queries.some((existingQuery) => existingQuery.toLowerCase() === cleaned.toLowerCase())) {
+    queries.push(cleaned);
+  }
+}
+
+function buildSearchQueries(postcode: string, searchText: string) {
+  const queries: string[] = [];
   const cleanedSearchText = searchText.trim();
 
   if (cleanedSearchText) {
-    return cleanedSearchText;
+    addUniqueQuery(queries, cleanedSearchText);
+    addUniqueQuery(queries, `${cleanedSearchText}, United Kingdom`);
   }
 
   if (postcode) {
-    return `${postcode}, United Kingdom`;
+    addUniqueQuery(queries, `${postcode}, United Kingdom`);
+    addUniqueQuery(queries, postcode);
   }
 
-  return "";
+  return queries;
+}
+
+function fallbackAddress(postcode: string, searchText: string): AddressLookupResult {
+  return {
+    formattedAddress: searchText || postcode || "No address found",
+    postcode,
+    latitude: null,
+    longitude: null,
+    confidence: "LOW",
+    source: "none",
+  };
 }
 
 async function lookupTomTom(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
@@ -128,10 +150,8 @@ async function lookupTomTom(query: string, postcode: string, searchText: string)
   }
 }
 
-async function lookupOpenStreetMap(query: string, postcode: string, searchText: string): Promise<AddressLookupResult> {
+async function lookupOpenStreetMap(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=jsonv2&limit=1&countrycodes=gb`;
-
-  console.warn("OPENSTREETMAP URL", url);
 
   try {
     const response = await fetch(url, {
@@ -144,20 +164,14 @@ async function lookupOpenStreetMap(query: string, postcode: string, searchText: 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       console.warn("OpenStreetMap lookup failed", {
+        query,
         postcode,
         status: response.status,
         statusText: response.statusText,
         body: body.slice(0, 500),
       });
 
-      return {
-        formattedAddress: searchText || postcode,
-        postcode,
-        latitude: null,
-        longitude: null,
-        confidence: "LOW",
-        source: "none",
-      };
+      return null;
     }
 
     const payload = await response.json() as NominatimSearchResult[];
@@ -167,18 +181,12 @@ async function lookupOpenStreetMap(query: string, postcode: string, searchText: 
 
     if (typeof latitude !== "number" || Number.isNaN(latitude) || typeof longitude !== "number" || Number.isNaN(longitude)) {
       console.warn("OpenStreetMap lookup returned no coordinates", {
+        query,
         postcode,
         resultCount: Array.isArray(payload) ? payload.length : 0,
       });
 
-      return {
-        formattedAddress: searchText || postcode,
-        postcode,
-        latitude: null,
-        longitude: null,
-        confidence: "LOW",
-        source: "none",
-      };
+      return null;
     }
 
     return {
@@ -191,46 +199,43 @@ async function lookupOpenStreetMap(query: string, postcode: string, searchText: 
     };
   } catch (error) {
     console.warn("OpenStreetMap lookup crashed", {
+      query,
       postcode,
       message: error instanceof Error ? error.message : String(error),
     });
 
-    return {
-      formattedAddress: searchText || postcode,
-      postcode,
-      latitude: null,
-      longitude: null,
-      confidence: "LOW",
-      source: "none",
-    };
+    return null;
   }
 }
 
 export async function lookupAddress(postcode: string | null, searchText: string): Promise<AddressLookupResult> {
   const cleanPostcode = normalisePostcode(postcode);
-  const query = buildSearchQuery(cleanPostcode, searchText);
+  const queries = buildSearchQueries(cleanPostcode, searchText);
 
-  if (!query) {
+  if (!queries.length) {
     console.warn("address lookup skipped", {
       postcode: postcode || "",
       cleanPostcode,
     });
 
-    return {
-      formattedAddress: searchText || "No address found",
-      postcode: postcode || "",
-      latitude: null,
-      longitude: null,
-      confidence: "LOW",
-      source: "none",
-    };
+    return fallbackAddress(postcode || "", searchText);
   }
 
-  const tomTomResult = await lookupTomTom(query, cleanPostcode || postcode || "", searchText);
+  for (const query of queries) {
+    const tomTomResult = await lookupTomTom(query, cleanPostcode || postcode || "", searchText);
 
-  if (tomTomResult) {
-    return tomTomResult;
+    if (tomTomResult) {
+      return tomTomResult;
+    }
   }
 
-  return lookupOpenStreetMap(query, cleanPostcode || postcode || "", searchText);
+  for (const query of queries) {
+    const openStreetMapResult = await lookupOpenStreetMap(query, cleanPostcode || postcode || "", searchText);
+
+    if (openStreetMapResult) {
+      return openStreetMapResult;
+    }
+  }
+
+  return fallbackAddress(cleanPostcode || postcode || "", searchText);
 }
