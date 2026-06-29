@@ -15,6 +15,7 @@ import {
   EmptyState,
   TextField,
   Checkbox,
+  Select,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
 import { useEffect, useMemo, useState } from "react";
@@ -37,8 +38,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { RouteMap } from "../components/RouteMap";
+import { listActiveDrivers } from "../lib/drivers.server";
 import { lookupAddress } from "../lib/getAddress.server";
-import { createRouteDraft } from "../lib/routeDrafts.server";
+import { assignDriverToRoute, createRouteDraft } from "../lib/routeDrafts.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
@@ -92,10 +94,14 @@ const DEFAULT_SHOP_LOCATION = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const orders = await getDeliveryOrders(admin);
+  const [orders, drivers] = await Promise.all([
+    getDeliveryOrders(admin),
+    listActiveDrivers(),
+  ]);
 
   return json({
     orders,
+    drivers,
     addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
     routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD),
     defaults: defaultRoutePlanningSettings,
@@ -202,6 +208,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const startAddress = String(formData.get("startAddress") || "").trim();
   const finishAddress = String(formData.get("finishAddress") || "").trim();
   const returnToBase = String(formData.get("returnToBase") || "") === "true";
+  const driverId = String(formData.get("driverId") || "").trim();
   const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
   const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
     .split(",")
@@ -278,7 +285,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  await createRouteDraft({
+  const draftRoute = await createRouteDraft({
     orders: selectedOrders,
     routeName,
     routeDate,
@@ -290,6 +297,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ? startAddress
       : finishAddress || selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || startAddress,
   });
+
+  if (driverId) {
+    await assignDriverToRoute(draftRoute.id, driverId);
+  }
 
   return redirect("/app/routes");
 };
@@ -537,11 +548,12 @@ function formatDuration(minutes: number | null) {
 }
 
 export default function OrdersMap() {
-  const { orders, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
+  const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const optimisationFetcher = useFetcher<PlanningOptimisationResult>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [routeName, setRouteName] = useState("");
+  const [selectedDriverId, setSelectedDriverId] = useState("");
   const [routeDate, setRouteDate] = useState(defaults.routeDate);
   const [plannedStartTime, setPlannedStartTime] = useState(defaults.plannedStartTime);
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(defaults.timePerDropMinutes));
@@ -559,6 +571,14 @@ export default function OrdersMap() {
   const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
 
+  const driverOptions = useMemo(() => [
+    { label: "Select driver later", value: "" },
+    ...drivers.map((driver) => ({
+      label: `${driver.name}${driver.vehicleName ? `, ${driver.vehicleName}` : ""}${driver.vehicleRegistration ? `, ${driver.vehicleRegistration}` : ""}`,
+      value: driver.id,
+    })),
+  ], [drivers]);
+  const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId);
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
   const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
@@ -705,7 +725,7 @@ export default function OrdersMap() {
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Click delivery pins to build a route, then optimise it live before saving the draft.
+                    Click delivery pins to build a route, then select a driver, optimise and save the draft.
                   </Text>
                   {!addressLookupEnabled ? (
                     <Text as="p" variant="bodySm" tone="critical">
@@ -765,12 +785,24 @@ export default function OrdersMap() {
                     {returnToBase ? "Route includes return to base." : "Route ends at the custom finish location."}
                     {routeFinishEta ? ` Finish ETA: ${routeFinishEta}.` : ""}
                   </Text>
+                  {selectedDriver ? (
+                    <Text as="p" variant="bodySm" tone="subdued">Driver selected: {selectedDriver.name}</Text>
+                  ) : null}
                   {optimisationError ? <Text as="p" variant="bodySm" tone="critical">{optimisationError}</Text> : null}
                 </BlockStack>
 
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Route planning</Text>
                   <TextField label="Route date" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
+                  <Select
+                    label="Driver"
+                    options={driverOptions}
+                    value={selectedDriverId}
+                    onChange={setSelectedDriverId}
+                  />
+                  {!drivers.length ? (
+                    <Text as="p" variant="bodySm" tone="subdued">No active drivers yet. Add one in Driver profiles first.</Text>
+                  ) : null}
                   <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={(value) => { setPlannedStartTime(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={(value) => { setTimePerDropMinutes(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
@@ -820,6 +852,7 @@ export default function OrdersMap() {
                 <input type="hidden" name="intent" value="saveRoute" />
                 <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
                 <input type="hidden" name="manualOrdersJson" value={manualOrdersJson} />
+                <input type="hidden" name="driverId" value={selectedDriverId} />
                 <input type="hidden" name="routeDate" value={routeDate} />
                 <input type="hidden" name="plannedStartTime" value={plannedStartTime} />
                 <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
