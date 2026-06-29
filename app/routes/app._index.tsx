@@ -38,6 +38,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { RouteMap } from "../components/RouteMap";
+import { fulfilByDateFromOrderDate } from "../lib/bankHolidays.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { lookupAddress } from "../lib/getAddress.server";
 import { assignDriverToRoute, createRouteDraft } from "../lib/routeDrafts.server";
@@ -92,15 +93,33 @@ const DEFAULT_SHOP_LOCATION = {
   longitude: -3.6119,
 };
 
+async function addFulfilByDates(orders: DeliveryOrder[]) {
+  const fulfilByDatesByOrderDate = new Map<string, string>();
+
+  for (const order of orders) {
+    const orderDateKey = order.createdAt.slice(0, 10);
+
+    if (!fulfilByDatesByOrderDate.has(orderDateKey)) {
+      fulfilByDatesByOrderDate.set(orderDateKey, await fulfilByDateFromOrderDate(order.createdAt));
+    }
+  }
+
+  return orders.map((order) => ({
+    ...order,
+    fulfilByDate: fulfilByDatesByOrderDate.get(order.createdAt.slice(0, 10)) || null,
+  }));
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const [orders, drivers] = await Promise.all([
     getDeliveryOrders(admin),
     listActiveDrivers(),
   ]);
+  const ordersWithFulfilByDates = await addFulfilByDates(orders);
 
   return json({
-    orders,
+    orders: ordersWithFulfilByDates,
     drivers,
     addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
     routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD),
@@ -392,6 +411,11 @@ function refreshStopEtas(stops: Stop[], plannedStartTime: string, timePerDropMin
 }
 
 function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
+  const lineItemLines = order.lineItemSummary
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
   return {
     id: order.id,
     name: order.id.replace("manual:", "MANUAL-").toUpperCase(),
@@ -413,6 +437,8 @@ function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
     latitude: null,
     longitude: null,
     lineItemSummary: order.lineItemSummary,
+    lineItemLines: lineItemLines.length ? lineItemLines : [order.lineItemSummary].filter(Boolean),
+    fulfilByDate: null,
     hasManualOverride: true,
     manualAddress: order.address,
     manualAddressNotes: "Manual order added from the planning map",
@@ -444,7 +470,11 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
-function formatOrderDate(value: string) {
+function formatOrderDate(value: string | null | undefined) {
+  if (!value) {
+    return "Date unavailable";
+  }
+
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
@@ -458,14 +488,15 @@ function formatOrderDate(value: string) {
   }).format(date);
 }
 
-function trimItemsSummary(value: string) {
-  const cleaned = value.trim();
+function orderItemLines(order: DeliveryOrder) {
+  const itemLines = order.lineItemLines?.length
+    ? order.lineItemLines
+    : order.lineItemSummary
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
 
-  if (!cleaned) {
-    return "Items not listed";
-  }
-
-  return cleaned.length > 110 ? `${cleaned.slice(0, 107)}...` : cleaned;
+  return itemLines.length ? itemLines.map((item) => `• ${item}`) : ["Items not listed"];
 }
 
 function orderMapTooltip(order: DeliveryOrder, heading: string) {
@@ -473,8 +504,10 @@ function orderMapTooltip(order: DeliveryOrder, heading: string) {
     tooltipTitle: heading,
     tooltipLines: [
       `Ordered: ${formatOrderDate(order.createdAt)}`,
+      `Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
       `Postcode: ${order.postcode || "No postcode"}`,
-      `Items: ${trimItemsSummary(order.lineItemSummary)}`,
+      "Items:",
+      ...orderItemLines(order),
     ],
   };
 }
