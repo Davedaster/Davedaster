@@ -146,6 +146,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     plannedStartTime: String(formData.get("plannedStartTime") || ""),
     timePerDropMinutes: Number(formData.get("timePerDropMinutes") || 10),
     customerSlotMinutes: Number(formData.get("customerSlotMinutes") || 60),
+    fulfilmentWindowDays: Number(formData.get("fulfilmentWindowDays") || 7),
+    useWorkingDaysOnly: String(formData.get("useWorkingDaysOnly") || "") === "true",
     startStructuredAddress: structuredAddressFromForm(formData, "start"),
     startLatitude: formCoordinate(formData, "startLatitude"),
     startLongitude: formCoordinate(formData, "startLongitude"),
@@ -199,6 +201,8 @@ export default function Settings() {
   const [plannedStartTime, setPlannedStartTime] = useState(currentSettings.plannedStartTime);
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(currentSettings.timePerDropMinutes));
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(currentSettings.customerSlotMinutes));
+  const [fulfilmentWindowDays, setFulfilmentWindowDays] = useState(String(currentSettings.fulfilmentWindowDays || 7));
+  const [useWorkingDaysOnly, setUseWorkingDaysOnly] = useState(currentSettings.useWorkingDaysOnly ?? true);
   const [startStructuredAddress, setStartStructuredAddress] = useState<StructuredAddress>(currentSettings.startStructuredAddress);
   const [startLatitude, setStartLatitude] = useState(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude));
   const [startLongitude, setStartLongitude] = useState(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
@@ -208,6 +212,8 @@ export default function Settings() {
     setPlannedStartTime(currentSettings.plannedStartTime);
     setTimePerDropMinutes(String(currentSettings.timePerDropMinutes));
     setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes));
+    setFulfilmentWindowDays(String(currentSettings.fulfilmentWindowDays || 7));
+    setUseWorkingDaysOnly(currentSettings.useWorkingDaysOnly ?? true);
     setStartStructuredAddress(currentSettings.startStructuredAddress);
     setStartLatitude(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude));
     setStartLongitude(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
@@ -244,6 +250,13 @@ export default function Settings() {
                     <TextField label="Default minutes per drop" name="timePerDropMinutes" value={timePerDropMinutes} onChange={setTimePerDropMinutes} type="number" autoComplete="off" />
                   </FormLayout.Group>
                   <TextField label="Default customer delivery slot minutes" name="customerSlotMinutes" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} type="number" autoComplete="off" helpText="60 means customers get a one hour delivery slot." />
+
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingMd">Fulfilment hover settings</Text>
+                    <TextField label="Fulfilment window days" name="fulfilmentWindowDays" value={fulfilmentWindowDays} onChange={setFulfilmentWindowDays} type="number" autoComplete="off" helpText="Used for the fulfil by date shown in the map hover card." />
+                    <Checkbox label="Use working days only, exclude weekends and bank holidays" checked={useWorkingDaysOnly} onChange={setUseWorkingDaysOnly} helpText="Ticked means weekends and England and Wales bank holidays are not counted. Unticked means normal calendar days are counted." />
+                    <input type="hidden" name="useWorkingDaysOnly" value={useWorkingDaysOnly ? "true" : "false"} />
+                  </BlockStack>
 
                   <BlockStack gap="300">
                     <Text as="h3" variant="headingMd">Default route start address</Text>
