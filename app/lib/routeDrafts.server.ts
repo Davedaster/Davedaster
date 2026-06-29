@@ -13,6 +13,10 @@ type CreateRouteDraftInput = {
   customerSlotMinutes?: number;
   startAddress?: string;
   finishAddress?: string;
+  startLatitude?: number | null;
+  startLongitude?: number | null;
+  finishLatitude?: number | null;
+  finishLongitude?: number | null;
 };
 
 type RoutePlanningSettingsInput = {
@@ -22,6 +26,10 @@ type RoutePlanningSettingsInput = {
   customerSlotMinutes?: number;
   startAddress?: string;
   finishAddress?: string;
+  startLatitude?: number | null;
+  startLongitude?: number | null;
+  finishLatitude?: number | null;
+  finishLongitude?: number | null;
 };
 
 const DEFAULT_SHOP_LOCATION = {
@@ -78,6 +86,10 @@ function normalisePositiveNumber(value: number | undefined, fallback: number) {
   return Math.max(1, Math.round(value));
 }
 
+function normaliseCoordinate(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function buildRouteName(orders: DeliveryOrder[], routeName?: string, routeDate?: Date) {
   if (routeName?.trim()) {
     return routeName.trim();
@@ -106,11 +118,27 @@ function extractPostcode(value: string) {
   return match?.[0]?.toUpperCase() || "";
 }
 
-async function resolveRouteEndpoint(address: string | undefined) {
-  const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
-  const isDefaultShop = trimmedAddress.toLowerCase() === DEFAULT_SHOP_LOCATION.address.toLowerCase();
+function isDefaultShopAddress(address: string) {
+  const normalisedAddress = address.trim().toLowerCase();
 
-  if (isDefaultShop) {
+  return normalisedAddress === DEFAULT_SHOP_LOCATION.address.toLowerCase() ||
+    (normalisedAddress.includes("olympus") && normalisedAddress.includes("tq12 2sn"));
+}
+
+async function resolveRouteEndpoint(address: string | undefined, latitude?: number | null, longitude?: number | null) {
+  const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
+  const lockedLatitude = normaliseCoordinate(latitude);
+  const lockedLongitude = normaliseCoordinate(longitude);
+
+  if (lockedLatitude !== null && lockedLongitude !== null) {
+    return {
+      address: trimmedAddress,
+      latitude: lockedLatitude,
+      longitude: lockedLongitude,
+    };
+  }
+
+  if (isDefaultShopAddress(trimmedAddress)) {
     return {
       address: DEFAULT_SHOP_LOCATION.address,
       latitude: DEFAULT_SHOP_LOCATION.latitude,
@@ -129,8 +157,8 @@ async function resolveRouteEndpoint(address: string | undefined) {
 
 async function buildPlanningData(input: RoutePlanningSettingsInput) {
   const [start, finish] = await Promise.all([
-    resolveRouteEndpoint(input.startAddress),
-    resolveRouteEndpoint(input.finishAddress),
+    resolveRouteEndpoint(input.startAddress, input.startLatitude, input.startLongitude),
+    resolveRouteEndpoint(input.finishAddress, input.finishLatitude, input.finishLongitude),
   ]);
 
   return {
