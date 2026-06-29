@@ -253,15 +253,19 @@ export async function sendDriverRouteLink(input: {
   request: Request;
 }): Promise<DriverRouteNotificationResult> {
   const token = await ensureDriverRouteAccessToken(input.routeId);
-  const route = await prisma.route.findUnique({
-    where: {
-      id: input.routeId,
-    },
-    include: {
-      driver: true,
-      stops: true,
-    },
-  });
+  const [route, canSendSms, canSendEmail] = await Promise.all([
+    prisma.route.findUnique({
+      where: {
+        id: input.routeId,
+      },
+      include: {
+        driver: true,
+        stops: true,
+      },
+    }),
+    isTwilioEnabled(),
+    isResendEnabled(),
+  ]);
 
   if (!route) {
     throw new Error("Route not found.");
@@ -284,7 +288,7 @@ export async function sendDriverRouteLink(input: {
   let smsSent = false;
   let emailSent = false;
 
-  if (route.driver.phoneNumber && isTwilioEnabled()) {
+  if (route.driver.phoneNumber && canSendSms) {
     try {
       await sendSmsWithTwilio({
         to: route.driver.phoneNumber,
@@ -298,7 +302,7 @@ export async function sendDriverRouteLink(input: {
     }
   }
 
-  if (route.driver.email && isResendEnabled()) {
+  if (route.driver.email && canSendEmail) {
     try {
       await sendEmailWithResend({
         to: route.driver.email,
