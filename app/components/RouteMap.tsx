@@ -436,6 +436,9 @@ export function RouteMap({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<TomTomMapRef | null>(null);
   const popupRef = useRef<TomTomPopupRef | null>(null);
+  const touchHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const ignoreNextPinClickRef = useRef(false);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
@@ -772,6 +775,15 @@ export function RouteMap({
       });
     }
 
+    const clearTouchHold = () => {
+      if (touchHoldTimerRef.current) {
+        clearTimeout(touchHoldTimerRef.current);
+        touchHoldTimerRef.current = null;
+      }
+
+      touchStartPointRef.current = null;
+    };
+
     const handleClusterClick = (event: any) => {
       const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
       const feature = features[0];
@@ -792,6 +804,11 @@ export function RouteMap({
     };
 
     const handlePinClick = (event: any) => {
+      if (ignoreNextPinClickRef.current) {
+        ignoreNextPinClickRef.current = false;
+        return;
+      }
+
       const feature = event.features?.[0];
       const id = feature?.properties?.id;
       const point = mappablePoints.find((mapPoint) => mapPoint.id === id);
@@ -801,10 +818,7 @@ export function RouteMap({
       }
     };
 
-    const showPopup = async (event: any) => {
-      map.getCanvas().style.cursor = "pointer";
-      const feature = event.features?.[0];
-
+    const showPopupForFeature = async (feature: any) => {
       if (!feature) {
         return;
       }
@@ -817,9 +831,50 @@ export function RouteMap({
         .addTo(map);
     };
 
+    const showPopup = async (event: any) => {
+      map.getCanvas().style.cursor = "pointer";
+      await showPopupForFeature(event.features?.[0]);
+    };
+
     const hidePopup = () => {
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
+    };
+
+    const handlePinTouchStart = (event: any) => {
+      const feature = event.features?.[0];
+
+      if (!feature) {
+        return;
+      }
+
+      clearTouchHold();
+      touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
+      touchHoldTimerRef.current = setTimeout(() => {
+        ignoreNextPinClickRef.current = true;
+        map.getCanvas().style.cursor = "pointer";
+        void showPopupForFeature(feature);
+        window.setTimeout(() => {
+          ignoreNextPinClickRef.current = false;
+        }, 650);
+      }, 520);
+    };
+
+    const handlePinTouchMove = (event: any) => {
+      if (!touchStartPointRef.current || !event.point) {
+        return;
+      }
+
+      const movedX = Math.abs(event.point.x - touchStartPointRef.current.x);
+      const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
+
+      if (movedX > 12 || movedY > 12) {
+        clearTouchHold();
+      }
+    };
+
+    const handlePinTouchEnd = () => {
+      clearTouchHold();
     };
 
     const handleClusterEnter = () => {
@@ -838,6 +893,10 @@ export function RouteMap({
     map.on("mouseleave", pinsLayerId, hidePopup);
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
+    map.on("touchstart", pinsLayerId, handlePinTouchStart);
+    map.on("touchmove", handlePinTouchMove);
+    map.on("touchend", handlePinTouchEnd);
+    map.on("touchcancel", handlePinTouchEnd);
 
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
@@ -855,6 +914,7 @@ export function RouteMap({
     }
 
     return () => {
+      clearTouchHold();
       map.off("click", clustersLayerId, handleClusterClick);
       map.off("click", pinsLayerId, handlePinClick);
       map.off("mouseenter", clustersLayerId, handleClusterEnter);
@@ -863,6 +923,10 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
+      map.off("touchstart", pinsLayerId, handlePinTouchStart);
+      map.off("touchmove", handlePinTouchMove);
+      map.off("touchend", handlePinTouchEnd);
+      map.off("touchcancel", handlePinTouchEnd);
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
