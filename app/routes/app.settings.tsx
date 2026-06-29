@@ -15,6 +15,7 @@ import {
   Badge,
   InlineStack,
 } from "@shopify/polaris";
+import { useEffect, useState } from "react";
 
 import { getRouteSettings, saveRouteSettings } from "../lib/routeSettings.server";
 import { authenticate } from "../shopify.server";
@@ -52,6 +53,21 @@ export default function Settings() {
   const { routeSettings, routexlEnabled, getAddressEnabled, twilioEnabled, resendEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const currentSettings = actionData?.ok ? actionData.routeSettings : routeSettings;
+  const [plannedStartTime, setPlannedStartTime] = useState(currentSettings.plannedStartTime);
+  const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(currentSettings.timePerDropMinutes));
+  const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(currentSettings.customerSlotMinutes));
+  const [startAddress, setStartAddress] = useState(currentSettings.startAddress);
+  const [finishAddress, setFinishAddress] = useState(currentSettings.finishAddress);
+  const [returnToBaseDefault, setReturnToBaseDefault] = useState(currentSettings.returnToBaseDefault);
+
+  useEffect(() => {
+    setPlannedStartTime(currentSettings.plannedStartTime);
+    setTimePerDropMinutes(String(currentSettings.timePerDropMinutes));
+    setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes));
+    setStartAddress(currentSettings.startAddress);
+    setFinishAddress(currentSettings.finishAddress);
+    setReturnToBaseDefault(currentSettings.returnToBaseDefault);
+  }, [currentSettings]);
 
   return (
     <Page title="Settings">
@@ -73,14 +89,16 @@ export default function Settings() {
                     <TextField
                       label="Default driver start time"
                       name="plannedStartTime"
-                      defaultValue={currentSettings.plannedStartTime}
+                      value={plannedStartTime}
+                      onChange={setPlannedStartTime}
                       type="time"
                       autoComplete="off"
                     />
                     <TextField
                       label="Default minutes per drop"
                       name="timePerDropMinutes"
-                      defaultValue={String(currentSettings.timePerDropMinutes)}
+                      value={timePerDropMinutes}
+                      onChange={setTimePerDropMinutes}
                       type="number"
                       autoComplete="off"
                     />
@@ -88,7 +106,8 @@ export default function Settings() {
                   <TextField
                     label="Default customer delivery slot minutes"
                     name="customerSlotMinutes"
-                    defaultValue={String(currentSettings.customerSlotMinutes)}
+                    value={customerSlotMinutes}
+                    onChange={setCustomerSlotMinutes}
                     type="number"
                     autoComplete="off"
                     helpText="60 means customers get a one hour delivery slot."
@@ -96,21 +115,23 @@ export default function Settings() {
                   <TextField
                     label="Default start address"
                     name="startAddress"
-                    defaultValue={currentSettings.startAddress}
+                    value={startAddress}
+                    onChange={setStartAddress}
                     multiline={2}
                     autoComplete="off"
                   />
                   <Checkbox
                     label="Return to base by default"
-                    name="returnToBaseDefault"
-                    value="true"
-                    defaultChecked={currentSettings.returnToBaseDefault}
+                    checked={returnToBaseDefault}
+                    onChange={setReturnToBaseDefault}
                     helpText="When ticked, planning optimisation includes the finish address in total route miles and time."
                   />
+                  <input type="hidden" name="returnToBaseDefault" value={returnToBaseDefault ? "true" : "false"} />
                   <TextField
                     label="Default finish address"
                     name="finishAddress"
-                    defaultValue={currentSettings.finishAddress}
+                    value={finishAddress}
+                    onChange={setFinishAddress}
                     multiline={2}
                     autoComplete="off"
                     helpText="Usually the same as the start address, unless the driver normally finishes somewhere else."
@@ -125,20 +146,20 @@ export default function Settings() {
             <FormLayout>
               <Text as="h3" variant="headingMd">RouteXL</Text>
               <InlineStack gap="200">
-                <Badge tone={routexlEnabled ? "success" : "warning"}>RouteXL {routexlEnabled ? "enabled" : "not set up"}</Badge>
+                <Badge tone={routexlEnabled ? "success" : "warning"}>{`RouteXL ${routexlEnabled ? "enabled" : "not set up"}`}</Badge>
               </InlineStack>
               <Text as="p" variant="bodySm" tone="subdued">
                 RouteXL credentials are still read from the app environment for security.
               </Text>
               <Divider />
               <Text as="h3" variant="headingMd">getAddress.io</Text>
-              <Badge tone={getAddressEnabled ? "success" : "warning"}>getAddress.io {getAddressEnabled ? "enabled" : "not set up"}</Badge>
+              <Badge tone={getAddressEnabled ? "success" : "warning"}>{`getAddress.io ${getAddressEnabled ? "enabled" : "not set up"}`}</Badge>
               <Divider />
               <Text as="h3" variant="headingMd">Twilio (SMS)</Text>
-              <Badge tone={twilioEnabled ? "success" : "warning"}>Twilio {twilioEnabled ? "enabled" : "not set up"}</Badge>
+              <Badge tone={twilioEnabled ? "success" : "warning"}>{`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}</Badge>
               <Divider />
               <Text as="h3" variant="headingMd">Resend (Email)</Text>
-              <Badge tone={resendEnabled ? "success" : "warning"}>Resend {resendEnabled ? "enabled" : "not set up"}</Badge>
+              <Badge tone={resendEnabled ? "success" : "warning"}>{`Resend ${resendEnabled ? "enabled" : "not set up"}`}</Badge>
             </FormLayout>
           </LegacyCard>
         </Layout.Section>
