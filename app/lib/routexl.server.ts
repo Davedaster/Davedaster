@@ -1,3 +1,5 @@
+import { getAppCredentials } from "./appCredentials.server";
+
 type RouteXLLocation = {
   address: string;
   lat: string;
@@ -32,12 +34,13 @@ export type OptimisedRoute = {
   totalDurationMinutes: number | null;
 };
 
-function getRouteXLCredentials() {
-  const username = process.env.ROUTEXL_USERNAME;
-  const password = process.env.ROUTEXL_PASSWORD;
+async function getRouteXLCredentials() {
+  const credentials = await getAppCredentials();
+  const username = credentials.routexlUsername;
+  const password = credentials.routexlPassword;
 
   if (!username || !password) {
-    throw new Error("RouteXL credentials are missing. Add ROUTEXL_USERNAME and ROUTEXL_PASSWORD to the app environment.");
+    throw new Error("RouteXL credentials are missing. Add them in Settings, API Credentials.");
   }
 
   return { username, password };
@@ -59,7 +62,7 @@ function toRouteXLBody(locations: RouteXLLocation[], skipOptimisation = false) {
 }
 
 export async function optimiseLocations(locations: RouteXLLocation[], skipOptimisation = false): Promise<OptimisedRoute> {
-  const { username, password } = getRouteXLCredentials();
+  const { username, password } = await getRouteXLCredentials();
   const response = await fetch("https://api.routexl.com/tour/", {
     method: "POST",
     headers: {
