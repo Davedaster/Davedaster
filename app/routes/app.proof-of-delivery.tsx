@@ -211,7 +211,7 @@ export default function ProofOfDelivery() {
               renderItem={(stop) => {
                 const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
                 return (
-                  <ResourceItem id={stop.id} accessibilityLabel={`View stop ${stop.orderIndex}`}>
+                  <ResourceItem id={stop.id} accessibilityLabel={`View stop ${stop.orderIndex}`} onClick={() => {}}>
                     <BlockStack gap="100">
                       <Text as="h3" variant="bodyMd" fontWeight="bold">
                         {stop.route.name}, stop {stop.orderIndex}, {orders}
