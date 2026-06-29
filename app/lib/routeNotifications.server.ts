@@ -16,7 +16,7 @@ function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) 
 }
 
 export async function sendBookedSlotNotifications(routeId: string): Promise<SendRouteNotificationsResult> {
-  const [route, credentials] = await Promise.all([
+  const [route, credentials, canSendSms, canSendEmail] = await Promise.all([
     prisma.route.findUnique({
       where: { id: routeId },
       include: {
@@ -36,6 +36,8 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
       },
     }),
     getAppCredentials(),
+    isTwilioEnabled(),
+    isResendEnabled(),
   ]);
 
   if (!route) {
@@ -49,9 +51,6 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
   if (route.notificationsSent) {
     throw new Error("Customer notifications have already been sent for this route.");
   }
-
-  const canSendSms = await isTwilioEnabled();
-  const canSendEmail = await isResendEnabled();
 
   if (!canSendSms && !canSendEmail) {
     throw new Error("Twilio and Resend are not set up yet. Add them in Settings, API Credentials before sending messages.");
@@ -70,6 +69,9 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
         orderNumber: order.shopifyOrderNumber,
         routeName: route.name,
         driverName: route.driver?.name,
+        driverPhotoUrl: route.driver?.photoUrl,
+        driverVehicleName: route.driver?.vehicleName,
+        driverVehicleRegistration: route.driver?.vehicleRegistration,
         deliveryDate: route.date,
         estimatedArrival: stop.estimatedArrival,
         slotMinutes: route.customerSlotMinutes,
@@ -81,7 +83,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
       if (canSendSms && order.customerPhone) {
         await sendSmsWithTwilio({
           to: order.customerPhone,
-          message: buildBookedSlotMessage(messageInput, "sms"),
+          message: await buildBookedSlotMessage(messageInput, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
@@ -90,7 +92,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
       if (canSendEmail && order.customerEmail) {
         await sendEmailWithResend({
           to: order.customerEmail,
-          message: buildBookedSlotMessage(messageInput, "email"),
+          message: await buildBookedSlotMessage(messageInput, "email"),
         });
         emailsSent += 1;
         sentAnything = true;
