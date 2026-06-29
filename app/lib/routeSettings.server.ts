@@ -86,6 +86,10 @@ function normaliseCoordinate(value: unknown, fallback: number | null) {
   return numericValue;
 }
 
+function optionalCoordinate(value: unknown) {
+  return normaliseCoordinate(value, null);
+}
+
 function normaliseRouteSettings(value: Partial<RouteSettings> | null | undefined): RouteSettings {
   const startStructuredAddress = normaliseStructuredAddress(value?.startStructuredAddress, fallbackRouteSettings.startStructuredAddress);
   const startAddress = normaliseAddress(value?.startAddress, formatStructuredAddress(startStructuredAddress) || fallbackRouteSettings.startAddress);
@@ -152,17 +156,23 @@ export async function saveRouteSettings(input: Partial<RouteSettings>) {
   const suppliedStart = input.startStructuredAddress
     ? await resolveStructuredAddress(input.startStructuredAddress, defaultDepotAddress)
     : null;
+  const exactStartLatitude = optionalCoordinate(input.startLatitude);
+  const exactStartLongitude = optionalCoordinate(input.startLongitude);
+  const hasExactStartCoordinates = exactStartLatitude !== null && exactStartLongitude !== null;
+  const savedStartLatitude = hasExactStartCoordinates ? exactStartLatitude : suppliedStart?.latitude ?? currentSettings.startLatitude;
+  const savedStartLongitude = hasExactStartCoordinates ? exactStartLongitude : suppliedStart?.longitude ?? currentSettings.startLongitude;
+  const savedStartAddress = suppliedStart?.formattedAddress || input.startAddress || currentSettings.startAddress;
   const settings = normaliseRouteSettings({
     ...currentSettings,
     ...input,
     ...(suppliedStart ? {
       startStructuredAddress: suppliedStart,
-      startAddress: suppliedStart.formattedAddress,
-      startLatitude: suppliedStart.latitude,
-      startLongitude: suppliedStart.longitude,
-      finishAddress: input.returnToBaseDefault === false ? input.finishAddress : suppliedStart.formattedAddress,
-      finishLatitude: input.returnToBaseDefault === false ? input.finishLatitude : suppliedStart.latitude,
-      finishLongitude: input.returnToBaseDefault === false ? input.finishLongitude : suppliedStart.longitude,
+      startAddress: savedStartAddress,
+      startLatitude: savedStartLatitude,
+      startLongitude: savedStartLongitude,
+      finishAddress: input.returnToBaseDefault === false ? input.finishAddress : savedStartAddress,
+      finishLatitude: input.returnToBaseDefault === false ? input.finishLatitude : savedStartLatitude,
+      finishLongitude: input.returnToBaseDefault === false ? input.finishLongitude : savedStartLongitude,
     } : {}),
   });
 
