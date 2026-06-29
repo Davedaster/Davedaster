@@ -100,6 +100,7 @@ export async function sendEmailWithResend(input: SendEmailInput): Promise<SendRe
       to: input.to,
       subject: input.message.subject || "Bathroom Panels Direct delivery update",
       text: input.message.body,
+      html: input.message.html || undefined,
     }),
   });
 
