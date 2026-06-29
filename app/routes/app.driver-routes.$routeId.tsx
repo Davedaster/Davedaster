@@ -26,6 +26,7 @@ import { getDriverRoute, startDriverRoute } from "../lib/driverRoutes.server";
 import { saveProofOfDelivery } from "../lib/proofOfDelivery.server";
 import { deleteProofPhoto } from "../lib/proofPhotos.server";
 import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";
+import { sendAutomaticDelayNotifications } from "../lib/routeNotifications.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -36,7 +37,16 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  const route = await getDriverRoute(routeId);
+  let route = await getDriverRoute(routeId);
+
+  if (!route) {
+    throw new Response("Route not found", { status: 404 });
+  }
+
+  if (route.status === "OUT_FOR_DELIVERY") {
+    await sendAutomaticDelayNotifications(routeId);
+    route = await getDriverRoute(routeId);
+  }
 
   if (!route) {
     throw new Response("Route not found", { status: 404 });
@@ -79,6 +89,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (!route || route.status !== "OUT_FOR_DELIVERY") {
     return json({ ok: false, error: "Start the route before updating stops." }, { status: 400 });
   }
+
+  await sendAutomaticDelayNotifications(routeId);
 
   if (intent === "completeStop") {
     try {
