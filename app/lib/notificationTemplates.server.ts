@@ -98,8 +98,8 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     label: "Next drop tracking",
     description: "Sent when the customer is the next delivery stop.",
     emailSubject: "You are the next delivery",
-    emailHtml: shell("You are the next delivery", "Good news, our driver is heading to you next.", "Live tracking is now available", "<p style=\"margin:0 0 22px;font-size:15px;line-height:1.6;color:#475467;\">You will only see live tracking while you are the next drop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% endif %}{% if driver.name %}{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}",
+    emailHtml: shell("You are the next delivery", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next.", "Live tracking is now available", "<p style=\"margin:0 0 22px;font-size:15px;line-height:1.6;color:#475467;\">You will only see live tracking while you are the next drop.</p>"),
+    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}",
   },
   delayUpdate: {
     id: "delayUpdate",
@@ -224,10 +224,10 @@ function valueAtPath(value: unknown, path: string): unknown {
 
 function renderLiquid(template: string, context: Record<string, unknown>, mode: "html" | "text") {
   let output = template;
-  const ifPattern = /\{%\s*if\s+([a-zA-Z0-9_.]+)\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/g;
+  const ifPattern = /\{%\s*if\s+([a-zA-Z0-9_.]+)\s*%\}([\s\S]*?)(?:\{%\s*else\s*%\}([\s\S]*?))?\{%\s*endif\s*%\}/g;
 
   for (let index = 0; index < 8; index += 1) {
-    const nextOutput = output.replace(ifPattern, (_match, path: string, content: string) => valueAtPath(context, path) ? content : "");
+    const nextOutput = output.replace(ifPattern, (_match, path: string, truthyContent: string, falseyContent: string = "") => valueAtPath(context, path) ? truthyContent : falseyContent);
     if (nextOutput === output) break;
     output = nextOutput;
   }
