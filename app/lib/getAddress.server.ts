@@ -88,8 +88,18 @@ async function lookupTomTom(query: string, postcode: string, searchText: string)
 
     const payload = await response.json() as TomTomSearchPayload;
     const bestMatch = payload.results?.[0];
-    const latitude = bestMatch?.position?.lat;
-    const longitude = bestMatch?.position?.lon;
+
+    if (!bestMatch) {
+      console.warn("TomTom lookup returned no matches", {
+        query,
+        resultCount: payload.results?.length || 0,
+      });
+
+      return null;
+    }
+
+    const latitude = bestMatch.position?.lat;
+    const longitude = bestMatch.position?.lon;
 
     if (typeof latitude !== "number" || typeof longitude !== "number") {
       console.warn("TomTom lookup returned no coordinates", {
