@@ -61,6 +61,18 @@ function formValue(formData: FormData, key: keyof AppCredentials) {
   return String(formData.get(key) || "").trim();
 }
 
+function formCoordinate(formData: FormData, key: string) {
+  const value = String(formData.get(key) || "").trim();
+
+  if (!value) {
+    return null;
+  }
+
+  const numberValue = Number(value);
+
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
 function structuredAddressFromForm(formData: FormData, prefix: string): StructuredAddress {
   return {
     building: String(formData.get(`${prefix}Building`) || "").trim(),
@@ -135,6 +147,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     timePerDropMinutes: Number(formData.get("timePerDropMinutes") || 10),
     customerSlotMinutes: Number(formData.get("customerSlotMinutes") || 60),
     startStructuredAddress: structuredAddressFromForm(formData, "start"),
+    startLatitude: formCoordinate(formData, "startLatitude"),
+    startLongitude: formCoordinate(formData, "startLongitude"),
     returnToBaseDefault: String(formData.get("returnToBaseDefault") || "") === "true",
   });
 
@@ -186,6 +200,8 @@ export default function Settings() {
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(currentSettings.timePerDropMinutes));
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(currentSettings.customerSlotMinutes));
   const [startStructuredAddress, setStartStructuredAddress] = useState<StructuredAddress>(currentSettings.startStructuredAddress);
+  const [startLatitude, setStartLatitude] = useState(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude));
+  const [startLongitude, setStartLongitude] = useState(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
   const [returnToBaseDefault, setReturnToBaseDefault] = useState(currentSettings.returnToBaseDefault);
 
   useEffect(() => {
@@ -193,6 +209,8 @@ export default function Settings() {
     setTimePerDropMinutes(String(currentSettings.timePerDropMinutes));
     setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes));
     setStartStructuredAddress(currentSettings.startStructuredAddress);
+    setStartLatitude(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude));
+    setStartLongitude(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
     setReturnToBaseDefault(currentSettings.returnToBaseDefault);
   }, [currentSettings]);
 
@@ -233,6 +251,10 @@ export default function Settings() {
                       Enter the address in separate parts. The app combines these into one clean address and converts it to coordinates using the same lookup method as customer orders.
                     </Text>
                     <StructuredAddressFields address={startStructuredAddress} onChange={setStartStructuredAddress} prefix="start" />
+                    <FormLayout.Group>
+                      <TextField label="Exact depot latitude" name="startLatitude" value={startLatitude} onChange={setStartLatitude} autoComplete="off" helpText="Use this to pin the depot exactly when the address lookup puts it on the road." />
+                      <TextField label="Exact depot longitude" name="startLongitude" value={startLongitude} onChange={setStartLongitude} autoComplete="off" helpText="Leave blank only if you want the app to use the lookup result." />
+                    </FormLayout.Group>
                     <Box background="bg-surface-secondary" padding="300" borderRadius="300">
                       <BlockStack gap="100">
                         <Text as="p" variant="bodySm" fontWeight="bold">Saved address format</Text>
