@@ -1,88 +1,163 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { Page, Layout, LegacyCard, Text, BlockStack, Badge, Divider, InlineStack } from "@shopify/polaris";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { Page, Layout, LegacyCard, Text, BlockStack, Badge, Divider, InlineStack, TextField, Button, Box } from "@shopify/polaris";
+import { useEffect, useState } from "react";
 
 import {
   isResendEnabled,
   isTwilioEnabled,
 } from "../lib/notificationSenders.server";
 import {
-  buildBookedSlotMessage,
-  buildDelayMessage,
-  buildDeliveryCompleteMessage,
-  buildNextDropTrackingMessage,
-  buildOutForDeliveryMessage,
+  availableNotificationVariables,
+  buildNotificationTemplatePreview,
+  listNotificationTemplates,
+  resetNotificationTemplate,
+  saveNotificationTemplate,
+  type EditableNotificationTemplate,
 } from "../lib/notificationTemplates.server";
 import { authenticate } from "../shopify.server";
 
 const previewInput = {
   customerName: "Chris",
   orderNumber: "#1234",
+  itemsSummary: "Gold Vein Marble Luxury Matt panels",
   routeName: "Devon route",
   driverName: "Ashley",
+  driverPhotoUrl: "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/driver-preview.jpg",
+  driverVehicleName: "BPD van",
+  driverVehicleRegistration: "BP24 DPD",
   deliveryDate: new Date("2026-05-14T05:00:00.000Z"),
   estimatedArrival: new Date("2026-05-14T09:30:00.000Z"),
   slotMinutes: 60,
   trackingUrl: "https://www.bathroompanelsdirect.co.uk/apps/track/example",
   proofPhotoUrl: "https://example.com/proof-of-delivery-photo.jpg",
+  delayMinutes: 45,
 };
 
-function buildPreviews() {
-  return [
-    {
-      title: "Booked slot",
-      sms: buildBookedSlotMessage(previewInput, "sms"),
-      email: buildBookedSlotMessage(previewInput, "email"),
-    },
-    {
-      title: "Out for delivery",
-      sms: buildOutForDeliveryMessage(previewInput, "sms"),
-      email: buildOutForDeliveryMessage(previewInput, "email"),
-    },
-    {
-      title: "Next drop tracking",
-      sms: buildNextDropTrackingMessage(previewInput, "sms"),
-      email: buildNextDropTrackingMessage(previewInput, "email"),
-    },
-    {
-      title: "Delay, 45 minutes",
-      sms: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "sms"),
-      email: buildDelayMessage({ ...previewInput, delayMinutes: 45 }, "email"),
-    },
-    {
-      title: "Delay, 90 minutes",
-      sms: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "sms"),
-      email: buildDelayMessage({ ...previewInput, delayMinutes: 90 }, "email"),
-    },
-    {
-      title: "Delivery complete",
-      sms: buildDeliveryCompleteMessage(previewInput, "sms"),
-      email: buildDeliveryCompleteMessage(previewInput, "email"),
-    },
-  ];
-}
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  const [twilioEnabled, resendEnabled, templates] = await Promise.all([
+    isTwilioEnabled(),
+    isResendEnabled(),
+    listNotificationTemplates(),
+  ]);
+  const previews = templates.map((template) => ({
+    id: template.id,
+    sms: buildNotificationTemplatePreview(previewInput, template, "sms"),
+    email: buildNotificationTemplatePreview(previewInput, template, "email"),
+  }));
+
+  return json({
+    twilioEnabled,
+    resendEnabled,
+    templates,
+    previews,
+    variables: availableNotificationVariables(),
+  });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+  const templateId = String(formData.get("templateId") || "");
+
+  if (intent === "resetTemplate") {
+    await resetNotificationTemplate(templateId);
+    return json({ ok: true, savedSection: "Template reset" });
+  }
+
+  if (intent === "saveTemplate") {
+    await saveNotificationTemplate(templateId, {
+      emailSubject: String(formData.get("emailSubject") || ""),
+      emailHtml: String(formData.get("emailHtml") || ""),
+      smsBody: String(formData.get("smsBody") || ""),
+    });
+
+    return json({ ok: true, savedSection: "Template saved" });
+  }
+
+  return json({ ok: false, error: "Template action was not recognised." }, { status: 400 });
+};
 
 function MessagePreview({ body }: { body: string }) {
   return (
-    <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}>
+    <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit", fontSize: 13 }}>
       {body}
     </pre>
   );
 }
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+function TemplateEditor({
+  template,
+  preview,
+}: {
+  template: EditableNotificationTemplate;
+  preview: {
+    sms: { body: string };
+    email: { subject?: string; body: string; html?: string };
+  };
+}) {
+  const [emailSubject, setEmailSubject] = useState(template.emailSubject);
+  const [emailHtml, setEmailHtml] = useState(template.emailHtml);
+  const [smsBody, setSmsBody] = useState(template.smsBody);
 
-  return json({
-    twilioEnabled: isTwilioEnabled(),
-    resendEnabled: isResendEnabled(),
-    previews: buildPreviews(),
-  });
-};
+  useEffect(() => {
+    setEmailSubject(template.emailSubject);
+    setEmailHtml(template.emailHtml);
+    setSmsBody(template.smsBody);
+  }, [template]);
+
+  return (
+    <LegacyCard sectioned>
+      <BlockStack gap="400">
+        <InlineStack align="space-between" blockAlign="start">
+          <BlockStack gap="100">
+            <Text as="h3" variant="headingMd">{template.label}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">{template.description}</Text>
+          </BlockStack>
+          <Form method="post">
+            <input type="hidden" name="intent" value="resetTemplate" />
+            <input type="hidden" name="templateId" value={template.id} />
+            <Button submit>Reset default</Button>
+          </Form>
+        </InlineStack>
+
+        <Form method="post">
+          <input type="hidden" name="intent" value="saveTemplate" />
+          <input type="hidden" name="templateId" value={template.id} />
+          <BlockStack gap="300">
+            <TextField label="Email subject" name="emailSubject" value={emailSubject} onChange={setEmailSubject} autoComplete="off" />
+            <TextField label="Email HTML template" name="emailHtml" value={emailHtml} onChange={setEmailHtml} autoComplete="off" multiline={14} helpText="Supports Liquid style variables like {{ customer.name }} and simple conditionals like {% if driver.photo_url %}...{% endif %}." />
+            <TextField label="SMS template" name="smsBody" value={smsBody} onChange={setSmsBody} autoComplete="off" multiline={4} />
+            <Button submit variant="primary">Save template</Button>
+          </BlockStack>
+        </Form>
+
+        <Divider />
+
+        <BlockStack gap="300">
+          <Text as="h4" variant="headingSm">Saved preview</Text>
+          <Badge tone="info">SMS</Badge>
+          <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+            <MessagePreview body={preview.sms.body} />
+          </Box>
+          <Badge tone="success">Email</Badge>
+          {preview.email.subject ? <Text as="p" variant="bodyMd" fontWeight="bold">Subject: {preview.email.subject}</Text> : null}
+          <div style={{ border: "1px solid #d0d5dd", borderRadius: 12, overflow: "hidden" }}>
+            <div dangerouslySetInnerHTML={{ __html: preview.email.html || preview.email.body }} />
+          </div>
+        </BlockStack>
+      </BlockStack>
+    </LegacyCard>
+  );
+}
 
 export default function Notifications() {
-  const { twilioEnabled, resendEnabled, previews } = useLoaderData<typeof loader>();
+  const { twilioEnabled, resendEnabled, templates, previews, variables } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const previewsById = new Map(previews.map((preview) => [preview.id, preview]));
 
   return (
     <Page title="Notifications">
@@ -90,38 +165,37 @@ export default function Notifications() {
         <Layout.Section>
           <LegacyCard sectioned>
             <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">Customer message templates</Text>
+              <Text as="h2" variant="headingMd">Editable customer notification templates</Text>
               <Text as="p" variant="bodyMd" tone="subdued">
-                Twilio and Resend sender helpers are now ready. Actual route message sending will stay behind a manual Send notifications button in a later milestone.
+                Edit the SMS text and HTML email templates used for customer delivery updates. Emails support Liquid style variables and a clean branded HTML layout.
               </Text>
               <InlineStack gap="200">
-                <Badge tone={twilioEnabled ? "success" : "warning"}>
-                  {`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}
-                </Badge>
-                <Badge tone={resendEnabled ? "success" : "warning"}>
-                  {`Resend ${resendEnabled ? "enabled" : "not set up"}`}
-                </Badge>
+                <Badge tone={twilioEnabled ? "success" : "warning"}>{`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}</Badge>
+                <Badge tone={resendEnabled ? "success" : "warning"}>{`Resend ${resendEnabled ? "enabled" : "not set up"}`}</Badge>
               </InlineStack>
+              {actionData?.ok ? <Badge tone="success">{actionData.savedSection}</Badge> : null}
+              {actionData && "error" in actionData ? <Text as="p" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
 
-          {previews.map((preview) => (
-            <LegacyCard key={preview.title} sectioned>
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">{preview.title}</Text>
-                <Badge tone="info">SMS</Badge>
-                <MessagePreview body={preview.sms.body} />
-                <Divider />
-                <Badge tone="success">Email</Badge>
-                {preview.email.subject ? (
-                  <Text as="p" variant="bodyMd" fontWeight="bold">
-                    Subject: {preview.email.subject}
-                  </Text>
-                ) : null}
-                <MessagePreview body={preview.email.body} />
-              </BlockStack>
-            </LegacyCard>
-          ))}
+          <LegacyCard title="Available Liquid variables" sectioned>
+            <BlockStack gap="200">
+              <Text as="p" variant="bodySm" tone="subdued">Use these inside email subjects, HTML email templates and SMS templates.</Text>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {variables.map((variable) => <code key={variable} style={{ background: "#f2f4f7", padding: "4px 7px", borderRadius: 8 }}>{variable}</code>)}
+              </div>
+            </BlockStack>
+          </LegacyCard>
+
+          {templates.map((template) => {
+            const preview = previewsById.get(template.id);
+
+            if (!preview) {
+              return null;
+            }
+
+            return <TemplateEditor key={template.id} template={template} preview={preview} />;
+          })}
         </Layout.Section>
       </Layout>
     </Page>
