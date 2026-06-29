@@ -117,7 +117,10 @@ function endpointImage(endpoint: MappableEndpoint) {
 
 function styles() {
   return `
-    .bpd-tomtom-map .mapboxgl-map { font-family: inherit; }
+    .bpd-tomtom-map { overscroll-behavior: contain; }
+    .bpd-tomtom-map .mapboxgl-map { font-family: inherit; overscroll-behavior: contain; touch-action: none; }
+    .bpd-tomtom-map .mapboxgl-canvas-container,
+    .bpd-tomtom-map .mapboxgl-canvas { overscroll-behavior: contain; touch-action: none; }
     .bpd-tomtom-map .mapboxgl-ctrl-group button { width: 36px; height: 36px; }
     .bpd-tomtom-map .mapboxgl-canvas { outline: none; }
     .bpd-tomtom-popup .mapboxgl-popup-content { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
@@ -438,6 +441,7 @@ export function RouteMap({
   const popupRef = useRef<TomTomPopupRef | null>(null);
   const touchHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
+  const touchHoldShownRef = useRef(false);
   const ignoreNextPinClickRef = useRef(false);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
@@ -849,14 +853,13 @@ export function RouteMap({
       }
 
       clearTouchHold();
+      touchHoldShownRef.current = false;
       touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
       touchHoldTimerRef.current = setTimeout(() => {
+        touchHoldShownRef.current = true;
         ignoreNextPinClickRef.current = true;
         map.getCanvas().style.cursor = "pointer";
         void showPopupForFeature(feature);
-        window.setTimeout(() => {
-          ignoreNextPinClickRef.current = false;
-        }, 650);
       }, 520);
     };
 
@@ -870,11 +873,22 @@ export function RouteMap({
 
       if (movedX > 12 || movedY > 12) {
         clearTouchHold();
+        touchHoldShownRef.current = false;
       }
     };
 
     const handlePinTouchEnd = () => {
+      const wasLongPress = touchHoldShownRef.current;
       clearTouchHold();
+      touchHoldShownRef.current = false;
+
+      if (wasLongPress) {
+        hidePopup();
+        ignoreNextPinClickRef.current = true;
+        window.setTimeout(() => {
+          ignoreNextPinClickRef.current = false;
+        }, 450);
+      }
     };
 
     const handleClusterEnter = () => {
@@ -941,7 +955,7 @@ export function RouteMap({
   const showTitleBadge = title.trim().length > 0 && title !== "Live planning map";
 
   return (
-    <div className="bpd-tomtom-map" style={{ display: "grid", gap: 10 }}>
+    <div className="bpd-tomtom-map" style={{ display: "grid", gap: 10, overscrollBehavior: "contain" }}>
       <style>{styles()}</style>
       <div
         style={{
@@ -952,6 +966,8 @@ export function RouteMap({
           border: "1px solid #d0d5dd",
           background: "#d6ecff",
           boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
+          overscrollBehavior: "contain",
+          touchAction: "none",
         }}
       >
         {activeApiKey ? <div ref={mapElementRef} style={{ height: "100%", width: "100%" }} /> : null}
