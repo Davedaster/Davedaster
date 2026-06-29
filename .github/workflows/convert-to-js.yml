@@ -46,6 +46,26 @@ jobs:
             }
           }' > tsconfig.js.json
 
+      - name: Prepare files for JavaScript transpile
+        run: |
+          find app \( -name "*.ts" -o -name "*.tsx" \) -type f | while read -r file; do
+            if ! head -n 1 "$file" | grep -q "@ts-nocheck"; then
+              tmp="$(mktemp)"
+              printf '// @ts-nocheck\n' > "$tmp"
+              cat "$file" >> "$tmp"
+              mv "$tmp" "$file"
+            fi
+          done
+
+          for file in .graphqlrc.ts vite.config.ts; do
+            if [ -f "$file" ] && ! head -n 1 "$file" | grep -q "@ts-nocheck"; then
+              tmp="$(mktemp)"
+              printf '// @ts-nocheck\n' > "$tmp"
+              cat "$file" >> "$tmp"
+              mv "$tmp" "$file"
+            fi
+          done
+
       - name: Transpile to Javascript
         run: yarn tsc -p tsconfig.js.json
 
@@ -64,7 +84,7 @@ jobs:
             "import/newline-after-import": "error",
             "padding-line-between-statements": ["error",
               { "blankLine": "always", "prev": ["const", "let", "var"], "next": "*"},
-              { "blankLine": "any",    "prev": ["const", "let", "var"], "next": ["const", "let", "var"]}
+              { "blankLine": "any",    "prev": ["const", "let", "var"], "next": ["const", "let", "var"]},
               { "blankLine": "always", "prev": "*", "next": "return" },
               { "blankLine": "always", "prev": "*", "next": "export" },
               { "blankLine": "never",  "prev": "export", "next": "export" },
