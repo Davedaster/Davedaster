@@ -625,6 +625,27 @@ function formatDuration(minutes: number | null) {
   return `${hours} hr ${mins} min`;
 }
 
+function OptimiseRouteButton({
+  onClick,
+  loading,
+  disabled,
+}: {
+  onClick: () => void;
+  loading: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <Button onClick={onClick} loading={loading} disabled={disabled} variant="primary" tone="critical">
+      <InlineStack gap="100" blockAlign="center" align="center">
+        <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8.9 1.3 3.4 8.5h4.2L6.8 14.7l5.8-7.9H8.2l.7-5.5Z" />
+        </svg>
+        <span>Optimise selected route</span>
+      </InlineStack>
+    </Button>
+  );
+}
+
 export default function OrdersMap() {
   const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -887,7 +908,7 @@ export default function OrdersMap() {
                   <TextField label="Driver start location" value={startAddress} onChange={(value) => { setStartAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} />
                   <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
                   {!returnToBase ? <TextField label="Custom finish location" value={finishAddress} onChange={(value) => { setFinishAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} /> : null}
-                  <Button onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0}>Optimise selected route</Button>
+                  <OptimiseRouteButton onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0} />
                 </BlockStack>
               </BlockStack>
             </Box>
