@@ -169,7 +169,13 @@ function extractPostcode(value: string) {
 }
 
 function formCoordinate(formData: FormData, name: string) {
-  const value = Number(String(formData.get(name) || ""));
+  const rawValue = String(formData.get(name) || "").trim();
+
+  if (!rawValue) {
+    return null;
+  }
+
+  const value = Number(rawValue);
 
   return Number.isFinite(value) ? value : null;
 }
