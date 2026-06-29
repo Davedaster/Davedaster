@@ -173,16 +173,6 @@ function formatAddress(order: ShopifyOrderNode) {
     .join(", ");
 }
 
-function hasWeakAddress(order: ShopifyOrderNode) {
-  const address = order.shippingAddress;
-
-  if (!address) {
-    return false;
-  }
-
-  return !address.address1 || !address.zip;
-}
-
 function extractPostcode(value: string) {
   const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
 
@@ -219,8 +209,8 @@ function applyOverride(order: DeliveryOrder, override: AddressOverride | undefin
     postcode: override.postcode || order.postcode,
     addressSummary: override.manualAddress,
     formattedAddress: override.manualAddress,
-    addressStatus: override.addressStatus === "READY" ? "READY" : "NEEDS_LOCATION_CHECK",
-    addressConfidence: override.addressStatus === "READY" ? "HIGH" : "LOW",
+    addressStatus: override.latitude && override.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: override.latitude && override.longitude ? "HIGH" : "LOW",
     latitude: override.latitude,
     longitude: override.longitude,
     hasManualOverride: true,
@@ -247,13 +237,12 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
   const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
   const shippingMethod = shippingTitle(order);
   const hasDeliveryAddress = Boolean(order.shippingAddress);
-  const weakAddress = hasWeakAddress(order);
   const addressSummary = formatAddress(order);
   const lookup = hasDeliveryAddress && !override
     ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary)
     : null;
 
-  const lookupNeedsCheck = lookup ? lookup.confidence === "LOW" || !lookup.latitude || !lookup.longitude : false;
+  const lookupHasCoordinates = Boolean(lookup?.latitude && lookup?.longitude);
 
   const deliveryOrder: DeliveryOrder = {
     id: order.id,
@@ -273,10 +262,10 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     isSampleOnly,
     addressStatus: !hasDeliveryAddress
       ? "NEEDS_ADDRESS"
-      : weakAddress || lookupNeedsCheck
-        ? "NEEDS_LOCATION_CHECK"
-        : "READY",
-    addressConfidence: lookup?.confidence || "LOW",
+      : lookupHasCoordinates
+        ? "READY"
+        : "NEEDS_LOCATION_CHECK",
+    addressConfidence: lookupHasCoordinates ? "HIGH" : lookup?.confidence || "LOW",
     latitude: lookup?.latitude || null,
     longitude: lookup?.longitude || null,
     lineItemSummary: items.map((item) => item.title).join(", "),
@@ -312,7 +301,7 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
     hasPanel: true,
     isSampleOnly: false,
     addressStatus: lookup.latitude && lookup.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
-    addressConfidence: lookup.confidence,
+    addressConfidence: lookup.latitude && lookup.longitude ? "HIGH" : lookup.confidence,
     latitude: lookup.latitude,
     longitude: lookup.longitude,
     lineItemSummary: input.lineItemSummary.trim(),
