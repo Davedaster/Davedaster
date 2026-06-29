@@ -1,7 +1,6 @@
 import type { AddressOverride } from "@prisma/client";
 import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
-import { getLastWorkingDaysStart } from "./workingDays.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -61,6 +60,10 @@ type ShopifyOrderNode = {
 type DeliveryOrdersPayload = {
   data?: {
     orders?: {
+      pageInfo: {
+        hasNextPage: boolean;
+        endCursor: string | null;
+      };
       edges: Array<{ node: ShopifyOrderNode }>;
     };
   };
@@ -103,34 +106,12 @@ export type ManualDeliveryOrderInput = {
   lineItemSummary: string;
 };
 
-const INCLUDED_SHIPPING_TERMS = [
-  "free rapid delivery",
-  "rapid delivery",
-  "local delivery",
-];
-
-const EXCLUDED_SHIPPING_TERMS = [
-  "yodel",
-  "royal mail",
-  "pickup",
-  "pick up",
-  "store pickup",
-  "store collection",
-  "collection",
-  "local pickup",
-];
-
 function normalise(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
 
 function shippingTitle(order: ShopifyOrderNode) {
   return order.shippingLines.edges.map((edge) => edge.node.title).join(", ");
-}
-
-function includesAny(value: string, terms: string[]) {
-  const normalised = normalise(value);
-  return terms.some((term) => normalised.includes(term));
 }
 
 function isFulfilled(order: ShopifyOrderNode) {
@@ -249,19 +230,15 @@ function applyOverride(order: DeliveryOrder, override: AddressOverride | undefin
 }
 
 export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
-  const shippingMethod = shippingTitle(order);
   const items = lineItems(order);
-  const hasPanel = items.some(isPanelLineItem);
   const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
 
   if (order.cancelledAt) return false;
   if (isFullyRefunded(order)) return false;
   if (isFulfilled(order)) return false;
   if (isSampleOnly) return false;
-  if (!hasPanel) return false;
-  if (includesAny(shippingMethod, EXCLUDED_SHIPPING_TERMS)) return false;
 
-  return includesAny(shippingMethod, INCLUDED_SHIPPING_TERMS);
+  return true;
 }
 
 export async function toDeliveryOrder(order: ShopifyOrderNode, override?: AddressOverride): Promise<DeliveryOrder> {
@@ -347,8 +324,12 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
 }
 
 const DELIVERY_ORDERS_QUERY = `#graphql
-  query DeliveryOrders($query: String!) {
-    orders(first: 100, sortKey: CREATED_AT, reverse: true, query: $query) {
+  query DeliveryOrders($query: String!, $cursor: String) {
+    orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $query) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
       edges {
         node {
           id
@@ -400,12 +381,9 @@ const DELIVERY_ORDERS_QUERY = `#graphql
   }
 `;
 
-export async function getDeliveryOrders(admin: ShopifyAdmin) {
-  const startDate = getLastWorkingDaysStart(7);
-  const query = `created_at:>=${startDate.toISOString().slice(0, 10)}`;
-
+async function fetchDeliveryOrderPage(admin: ShopifyAdmin, query: string, cursor: string | null) {
   const response = await admin.graphql(DELIVERY_ORDERS_QUERY, {
-    variables: { query },
+    variables: { query, cursor },
   });
   const payload = await response.json() as DeliveryOrdersPayload;
 
@@ -413,7 +391,27 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
     throw new Error(payload.errors.map((error) => error.message).join(", "));
   }
 
-  const orders = payload.data?.orders?.edges.map((edge) => edge.node) || [];
+  return payload.data?.orders;
+}
+
+export async function getDeliveryOrders(admin: ShopifyAdmin) {
+  const query = "status:open";
+  const orders: ShopifyOrderNode[] = [];
+  let cursor: string | null = null;
+  let page = 0;
+
+  do {
+    const result = await fetchDeliveryOrderPage(admin, query, cursor);
+
+    if (!result) {
+      break;
+    }
+
+    orders.push(...result.edges.map((edge) => edge.node));
+    cursor = result.pageInfo.hasNextPage ? result.pageInfo.endCursor : null;
+    page += 1;
+  } while (cursor && page < 10);
+
   const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
   const overrides = await getAddressOverridesByOrderId();
 
