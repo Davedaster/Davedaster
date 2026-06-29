@@ -19,7 +19,7 @@ function isValidProofPhotoUrl(value: string) {
 }
 
 function isValidPodImage(value: string) {
-  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length > 500;
+  return value.startsWith("data:image/") && value.includes(";base64,") && value.length > 500;
 }
 
 function normaliseProofPhotoUrls(value: string | string[]) {
@@ -138,7 +138,7 @@ export async function saveProofOfDelivery(input: {
     throw new Error("Complete the POD fields before marking delivered.");
   }
 
-  const shopifyResults = [];
+  const shopifyResults: string[] = [];
 
   for (const order of stop.deliveryGroup.orders) {
     const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
