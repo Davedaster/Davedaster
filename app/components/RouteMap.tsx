@@ -45,7 +45,7 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
-const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-return";
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-return-arrow";
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -203,7 +203,7 @@ function createSplitEndpointImage() {
   const radius = 19;
   const badgeCenterX = 38;
   const badgeCenterY = 16;
-  const badgeRadius = 12;
+  const badgeRadius = 13;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -232,19 +232,23 @@ function createSplitEndpointImage() {
   context.lineWidth = 3;
   context.stroke();
 
-  context.beginPath();
-  context.arc(badgeCenterX, badgeCenterY, 6, Math.PI * 0.2, Math.PI * 1.55, false);
   context.strokeStyle = "#ffffff";
-  context.lineWidth = 2.4;
+  context.fillStyle = "#ffffff";
+  context.lineWidth = 3;
   context.lineCap = "round";
+  context.lineJoin = "round";
+
+  context.beginPath();
+  context.moveTo(badgeCenterX + 5, badgeCenterY + 5);
+  context.lineTo(badgeCenterX + 5, badgeCenterY - 4);
+  context.lineTo(badgeCenterX - 6, badgeCenterY - 4);
   context.stroke();
 
   context.beginPath();
-  context.moveTo(badgeCenterX - 5, badgeCenterY + 3);
-  context.lineTo(badgeCenterX - 8, badgeCenterY + 3);
-  context.lineTo(badgeCenterX - 7, badgeCenterY);
+  context.moveTo(badgeCenterX - 6, badgeCenterY - 4);
+  context.lineTo(badgeCenterX - 1, badgeCenterY - 9);
+  context.lineTo(badgeCenterX - 1, badgeCenterY + 1);
   context.closePath();
-  context.fillStyle = "#ffffff";
   context.fill();
 
   return context.getImageData(0, 0, size, size);
