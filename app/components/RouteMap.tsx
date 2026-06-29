@@ -45,9 +45,9 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
-const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v2";
-const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v2";
-const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v3";
+const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v3";
+const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
@@ -207,8 +207,8 @@ function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
 
 function drawLocationPin(context: CanvasRenderingContext2D, colour: string) {
   const cx = 32;
-  const cy = 28;
-  const tipY = 66;
+  const cy = 33;
+  const tipY = 76;
 
   context.beginPath();
   context.moveTo(cx, tipY);
@@ -227,7 +227,7 @@ function drawLocationPin(context: CanvasRenderingContext2D, colour: string) {
 function createEndpointPinImage(colour: string) {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
-  canvas.height = 72;
+  canvas.height = 78;
 
   const context = canvas.getContext("2d");
 
@@ -241,29 +241,26 @@ function createEndpointPinImage(colour: string) {
   return context.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-function drawRoundedReturnArrow(context: CanvasRenderingContext2D, badgeCenterX: number, badgeCenterY: number) {
-  context.strokeStyle = "#ffffff";
+function drawReturnBaseIcon(context: CanvasRenderingContext2D, badgeCenterX: number, badgeCenterY: number) {
   context.fillStyle = "#ffffff";
-  context.lineWidth = 2.6;
-  context.lineCap = "round";
-  context.lineJoin = "round";
 
   context.beginPath();
-  context.arc(badgeCenterX, badgeCenterY, 5.3, Math.PI * 0.16, Math.PI * 1.55, false);
-  context.stroke();
-
-  context.beginPath();
-  context.moveTo(badgeCenterX - 1.8, badgeCenterY - 6.4);
-  context.lineTo(badgeCenterX + 4.3, badgeCenterY - 6.7);
-  context.lineTo(badgeCenterX + 1.2, badgeCenterY - 1.4);
+  context.moveTo(badgeCenterX - 6, badgeCenterY - 1);
+  context.lineTo(badgeCenterX, badgeCenterY - 7);
+  context.lineTo(badgeCenterX + 6, badgeCenterY - 1);
   context.closePath();
   context.fill();
+
+  context.fillRect(badgeCenterX - 4.4, badgeCenterY - 1, 8.8, 6.8);
+
+  context.fillStyle = "#b42318";
+  context.fillRect(badgeCenterX - 1.2, badgeCenterY + 2.1, 2.4, 3.7);
 }
 
 function createSplitEndpointImage() {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
-  canvas.height = 72;
+  canvas.height = 78;
 
   const context = canvas.getContext("2d");
 
@@ -275,7 +272,7 @@ function createSplitEndpointImage() {
   drawLocationPin(context, "#16a34a");
 
   const badgeCenterX = 45;
-  const badgeCenterY = 14;
+  const badgeCenterY = 16;
   const badgeRadius = 10;
 
   context.beginPath();
@@ -286,7 +283,7 @@ function createSplitEndpointImage() {
   context.lineWidth = 2.5;
   context.stroke();
 
-  drawRoundedReturnArrow(context, badgeCenterX, badgeCenterY);
+  drawReturnBaseIcon(context, badgeCenterX, badgeCenterY);
 
   return context.getImageData(0, 0, canvas.width, canvas.height);
 }
