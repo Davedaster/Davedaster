@@ -1,3 +1,5 @@
+import { getAppCredentials } from "./appCredentials.server";
+
 export type AddressLookupResult = {
   formattedAddress: string;
   postcode: string;
@@ -75,7 +77,8 @@ function fallbackAddress(postcode: string, searchText: string): AddressLookupRes
 }
 
 async function lookupTomTom(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
-  const tomTomKey = process.env.TOMTOM_API_KEY || "";
+  const credentials = await getAppCredentials();
+  const tomTomKey = credentials.tomtomApiKey;
 
   if (!tomTomKey) {
     return null;
