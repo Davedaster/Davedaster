@@ -444,6 +444,41 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
+function formatOrderDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Date unavailable";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function trimItemsSummary(value: string) {
+  const cleaned = value.trim();
+
+  if (!cleaned) {
+    return "Items not listed";
+  }
+
+  return cleaned.length > 110 ? `${cleaned.slice(0, 107)}...` : cleaned;
+}
+
+function orderMapTooltip(order: DeliveryOrder, heading: string) {
+  return {
+    tooltipTitle: heading,
+    tooltipLines: [
+      `Ordered: ${formatOrderDate(order.createdAt)}`,
+      `Postcode: ${order.postcode || "No postcode"}`,
+      `Items: ${trimItemsSummary(order.lineItemSummary)}`,
+    ],
+  };
+}
+
 function DeliveryMap({
   orders,
   selectedIds,
@@ -468,24 +503,34 @@ function DeliveryMap({
   const routePoints = routeStopIds
     .map((id) => ordersById.get(id))
     .filter((order): order is DeliveryOrder => Boolean(order) && hasCoordinates(order))
-    .map((order, index) => ({
-      id: order.id,
-      label: String(index + 1),
-      title: `${index + 1}. ${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
-      latitude: order.latitude,
-      longitude: order.longitude,
-      selected: true,
-    }));
+    .map((order, index) => {
+      const heading = `${index + 1}. ${order.name} · ${order.customerName}`;
+
+      return {
+        id: order.id,
+        label: String(index + 1),
+        title: `${heading} · ${order.postcode || "No postcode"}`,
+        latitude: order.latitude,
+        longitude: order.longitude,
+        selected: true,
+        ...orderMapTooltip(order, heading),
+      };
+    });
   const unselectedPoints = ordersWithCoordinates
     .filter((order) => !routeStopSet.has(order.id))
-    .map((order) => ({
-      id: order.id,
-      label: order.name.replace("#", ""),
-      title: `${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`,
-      latitude: order.latitude,
-      longitude: order.longitude,
-      selected: selectedIds.has(order.id),
-    }));
+    .map((order) => {
+      const heading = `${order.name} · ${order.customerName}`;
+
+      return {
+        id: order.id,
+        label: order.name.replace("#", ""),
+        title: `${heading} · ${order.postcode || "No postcode"}`,
+        latitude: order.latitude,
+        longitude: order.longitude,
+        selected: selectedIds.has(order.id),
+        ...orderMapTooltip(order, heading),
+      };
+    });
 
   return (
     <BlockStack gap="300">
