@@ -45,7 +45,9 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
-const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-return-arrow";
+const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v1";
+const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v1";
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v2";
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -106,6 +108,10 @@ function markerColour(point: RouteMapPoint) {
 
 function endpointColour(endpoint: MappableEndpoint) {
   return endpoint.status === "START" ? "#16a34a" : "#b42318";
+}
+
+function endpointImage(endpoint: MappableEndpoint) {
+  return endpoint.status === "START" ? START_ENDPOINT_IMAGE_ID : FINISH_ENDPOINT_IMAGE_ID;
 }
 
 function styles() {
@@ -186,6 +192,7 @@ function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
           label: endpoint.label,
           markerType: isStartFinish ? "startFinish" : "single",
           colour: endpointColour(endpoint),
+          iconImage: isStartFinish ? SPLIT_ENDPOINT_IMAGE_ID : endpointImage(endpoint),
           tooltip: `<div class="bpd-tooltip-heading">${escapeHtml(tooltipLabel)}</div><div class="bpd-tooltip-line">${escapeHtml(endpoint.address)}</div>`,
         },
         geometry: {
@@ -197,16 +204,29 @@ function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
   };
 }
 
-function createSplitEndpointImage() {
-  const size = 54;
-  const center = size / 2;
-  const radius = 19;
-  const badgeCenterX = 38;
-  const badgeCenterY = 16;
-  const badgeRadius = 13;
+function drawLocationPin(context: CanvasRenderingContext2D, colour: string) {
+  const cx = 32;
+  const cy = 28;
+  const tipY = 66;
+
+  context.beginPath();
+  context.moveTo(cx, tipY);
+  context.bezierCurveTo(cx - 5, tipY - 9, cx - 23, cy + 15, cx - 23, cy - 2);
+  context.bezierCurveTo(cx - 23, cy - 17, cx - 13, cy - 28, cx, cy - 28);
+  context.bezierCurveTo(cx + 13, cy - 28, cx + 23, cy - 17, cx + 23, cy - 2);
+  context.bezierCurveTo(cx + 23, cy + 15, cx + 5, tipY - 9, cx, tipY);
+  context.closePath();
+  context.fillStyle = colour;
+  context.fill();
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 5;
+  context.stroke();
+}
+
+function createEndpointPinImage(colour: string) {
   const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = 64;
+  canvas.height = 72;
 
   const context = canvas.getContext("2d");
 
@@ -214,59 +234,80 @@ function createSplitEndpointImage() {
     return null;
   }
 
-  context.clearRect(0, 0, size, size);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  drawLocationPin(context, colour);
+
+  return context.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function drawRoundedReturnArrow(context: CanvasRenderingContext2D, badgeCenterX: number, badgeCenterY: number) {
+  context.strokeStyle = "#ffffff";
+  context.fillStyle = "#ffffff";
+  context.lineWidth = 2.6;
+  context.lineCap = "round";
+  context.lineJoin = "round";
 
   context.beginPath();
-  context.arc(center, center, radius, 0, Math.PI * 2);
-  context.fillStyle = "#16a34a";
-  context.fill();
-  context.strokeStyle = "#ffffff";
-  context.lineWidth = 5;
+  context.arc(badgeCenterX, badgeCenterY, 5.3, Math.PI * 0.16, Math.PI * 1.55, false);
   context.stroke();
+
+  context.beginPath();
+  context.moveTo(badgeCenterX - 1.8, badgeCenterY - 6.4);
+  context.lineTo(badgeCenterX + 4.3, badgeCenterY - 6.7);
+  context.lineTo(badgeCenterX + 1.2, badgeCenterY - 1.4);
+  context.closePath();
+  context.fill();
+}
+
+function createSplitEndpointImage() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 72;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  drawLocationPin(context, "#16a34a");
+
+  const badgeCenterX = 45;
+  const badgeCenterY = 14;
+  const badgeRadius = 10;
 
   context.beginPath();
   context.arc(badgeCenterX, badgeCenterY, badgeRadius, 0, Math.PI * 2);
   context.fillStyle = "#b42318";
   context.fill();
   context.strokeStyle = "#ffffff";
-  context.lineWidth = 3;
+  context.lineWidth = 2.5;
   context.stroke();
 
-  context.strokeStyle = "#ffffff";
-  context.fillStyle = "#ffffff";
-  context.lineWidth = 3;
-  context.lineCap = "round";
-  context.lineJoin = "round";
+  drawRoundedReturnArrow(context, badgeCenterX, badgeCenterY);
 
-  context.beginPath();
-  context.moveTo(badgeCenterX + 5, badgeCenterY + 5);
-  context.lineTo(badgeCenterX + 5, badgeCenterY - 4);
-  context.lineTo(badgeCenterX - 6, badgeCenterY - 4);
-  context.stroke();
-
-  context.beginPath();
-  context.moveTo(badgeCenterX - 6, badgeCenterY - 4);
-  context.lineTo(badgeCenterX - 1, badgeCenterY - 9);
-  context.lineTo(badgeCenterX - 1, badgeCenterY + 1);
-  context.closePath();
-  context.fill();
-
-  return context.getImageData(0, 0, size, size);
+  return context.getImageData(0, 0, canvas.width, canvas.height);
 }
 
-function ensureSplitEndpointImage(map: TomTomMapRef) {
+function ensureEndpointImages(map: TomTomMapRef) {
   try {
-    if (map.hasImage?.(SPLIT_ENDPOINT_IMAGE_ID)) {
-      return true;
+    const images: Array<[string, ImageData | null]> = [
+      [START_ENDPOINT_IMAGE_ID, createEndpointPinImage("#16a34a")],
+      [FINISH_ENDPOINT_IMAGE_ID, createEndpointPinImage("#b42318")],
+      [SPLIT_ENDPOINT_IMAGE_ID, createSplitEndpointImage()],
+    ];
+
+    for (const [id, image] of images) {
+      if (!image) {
+        return false;
+      }
+
+      if (!map.hasImage?.(id)) {
+        map.addImage(id, image);
+      }
     }
 
-    const image = createSplitEndpointImage();
-
-    if (!image) {
-      return false;
-    }
-
-    map.addImage(SPLIT_ENDPOINT_IMAGE_ID, image);
     return true;
   } catch {
     return false;
@@ -407,7 +448,6 @@ export function RouteMap({
   const pinLabelLayerIdRef = useRef(`pin-labels-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const endpointPinsLayerIdRef = useRef(`route-endpoint-pins-${Math.random().toString(36).slice(2)}`);
-  const splitEndpointLayerIdRef = useRef(`route-split-endpoint-${Math.random().toString(36).slice(2)}`);
   const endpointLabelLayerIdRef = useRef(`route-endpoint-labels-${Math.random().toString(36).slice(2)}`);
   const [loadedApiKey, setLoadedApiKey] = useState(apiKey || "");
   const [mapReady, setMapReady] = useState(false);
@@ -577,7 +617,6 @@ export function RouteMap({
     const pinLabelLayerId = pinLabelLayerIdRef.current;
     const routeLayerId = routeLayerIdRef.current;
     const endpointPinsLayerId = endpointPinsLayerIdRef.current;
-    const splitEndpointLayerId = splitEndpointLayerIdRef.current;
     const endpointLabelLayerId = endpointLabelLayerIdRef.current;
     const featureCollection = buildFeatureCollection(mappablePoints);
     const endpointFeatureCollection = buildEndpointFeatureCollection(routeEndpoints);
@@ -601,7 +640,6 @@ export function RouteMap({
     removeLayer(pinLabelLayerId);
     removeLayer(pinsLayerId);
     removeLayer(endpointLabelLayerId);
-    removeLayer(splitEndpointLayerId);
     removeLayer(endpointPinsLayerId);
     removeLayer(routeLayerId);
     removeSource(sourceId);
@@ -707,32 +745,31 @@ export function RouteMap({
       data: endpointFeatureCollection,
     });
 
-    const splitEndpointImageReady = ensureSplitEndpointImage(map);
+    const endpointImagesReady = ensureEndpointImages(map);
 
-    map.addLayer({
-      id: endpointPinsLayerId,
-      type: "circle",
-      source: endpointSourceId,
-      filter: splitEndpointImageReady ? ["!=", ["get", "markerType"], "startFinish"] : undefined,
-      paint: {
-        "circle-color": ["get", "colour"],
-        "circle-radius": 21,
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 4,
-        "circle-opacity": 0.98,
-      },
-    });
-
-    if (splitEndpointImageReady) {
+    if (endpointImagesReady) {
       map.addLayer({
-        id: splitEndpointLayerId,
+        id: endpointPinsLayerId,
         type: "symbol",
         source: endpointSourceId,
-        filter: ["==", ["get", "markerType"], "startFinish"],
         layout: {
-          "icon-image": SPLIT_ENDPOINT_IMAGE_ID,
+          "icon-image": ["get", "iconImage"],
           "icon-size": 1,
+          "icon-anchor": "bottom",
           "icon-allow-overlap": true,
+        },
+      });
+    } else {
+      map.addLayer({
+        id: endpointPinsLayerId,
+        type: "circle",
+        source: endpointSourceId,
+        paint: {
+          "circle-color": ["get", "colour"],
+          "circle-radius": 21,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 4,
+          "circle-opacity": 0.98,
         },
       });
     }
@@ -744,7 +781,8 @@ export function RouteMap({
       filter: ["==", ["get", "markerType"], "single"],
       layout: {
         "text-field": ["get", "label"],
-        "text-size": 10,
+        "text-size": 9,
+        "text-offset": [0, -1.85],
         "text-allow-overlap": true,
       },
       paint: {
@@ -819,11 +857,6 @@ export function RouteMap({
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
 
-    if (splitEndpointImageReady) {
-      map.on("mouseenter", splitEndpointLayerId, showPopup);
-      map.on("mouseleave", splitEndpointLayerId, hidePopup);
-    }
-
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
         ...routeEndpoints.map((endpoint) => [endpoint.longitude, endpoint.latitude]),
@@ -848,12 +881,6 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
-
-      if (splitEndpointImageReady) {
-        map.off("mouseenter", splitEndpointLayerId, showPopup);
-        map.off("mouseleave", splitEndpointLayerId, hidePopup);
-      }
-
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
