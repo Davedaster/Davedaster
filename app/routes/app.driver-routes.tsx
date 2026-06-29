@@ -129,7 +129,7 @@ export default function DriverRoutes() {
                 const progressPercent = routeProgressPercent(route.stops.length, deliveredStops);
 
                 return (
-                  <ResourceItem id={route.id} accessibilityLabel={`Open ${route.name}`}>
+                  <ResourceItem id={route.id} accessibilityLabel={`Open ${route.name}`} onClick={() => {}}>
                     <BlockStack gap="200">
                       <InlineStack align="space-between" blockAlign="center">
                         <BlockStack gap="100">
