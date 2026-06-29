@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { getAppCredentials, hasProofPhotoStorageCredentials } from "./appCredentials.server";
+
 const MAX_PROOF_PHOTO_BYTES = 10 * 1024 * 1024;
 const ALLOWED_CONTENT_TYPES = new Set([
   "image/jpeg",
@@ -9,11 +11,9 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "image/heif",
 ]);
 
-function requireEnv(name: string) {
-  const value = process.env[name];
-
+function requireCredential(value: string, name: string) {
   if (!value) {
-    throw new Error(`${name} is missing from the app environment.`);
+    throw new Error(`${name} is missing from Settings, API Credentials.`);
   }
 
   return value;
@@ -56,15 +56,10 @@ function buildObjectKey(stopId: string, file: File) {
   return `proof-of-delivery/${safeStopId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
 }
 
-export function isProofPhotoStorageEnabled() {
-  return Boolean(
-    process.env.PROOF_PHOTO_STORAGE_ENDPOINT &&
-    process.env.PROOF_PHOTO_STORAGE_REGION &&
-    process.env.PROOF_PHOTO_STORAGE_BUCKET &&
-    process.env.PROOF_PHOTO_STORAGE_ACCESS_KEY_ID &&
-    process.env.PROOF_PHOTO_STORAGE_SECRET_ACCESS_KEY &&
-    process.env.PROOF_PHOTO_PUBLIC_BASE_URL,
-  );
+export async function isProofPhotoStorageEnabled() {
+  const credentials = await getAppCredentials();
+
+  return hasProofPhotoStorageCredentials(credentials);
 }
 
 export async function uploadProofPhoto(file: File, stopId: string) {
@@ -80,12 +75,13 @@ export async function uploadProofPhoto(file: File, stopId: string) {
     throw new Error("Proof photo must be a JPG, PNG, WebP or HEIC image.");
   }
 
-  const endpoint = trimTrailingSlash(requireEnv("PROOF_PHOTO_STORAGE_ENDPOINT"));
-  const region = requireEnv("PROOF_PHOTO_STORAGE_REGION");
-  const bucket = requireEnv("PROOF_PHOTO_STORAGE_BUCKET");
-  const accessKeyId = requireEnv("PROOF_PHOTO_STORAGE_ACCESS_KEY_ID");
-  const secretAccessKey = requireEnv("PROOF_PHOTO_STORAGE_SECRET_ACCESS_KEY");
-  const publicBaseUrl = trimTrailingSlash(requireEnv("PROOF_PHOTO_PUBLIC_BASE_URL"));
+  const credentials = await getAppCredentials();
+  const endpoint = trimTrailingSlash(requireCredential(credentials.proofPhotoStorageEndpoint, "Proof photo storage endpoint"));
+  const region = requireCredential(credentials.proofPhotoStorageRegion, "Proof photo storage region");
+  const bucket = requireCredential(credentials.proofPhotoStorageBucket, "Proof photo storage bucket");
+  const accessKeyId = requireCredential(credentials.proofPhotoStorageAccessKeyId, "Proof photo storage access key ID");
+  const secretAccessKey = requireCredential(credentials.proofPhotoStorageSecretAccessKey, "Proof photo storage secret access key");
+  const publicBaseUrl = trimTrailingSlash(requireCredential(credentials.proofPhotoPublicBaseUrl, "Proof photo public base URL"));
 
   const body = Buffer.from(await file.arrayBuffer());
   const payloadHash = hashHex(body);
