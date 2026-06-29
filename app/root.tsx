@@ -107,8 +107,12 @@ const planningPanelScript = `
 
       if (touchingMap) {
         lockPageForMap();
+
+        if (event.cancelable) {
+          event.preventDefault();
+        }
       }
-    }, { passive: true, capture: true });
+    }, { passive: false, capture: true });
 
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
 
