@@ -212,12 +212,8 @@ const planningPanelScript = `
       if (touchingMap) {
         lastMapMoveAt = Date.now();
         lockPageForMap(event.target);
-
-        if (event.cancelable) {
-          event.preventDefault();
-        }
       }
-    }, { passive: false, capture: true });
+    }, { passive: true, capture: true });
 
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
 
