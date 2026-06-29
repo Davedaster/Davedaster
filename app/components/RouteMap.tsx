@@ -45,7 +45,7 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
-const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-split";
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-return";
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -198,9 +198,12 @@ function buildEndpointFeatureCollection(endpoints: MappableEndpoint[]) {
 }
 
 function createSplitEndpointImage() {
-  const size = 46;
+  const size = 54;
   const center = size / 2;
-  const radius = 20;
+  const radius = 19;
+  const badgeCenterX = 38;
+  const badgeCenterY = 16;
+  const badgeRadius = 12;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
@@ -214,24 +217,35 @@ function createSplitEndpointImage() {
   context.clearRect(0, 0, size, size);
 
   context.beginPath();
-  context.moveTo(center, center);
-  context.arc(center, center, radius, Math.PI / 2, Math.PI * 1.5);
-  context.closePath();
+  context.arc(center, center, radius, 0, Math.PI * 2);
   context.fillStyle = "#16a34a";
   context.fill();
-
-  context.beginPath();
-  context.moveTo(center, center);
-  context.arc(center, center, radius, -Math.PI / 2, Math.PI / 2);
-  context.closePath();
-  context.fillStyle = "#b42318";
-  context.fill();
-
-  context.beginPath();
-  context.arc(center, center, radius, 0, Math.PI * 2);
   context.strokeStyle = "#ffffff";
   context.lineWidth = 5;
   context.stroke();
+
+  context.beginPath();
+  context.arc(badgeCenterX, badgeCenterY, badgeRadius, 0, Math.PI * 2);
+  context.fillStyle = "#b42318";
+  context.fill();
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 3;
+  context.stroke();
+
+  context.beginPath();
+  context.arc(badgeCenterX, badgeCenterY, 6, Math.PI * 0.2, Math.PI * 1.55, false);
+  context.strokeStyle = "#ffffff";
+  context.lineWidth = 2.4;
+  context.lineCap = "round";
+  context.stroke();
+
+  context.beginPath();
+  context.moveTo(badgeCenterX - 5, badgeCenterY + 3);
+  context.lineTo(badgeCenterX - 8, badgeCenterY + 3);
+  context.lineTo(badgeCenterX - 7, badgeCenterY);
+  context.closePath();
+  context.fillStyle = "#ffffff";
+  context.fill();
 
   return context.getImageData(0, 0, size, size);
 }
