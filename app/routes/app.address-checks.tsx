@@ -16,9 +16,10 @@ import {
   TextField,
   Button,
 } from "@shopify/polaris";
+import { useState } from "react";
 
 import { upsertAddressOverride } from "../lib/addressOverrides.server";
-import { getDeliveryOrders } from "../lib/shopifyOrders.server";
+import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -61,6 +62,103 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return redirect("/app/address-checks");
 };
 
+function AddressCheckItem({ order }: { order: DeliveryOrder }) {
+  const [manualAddress, setManualAddress] = useState(order.manualAddress || order.addressSummary);
+  const [postcode, setPostcode] = useState(order.postcode || "");
+  const [latitude, setLatitude] = useState(order.latitude ? String(order.latitude) : "");
+  const [longitude, setLongitude] = useState(order.longitude ? String(order.longitude) : "");
+  const [notes, setNotes] = useState(order.manualAddressNotes || "");
+  const coordinates = order.latitude && order.longitude
+    ? `${order.latitude.toFixed(5)}, ${order.longitude.toFixed(5)}`
+    : "No coordinates yet";
+
+  return (
+    <ResourceItem id={order.id} accessibilityLabel={`Review ${order.name}`} onClick={() => {}}>
+      <BlockStack gap="300">
+        <InlineStack align="space-between">
+          <BlockStack gap="100">
+            <Text as="h3" variant="bodyMd" fontWeight="bold">
+              {order.name} · {order.customerName}
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              Shopify address: {order.addressSummary}
+            </Text>
+            {order.formattedAddress ? (
+              <Text as="p" variant="bodySm" tone="subdued">
+                Matched address: {order.formattedAddress}
+              </Text>
+            ) : null}
+            {order.hasManualOverride ? (
+              <Text as="p" variant="bodySm" tone="success">
+                Manual address override saved: {order.manualAddress}
+              </Text>
+            ) : null}
+            <Text as="p" variant="bodySm" tone="subdued">
+              Coordinates: {coordinates}
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              {order.shippingMethod}
+            </Text>
+          </BlockStack>
+          <Badge tone="warning">
+            {order.addressStatus === "NEEDS_ADDRESS" ? "Needs address" : "Needs location check"}
+          </Badge>
+        </InlineStack>
+
+        <LegacyCard sectioned>
+          <Form method="post">
+            <input type="hidden" name="shopifyOrderId" value={order.id} />
+            <input type="hidden" name="shopifyOrderName" value={order.name} />
+            <FormLayout>
+              <TextField
+                label="Manual delivery address"
+                name="manualAddress"
+                value={manualAddress}
+                onChange={setManualAddress}
+                autoComplete="off"
+                multiline={3}
+                helpText="Use this when Shopify has no delivery address, or when the matched address is not accurate enough."
+              />
+              <FormLayout.Group>
+                <TextField
+                  label="Postcode"
+                  name="postcode"
+                  value={postcode}
+                  onChange={setPostcode}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="Latitude, optional"
+                  name="latitude"
+                  value={latitude}
+                  onChange={setLatitude}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="Longitude, optional"
+                  name="longitude"
+                  value={longitude}
+                  onChange={setLongitude}
+                  autoComplete="off"
+                />
+              </FormLayout.Group>
+              <TextField
+                label="Internal address notes"
+                name="notes"
+                value={notes}
+                onChange={setNotes}
+                autoComplete="off"
+                multiline={2}
+              />
+              <Button submit variant="primary">Save manual address</Button>
+            </FormLayout>
+          </Form>
+        </LegacyCard>
+      </BlockStack>
+    </ResourceItem>
+  );
+}
+
 export default function AddressChecks() {
   const { orders, addressLookupEnabled } = useLoaderData<typeof loader>();
 
@@ -89,92 +187,7 @@ export default function AddressChecks() {
                 <ResourceList
                   resourceName={{ singular: "order", plural: "orders" }}
                   items={orders}
-                  renderItem={(order) => {
-                    const coordinates = order.latitude && order.longitude
-                      ? `${order.latitude.toFixed(5)}, ${order.longitude.toFixed(5)}`
-                      : "No coordinates yet";
-
-                    return (
-                      <ResourceItem id={order.id} accessibilityLabel={`Review ${order.name}`}>
-                        <BlockStack gap="300">
-                          <InlineStack align="space-between">
-                            <BlockStack gap="100">
-                              <Text as="h3" variant="bodyMd" fontWeight="bold">
-                                {order.name} · {order.customerName}
-                              </Text>
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                Shopify address: {order.addressSummary}
-                              </Text>
-                              {order.formattedAddress ? (
-                                <Text as="p" variant="bodySm" tone="subdued">
-                                  Matched address: {order.formattedAddress}
-                                </Text>
-                              ) : null}
-                              {order.hasManualOverride ? (
-                                <Text as="p" variant="bodySm" tone="success">
-                                  Manual address override saved: {order.manualAddress}
-                                </Text>
-                              ) : null}
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                Coordinates: {coordinates}
-                              </Text>
-                              <Text as="p" variant="bodySm" tone="subdued">
-                                {order.shippingMethod}
-                              </Text>
-                            </BlockStack>
-                            <Badge tone="warning">
-                              {order.addressStatus === "NEEDS_ADDRESS" ? "Needs address" : "Needs location check"}
-                            </Badge>
-                          </InlineStack>
-
-                          <LegacyCard sectioned>
-                            <Form method="post">
-                              <input type="hidden" name="shopifyOrderId" value={order.id} />
-                              <input type="hidden" name="shopifyOrderName" value={order.name} />
-                              <FormLayout>
-                                <TextField
-                                  label="Manual delivery address"
-                                  name="manualAddress"
-                                  defaultValue={order.manualAddress || order.addressSummary}
-                                  autoComplete="off"
-                                  multiline={3}
-                                  helpText="Use this when Shopify has no delivery address, or when the matched address is not accurate enough."
-                                />
-                                <FormLayout.Group>
-                                  <TextField
-                                    label="Postcode"
-                                    name="postcode"
-                                    defaultValue={order.postcode || ""}
-                                    autoComplete="off"
-                                  />
-                                  <TextField
-                                    label="Latitude, optional"
-                                    name="latitude"
-                                    defaultValue={order.latitude ? String(order.latitude) : ""}
-                                    autoComplete="off"
-                                  />
-                                  <TextField
-                                    label="Longitude, optional"
-                                    name="longitude"
-                                    defaultValue={order.longitude ? String(order.longitude) : ""}
-                                    autoComplete="off"
-                                  />
-                                </FormLayout.Group>
-                                <TextField
-                                  label="Internal address notes"
-                                  name="notes"
-                                  defaultValue={order.manualAddressNotes || ""}
-                                  autoComplete="off"
-                                  multiline={2}
-                                />
-                                <Button submit variant="primary">Save manual address</Button>
-                              </FormLayout>
-                            </Form>
-                          </LegacyCard>
-                        </BlockStack>
-                      </ResourceItem>
-                    );
-                  }}
+                  renderItem={(order) => <AddressCheckItem order={order} />}
                 />
               )}
             </BlockStack>
