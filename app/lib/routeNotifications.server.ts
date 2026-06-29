@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { getAppCredentials } from "./appCredentials.server";
 import { sendEmailWithResend, sendSmsWithTwilio, isResendEnabled, isTwilioEnabled } from "./notificationSenders.server";
 import { buildBookedSlotMessage } from "./notificationTemplates.server";
 
@@ -8,30 +9,34 @@ type SendRouteNotificationsResult = {
   skipped: number;
 };
 
-function trackingUrlForRoute(routeId: string, orderId: string) {
-  const baseUrl = process.env.SHOP_PUBLIC_URL || "https://www.bathroompanelsdirect.co.uk";
-  return `${baseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
+function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) {
+  const cleanBaseUrl = (baseUrl || "https://www.bathroompanelsdirect.co.uk").replace(/\/+$/, "");
+
+  return `${cleanBaseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
 }
 
 export async function sendBookedSlotNotifications(routeId: string): Promise<SendRouteNotificationsResult> {
-  const route = await prisma.route.findUnique({
-    where: { id: routeId },
-    include: {
-      driver: true,
-      stops: {
-        include: {
-          deliveryGroup: {
-            include: {
-              orders: true,
+  const [route, credentials] = await Promise.all([
+    prisma.route.findUnique({
+      where: { id: routeId },
+      include: {
+        driver: true,
+        stops: {
+          include: {
+            deliveryGroup: {
+              include: {
+                orders: true,
+              },
             },
           },
-        },
-        orderBy: {
-          orderIndex: "asc",
+          orderBy: {
+            orderIndex: "asc",
+          },
         },
       },
-    },
-  });
+    }),
+    getAppCredentials(),
+  ]);
 
   if (!route) {
     throw new Error("Route not found.");
@@ -45,11 +50,11 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
     throw new Error("Customer notifications have already been sent for this route.");
   }
 
-  const canSendSms = isTwilioEnabled();
-  const canSendEmail = isResendEnabled();
+  const canSendSms = await isTwilioEnabled();
+  const canSendEmail = await isResendEnabled();
 
   if (!canSendSms && !canSendEmail) {
-    throw new Error("Twilio and Resend are not set up yet. Add the notification environment variables before sending messages.");
+    throw new Error("Twilio and Resend are not set up yet. Add them in Settings, API Credentials before sending messages.");
   }
 
   let smsSent = 0;
@@ -68,7 +73,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
         deliveryDate: route.date,
         estimatedArrival: stop.estimatedArrival,
         slotMinutes: route.customerSlotMinutes,
-        trackingUrl: trackingUrlForRoute(route.id, order.shopifyOrderId),
+        trackingUrl: trackingUrlForRoute(credentials.shopPublicUrl, route.id, order.shopifyOrderId),
       };
 
       let sentAnything = false;
