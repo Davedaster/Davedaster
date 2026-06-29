@@ -7,6 +7,16 @@ import {
 } from "@remix-run/react";
 
 const planningPanelStyles = `
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+
+  .bpd-tomtom-map,
+  .bpd-tomtom-map * {
+    overscroll-behavior: contain;
+  }
+
   details:has(> summary[style*="list-style"] h3) {
     border: 1px solid #d0d5dd;
     border-radius: 12px;
@@ -38,6 +48,36 @@ const planningPanelStyles = `
 
 const planningPanelScript = `
   (() => {
+    let touchingMap = false;
+
+    const isMapTouch = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
+
+    const blockMapPullRefresh = (event) => {
+      if (!touchingMap && !isMapTouch(event.target)) {
+        return;
+      }
+
+      touchingMap = true;
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchstart', (event) => {
+      touchingMap = isMapTouch(event.target);
+    }, { passive: true, capture: true });
+
+    document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
+
+    document.addEventListener('touchend', () => {
+      touchingMap = false;
+    }, { passive: true, capture: true });
+
+    document.addEventListener('touchcancel', () => {
+      touchingMap = false;
+    }, { passive: true, capture: true });
+
     const tidyCustomerTracking = () => {
       if (!window.location.pathname.startsWith('/apps/track/')) {
         return;
