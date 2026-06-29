@@ -38,6 +38,58 @@ const planningPanelStyles = `
 
 const planningPanelScript = `
   (() => {
+    const tidyCustomerTracking = () => {
+      if (!window.location.pathname.startsWith('/apps/track/')) {
+        return;
+      }
+
+      const trackingTextNodes = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+
+      while (node) {
+        trackingTextNodes.push(node);
+        node = walker.nextNode();
+      }
+
+      const pageText = document.body?.innerText || '';
+      const isLive = pageText.includes('Live tracking active') && pageText.includes('You are next');
+      const isEnded = pageText.includes('Tracking ended') || pageText.includes('Delivery completed') || pageText.includes('Delivery attempted');
+
+      trackingTextNodes.forEach((textNode) => {
+        if (!isLive && textNode.nodeValue?.includes('Tracking active')) {
+          textNode.nodeValue = textNode.nodeValue.replaceAll('Tracking active', 'Tracking not live yet');
+        }
+
+        if (!isLive && textNode.nodeValue?.includes('Route active')) {
+          textNode.nodeValue = textNode.nodeValue.replaceAll('Route active', 'Route active, tracking not live yet');
+        }
+
+        if (!isLive && textNode.nodeValue?.includes('Activates when next')) {
+          textNode.nodeValue = textNode.nodeValue.replaceAll('Activates when next', 'Tracking locked');
+        }
+      });
+
+      if (isLive || isEnded) {
+        return;
+      }
+
+      document.querySelectorAll('span').forEach((span) => {
+        if (span.textContent?.trim() !== 'Map view') {
+          return;
+        }
+
+        const mapBox = span.closest('div[style*="min-height: 360"]');
+
+        if (!mapBox || mapBox.getAttribute('data-bpd-tracking-locked') === 'true') {
+          return;
+        }
+
+        mapBox.setAttribute('data-bpd-tracking-locked', 'true');
+        mapBox.innerHTML = '<div style="display:grid;place-items:center;min-height:360px;padding:24px;text-align:center;background:#f8fafc;border-radius:14px;"><div><div style="width:54px;height:54px;border-radius:50%;background:#e5e7eb;display:grid;place-items:center;margin:0 auto 12px;font-size:22px;font-weight:800;color:#667085;">•</div><h2 style="margin:0 0 8px;font-size:20px;color:#323841;">Live tracking is not active yet</h2><p style="margin:0;color:#667085;max-width:420px;">For privacy, the map will only appear when your delivery is the next active drop.</p></div></div>';
+      });
+    };
+
     const tidyPlanningLabels = () => {
       document.querySelectorAll('details summary h4').forEach((heading) => {
         const summary = heading.closest('summary');
@@ -62,6 +114,8 @@ const planningPanelScript = `
           textNode.nodeValue = textNode.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
         }
       });
+
+      tidyCustomerTracking();
     };
 
     const startObserver = () => {
