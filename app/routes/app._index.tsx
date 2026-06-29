@@ -809,6 +809,30 @@ export default function OrdersMap() {
     setRouteFinishEta(null);
   };
 
+  const resetTransientAddressFields = () => {
+    setUseCustomStartPoint(false);
+    setCustomStartAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    setCustomFinishAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    setManualAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    setReturnToBase(defaults.returnToBaseDefault);
+  };
+
+  useEffect(() => {
+    resetTransientAddressFields();
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        resetTransientAddressFields();
+      }
+    };
+
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, []);
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
