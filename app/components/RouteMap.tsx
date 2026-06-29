@@ -865,6 +865,8 @@ export function RouteMap({
     };
   }, []);
 
+  const showTitleBadge = title.trim().length > 0 && title !== "Live planning map";
+
   return (
     <div className="bpd-tomtom-map" style={{ display: "grid", gap: 10 }}>
       <style>{styles()}</style>
@@ -883,7 +885,7 @@ export function RouteMap({
 
         <div style={{ position: "absolute", inset: 14, pointerEvents: "none", zIndex: 5 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#323841", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{title}</span>
+            {showTitleBadge ? <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#323841", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{title}</span> : <span />}
             {badge ? <span style={{ background: "rgba(255,255,255,0.94)", padding: "7px 10px", borderRadius: 999, fontWeight: 800, fontSize: 13, color: "#509AE6", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>{badge}</span> : null}
           </div>
         </div>
