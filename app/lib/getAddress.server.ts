@@ -9,6 +9,14 @@ export type AddressLookupResult = {
   source: "getaddress" | "manual" | "none";
 };
 
+export type PostcodeAddressOption = {
+  id: string;
+  address: string;
+  postcode: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 type NominatimSearchResult = {
   lat?: string;
   lon?: string;
@@ -28,6 +36,28 @@ type TomTomSearchResult = {
 
 type TomTomSearchPayload = {
   results?: TomTomSearchResult[];
+};
+
+type GetAddressExpandedAddress = {
+  formatted_address?: string[];
+  line_1?: string;
+  line_2?: string;
+  line_3?: string;
+  line_4?: string;
+  locality?: string;
+  town_or_city?: string;
+  county?: string;
+  country?: string;
+  postcode?: string;
+  latitude?: number;
+  longitude?: number;
+};
+
+type GetAddressFindPayload = {
+  postcode?: string;
+  latitude?: number;
+  longitude?: number;
+  addresses?: Array<string | GetAddressExpandedAddress>;
 };
 
 function normalisePostcode(postcode: string | null | undefined) {
@@ -74,6 +104,45 @@ function fallbackAddress(postcode: string, searchText: string): AddressLookupRes
     confidence: "LOW",
     source: "none",
   };
+}
+
+function cleanAddressPart(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
+function formatGetAddressAddress(address: string | GetAddressExpandedAddress, postcode: string) {
+  if (typeof address === "string") {
+    return address
+      .split(",")
+      .map(cleanAddressPart)
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  const formattedLines = address.formatted_address
+    ?.map(cleanAddressPart)
+    .filter(Boolean) || [];
+
+  const addressParts = formattedLines.length ? formattedLines : [
+    address.line_1,
+    address.line_2,
+    address.line_3,
+    address.line_4,
+    address.locality,
+    address.town_or_city,
+    address.county,
+    address.country,
+  ]
+    .map(cleanAddressPart)
+    .filter(Boolean);
+
+  const finalPostcode = cleanAddressPart(address.postcode || postcode);
+
+  return [...addressParts, finalPostcode].filter(Boolean).join(", ");
+}
+
+function coordinate(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 async function lookupTomTom(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
@@ -209,6 +278,57 @@ async function lookupOpenStreetMap(query: string, postcode: string, searchText: 
 
     return null;
   }
+}
+
+export async function findAddressesByPostcode(postcode: string): Promise<PostcodeAddressOption[]> {
+  const credentials = await getAppCredentials();
+  const apiKey = credentials.getAddressApiKey;
+  const cleanPostcode = normalisePostcode(postcode);
+
+  if (!apiKey || !cleanPostcode) {
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    "api-key": apiKey,
+    expand: "true",
+    sort: "true",
+  });
+  const url = `https://api.getAddress.io/find/${encodeURIComponent(cleanPostcode)}?${params.toString()}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Address lookup failed. Check the postcode and try again.");
+  }
+
+  const payload = await response.json() as GetAddressFindPayload;
+  const payloadPostcode = normalisePostcode(payload.postcode || cleanPostcode);
+  const postcodeLatitude = coordinate(payload.latitude);
+  const postcodeLongitude = coordinate(payload.longitude);
+
+  return (payload.addresses || [])
+    .map((address, index) => {
+      const formattedAddress = formatGetAddressAddress(address, payloadPostcode);
+
+      if (!formattedAddress) {
+        return null;
+      }
+
+      const expandedAddress = typeof address === "string" ? null : address;
+
+      return {
+        id: `${payloadPostcode}-${index}`,
+        address: formattedAddress,
+        postcode: payloadPostcode,
+        latitude: coordinate(expandedAddress?.latitude) ?? postcodeLatitude,
+        longitude: coordinate(expandedAddress?.longitude) ?? postcodeLongitude,
+      };
+    })
+    .filter((address): address is PostcodeAddressOption => Boolean(address));
 }
 
 export async function lookupAddress(postcode: string | null, searchText: string): Promise<AddressLookupResult> {
