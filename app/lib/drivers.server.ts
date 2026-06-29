@@ -16,6 +16,24 @@ export type DriverInput = {
   notes?: string | null;
 };
 
+function driverData(input: DriverInput) {
+  return {
+    name: input.name,
+    photoUrl: input.photoUrl || null,
+    phoneNumber: input.phoneNumber || null,
+    email: input.email || null,
+    vehicleName: input.vehicleName || null,
+    vehicleRegistration: input.vehicleRegistration || null,
+    vehicleType: input.vehicleType || null,
+    fuelCardNumber: input.fuelCardNumber || null,
+    fuelCardProvider: input.fuelCardProvider || null,
+    startAddress: input.startAddress || null,
+    endAddress: input.endAddress || null,
+    isActive: input.isActive ?? true,
+    notes: input.notes || null,
+  };
+}
+
 export async function listDrivers() {
   return prisma.driver.findMany({
     orderBy: [
@@ -38,20 +56,32 @@ export async function listActiveDrivers() {
 
 export async function createDriver(input: DriverInput) {
   return prisma.driver.create({
+    data: driverData(input),
+  });
+}
+
+export async function updateDriver(driverId: string, input: DriverInput) {
+  return prisma.driver.update({
+    where: {
+      id: driverId,
+    },
+    data: driverData(input),
+  });
+}
+
+export async function deleteDriver(driverId: string) {
+  await prisma.route.updateMany({
+    where: {
+      driverId,
+    },
     data: {
-      name: input.name,
-      photoUrl: input.photoUrl || null,
-      phoneNumber: input.phoneNumber || null,
-      email: input.email || null,
-      vehicleName: input.vehicleName || null,
-      vehicleRegistration: input.vehicleRegistration || null,
-      vehicleType: input.vehicleType || null,
-      fuelCardNumber: input.fuelCardNumber || null,
-      fuelCardProvider: input.fuelCardProvider || null,
-      startAddress: input.startAddress || null,
-      endAddress: input.endAddress || null,
-      isActive: input.isActive ?? true,
-      notes: input.notes || null,
+      driverId: null,
+    },
+  });
+
+  return prisma.driver.delete({
+    where: {
+      id: driverId,
     },
   });
 }
