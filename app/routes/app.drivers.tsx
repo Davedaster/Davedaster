@@ -82,6 +82,7 @@ export default function Drivers() {
                     id={id}
                     media={media}
                     accessibilityLabel={`View details for ${name}`}
+                    onClick={() => {}}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div>
