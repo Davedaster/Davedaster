@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
+import { sendNextPendingStopNotification } from "./routeNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
 
 type ShopifyAdmin = {
@@ -206,4 +207,6 @@ export async function saveProofOfDelivery(input: {
       },
     });
   });
+
+  await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
