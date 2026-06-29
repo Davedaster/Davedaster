@@ -21,6 +21,12 @@ const planningPanelStyles = `
     touch-action: none;
   }
 
+  .bpd-scroll-container-locked {
+    overflow: hidden !important;
+    overscroll-behavior: contain !important;
+    touch-action: none !important;
+  }
+
   .bpd-tomtom-map,
   .bpd-tomtom-map * {
     overscroll-behavior: contain;
@@ -59,23 +65,79 @@ const planningPanelScript = `
   (() => {
     let touchingMap = false;
     let lockedScrollY = 0;
+    const lockedScrollContainers = [];
 
     const isMapTouch = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
 
-    const lockPageForMap = () => {
-      if (document.body.classList.contains('bpd-map-scroll-locked')) {
-        return;
+    const lockScrollableContainers = (target) => {
+      let element = target?.parentElement;
+
+      while (element && element !== document.body && element !== document.documentElement) {
+        const style = window.getComputedStyle(element);
+        const canScrollY = element.scrollHeight > element.clientHeight + 2;
+        const canScrollX = element.scrollWidth > element.clientWidth + 2;
+        const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
+
+        if ((canScrollY || canScrollX) && scrollable && !element.classList.contains('bpd-tomtom-map')) {
+          lockedScrollContainers.push({
+            element,
+            overflow: element.style.overflow,
+            overflowY: element.style.overflowY,
+            overflowX: element.style.overflowX,
+            overscrollBehavior: element.style.overscrollBehavior,
+            touchAction: element.style.touchAction,
+            scrollTop: element.scrollTop,
+            scrollLeft: element.scrollLeft,
+          });
+          element.classList.add('bpd-scroll-container-locked');
+          element.style.overflow = 'hidden';
+          element.style.overflowY = 'hidden';
+          element.style.overflowX = 'hidden';
+          element.style.overscrollBehavior = 'contain';
+          element.style.touchAction = 'none';
+        }
+
+        element = element.parentElement;
+      }
+    };
+
+    const unlockScrollableContainers = () => {
+      while (lockedScrollContainers.length) {
+        const lock = lockedScrollContainers.pop();
+
+        if (!lock?.element) {
+          continue;
+        }
+
+        lock.element.classList.remove('bpd-scroll-container-locked');
+        lock.element.style.overflow = lock.overflow;
+        lock.element.style.overflowY = lock.overflowY;
+        lock.element.style.overflowX = lock.overflowX;
+        lock.element.style.overscrollBehavior = lock.overscrollBehavior;
+        lock.element.style.touchAction = lock.touchAction;
+        lock.element.scrollTop = lock.scrollTop;
+        lock.element.scrollLeft = lock.scrollLeft;
+      }
+    };
+
+    const lockPageForMap = (target) => {
+      if (!document.body.classList.contains('bpd-map-scroll-locked')) {
+        lockedScrollY = window.scrollY || window.pageYOffset || 0;
+        document.body.dataset.bpdMapScrollY = String(lockedScrollY);
+        document.body.style.top = '-' + lockedScrollY + 'px';
+        document.body.classList.add('bpd-map-scroll-locked');
+        document.documentElement.style.overscrollBehaviorY = 'none';
+        document.body.style.overscrollBehaviorY = 'none';
       }
 
-      lockedScrollY = window.scrollY || window.pageYOffset || 0;
-      document.body.dataset.bpdMapScrollY = String(lockedScrollY);
-      document.body.style.top = '-' + lockedScrollY + 'px';
-      document.body.classList.add('bpd-map-scroll-locked');
-      document.documentElement.style.overscrollBehaviorY = 'none';
-      document.body.style.overscrollBehaviorY = 'none';
+      if (lockedScrollContainers.length === 0) {
+        lockScrollableContainers(target);
+      }
     };
 
     const unlockPageForMap = () => {
+      unlockScrollableContainers();
+
       if (!document.body.classList.contains('bpd-map-scroll-locked')) {
         return;
       }
@@ -95,7 +157,7 @@ const planningPanelScript = `
       }
 
       touchingMap = true;
-      lockPageForMap();
+      lockPageForMap(event.target);
 
       if (event.cancelable) {
         event.preventDefault();
@@ -106,7 +168,7 @@ const planningPanelScript = `
       touchingMap = isMapTouch(event.target);
 
       if (touchingMap) {
-        lockPageForMap();
+        lockPageForMap(event.target);
 
         if (event.cancelable) {
           event.preventDefault();
