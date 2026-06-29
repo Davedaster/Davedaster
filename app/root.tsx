@@ -12,6 +12,15 @@ const planningPanelStyles = `
     overscroll-behavior-y: none;
   }
 
+  body.bpd-map-scroll-locked {
+    position: fixed;
+    left: 0;
+    right: 0;
+    width: 100%;
+    overflow: hidden;
+    touch-action: none;
+  }
+
   .bpd-tomtom-map,
   .bpd-tomtom-map * {
     overscroll-behavior: contain;
@@ -49,8 +58,36 @@ const planningPanelStyles = `
 const planningPanelScript = `
   (() => {
     let touchingMap = false;
+    let lockedScrollY = 0;
 
     const isMapTouch = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
+
+    const lockPageForMap = () => {
+      if (document.body.classList.contains('bpd-map-scroll-locked')) {
+        return;
+      }
+
+      lockedScrollY = window.scrollY || window.pageYOffset || 0;
+      document.body.dataset.bpdMapScrollY = String(lockedScrollY);
+      document.body.style.top = '-' + lockedScrollY + 'px';
+      document.body.classList.add('bpd-map-scroll-locked');
+      document.documentElement.style.overscrollBehaviorY = 'none';
+      document.body.style.overscrollBehaviorY = 'none';
+    };
+
+    const unlockPageForMap = () => {
+      if (!document.body.classList.contains('bpd-map-scroll-locked')) {
+        return;
+      }
+
+      const restoreY = Number(document.body.dataset.bpdMapScrollY || lockedScrollY || 0);
+      document.body.classList.remove('bpd-map-scroll-locked');
+      document.body.style.top = '';
+      document.body.style.overscrollBehaviorY = '';
+      document.documentElement.style.overscrollBehaviorY = '';
+      delete document.body.dataset.bpdMapScrollY;
+      window.scrollTo(0, Number.isFinite(restoreY) ? restoreY : 0);
+    };
 
     const blockMapPullRefresh = (event) => {
       if (!touchingMap && !isMapTouch(event.target)) {
@@ -58,6 +95,7 @@ const planningPanelScript = `
       }
 
       touchingMap = true;
+      lockPageForMap();
 
       if (event.cancelable) {
         event.preventDefault();
@@ -66,17 +104,28 @@ const planningPanelScript = `
 
     document.addEventListener('touchstart', (event) => {
       touchingMap = isMapTouch(event.target);
+
+      if (touchingMap) {
+        lockPageForMap();
+      }
     }, { passive: true, capture: true });
 
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
 
     document.addEventListener('touchend', () => {
       touchingMap = false;
+      unlockPageForMap();
     }, { passive: true, capture: true });
 
     document.addEventListener('touchcancel', () => {
       touchingMap = false;
+      unlockPageForMap();
     }, { passive: true, capture: true });
+
+    window.addEventListener('blur', () => {
+      touchingMap = false;
+      unlockPageForMap();
+    });
 
     const tidyCustomerTracking = () => {
       if (!window.location.pathname.startsWith('/apps/track/')) {
