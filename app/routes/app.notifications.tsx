@@ -63,6 +63,14 @@ function buildPreviews() {
   ];
 }
 
+function MessagePreview({ body }: { body: string }) {
+  return (
+    <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}>
+      {body}
+    </pre>
+  );
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
 
@@ -88,10 +96,10 @@ export default function Notifications() {
               </Text>
               <InlineStack gap="200">
                 <Badge tone={twilioEnabled ? "success" : "warning"}>
-                  Twilio {twilioEnabled ? "enabled" : "not set up"}
+                  {`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}
                 </Badge>
                 <Badge tone={resendEnabled ? "success" : "warning"}>
-                  Resend {resendEnabled ? "enabled" : "not set up"}
+                  {`Resend ${resendEnabled ? "enabled" : "not set up"}`}
                 </Badge>
               </InlineStack>
             </BlockStack>
@@ -102,9 +110,7 @@ export default function Notifications() {
               <BlockStack gap="300">
                 <Text as="h3" variant="headingMd">{preview.title}</Text>
                 <Badge tone="info">SMS</Badge>
-                <Text as="pre" variant="bodyMd">
-                  {preview.sms.body}
-                </Text>
+                <MessagePreview body={preview.sms.body} />
                 <Divider />
                 <Badge tone="success">Email</Badge>
                 {preview.email.subject ? (
@@ -112,9 +118,7 @@ export default function Notifications() {
                     Subject: {preview.email.subject}
                   </Text>
                 ) : null}
-                <Text as="pre" variant="bodyMd">
-                  {preview.email.body}
-                </Text>
+                <MessagePreview body={preview.email.body} />
               </BlockStack>
             </LegacyCard>
           ))}
