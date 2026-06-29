@@ -13,6 +13,7 @@ import {
   startDriverRouteFromToken,
 } from "../lib/driverRouteAccess.server";
 import { formatEtaSlot } from "../lib/etaSlots";
+import { sendFirstOutForDeliveryNotification } from "../lib/routeNotifications.server";
 
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const token = params.token;
@@ -42,7 +43,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   try {
     if (intent === "startRoute") {
-      await startDriverRouteFromToken(token);
+      const route = await startDriverRouteFromToken(token);
+      await sendFirstOutForDeliveryNotification(route.id);
       return redirect(`/driver/routes/${token}`);
     }
 
