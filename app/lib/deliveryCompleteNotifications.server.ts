@@ -60,7 +60,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       try {
         await sendSmsWithTwilio({
           to: order.customerPhone,
-          message: buildDeliveryCompleteMessage(messageInput, "sms"),
+          message: await buildDeliveryCompleteMessage(messageInput, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
@@ -75,7 +75,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       try {
         await sendEmailWithResend({
           to: order.customerEmail,
-          message: buildDeliveryCompleteMessage(messageInput, "email"),
+          message: await buildDeliveryCompleteMessage(messageInput, "email"),
         });
         emailsSent += 1;
         sentAnything = true;
