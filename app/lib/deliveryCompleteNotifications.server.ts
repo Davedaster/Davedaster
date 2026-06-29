@@ -23,8 +23,10 @@ type DeliveryCompleteResult = {
 };
 
 export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteInput): Promise<DeliveryCompleteResult> {
-  const canSendSms = isTwilioEnabled();
-  const canSendEmail = isResendEnabled();
+  const [canSendSms, canSendEmail] = await Promise.all([
+    isTwilioEnabled(),
+    isResendEnabled(),
+  ]);
 
   if (!canSendSms && !canSendEmail) {
     return {
