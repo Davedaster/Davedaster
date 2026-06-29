@@ -100,7 +100,7 @@ export async function markStopFailedDelivery(input: {
     throw new Error("This stop has already been marked failed.");
   }
 
-  const shopifyResults = [];
+  const shopifyResults: string[] = [];
 
   for (const order of stop.deliveryGroup.orders) {
     await tagOrderFailedDelivery(input.admin, order.shopifyOrderId, reason);
