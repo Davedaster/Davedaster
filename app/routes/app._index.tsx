@@ -16,6 +16,7 @@ import {
   TextField,
   Checkbox,
   Select,
+  FormLayout,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
 import { useEffect, useMemo, useState } from "react";
@@ -38,10 +39,13 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import { RouteMap } from "../components/RouteMap";
+import { defaultCountry, emptyStructuredAddress, formatStructuredAddress, isStructuredAddressReady, normaliseStructuredAddress, type StructuredAddress } from "../lib/addressFields";
+import { getAppCredentials, hasGetAddressCredentials, hasRouteXLCredentials } from "../lib/appCredentials.server";
 import { fulfilByDateFromOrderDate } from "../lib/bankHolidays.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { lookupAddress } from "../lib/getAddress.server";
 import { assignDriverToRoute, createRouteDraft } from "../lib/routeDrafts.server";
+import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
@@ -65,23 +69,6 @@ type StopEta = {
   arrivalMinutes: number;
 };
 
-type AddressOption = {
-  id: string;
-  address: string;
-  postcode: string;
-  latitude: number | null;
-  longitude: number | null;
-};
-
-const defaultRoutePlanningSettings = {
-  routeDate: new Date().toISOString().slice(0, 10),
-  plannedStartTime: "05:00",
-  timePerDropMinutes: 10,
-  customerSlotMinutes: 60,
-  startAddress: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
-  finishAddress: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
-};
-
 type PlanningOptimisationResult = {
   ok: true;
   orderedIds: string[];
@@ -95,10 +82,27 @@ type PlanningOptimisationResult = {
   error: string;
 };
 
-const DEFAULT_SHOP_LOCATION = {
-  address: "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom",
-  latitude: 50.5293,
-  longitude: -3.6119,
+const fallbackRoutePlanningSettings = {
+  routeDate: new Date().toISOString().slice(0, 10),
+  plannedStartTime: "05:00",
+  timePerDropMinutes: 10,
+  customerSlotMinutes: 60,
+  startAddress: "Unit 1 Olympus Business Park, Kingsteignton Road, Newton Abbot, Devon, TQ12 2SN, United Kingdom",
+  startLatitude: 50.5293,
+  startLongitude: -3.6119,
+  finishAddress: "Unit 1 Olympus Business Park, Kingsteignton Road, Newton Abbot, Devon, TQ12 2SN, United Kingdom",
+  finishLatitude: 50.5293,
+  finishLongitude: -3.6119,
+  returnToBaseDefault: true,
+  startStructuredAddress: {
+    building: "Unit 1 Olympus Business Park",
+    addressLine1: "Kingsteignton Road",
+    addressLine2: "",
+    town: "Newton Abbot",
+    county: "Devon",
+    postcode: "TQ12 2SN",
+    country: defaultCountry,
+  },
 };
 
 async function addFulfilByDates(orders: DeliveryOrder[]) {
@@ -120,18 +124,25 @@ async function addFulfilByDates(orders: DeliveryOrder[]) {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const [orders, drivers] = await Promise.all([
+  const [orders, drivers, defaults, credentials] = await Promise.all([
     getDeliveryOrders(admin),
     listActiveDrivers(),
+    getRoutePlanningDefaults(),
+    getAppCredentials(),
   ]);
   const ordersWithFulfilByDates = await addFulfilByDates(orders);
 
   return json({
     orders: ordersWithFulfilByDates,
     drivers,
-    addressLookupEnabled: Boolean(process.env.GETADDRESS_API_KEY),
-    routexlEnabled: Boolean(process.env.ROUTEXL_USERNAME && process.env.ROUTEXL_PASSWORD),
-    defaults: defaultRoutePlanningSettings,
+    addressLookupEnabled: hasGetAddressCredentials(credentials),
+    routexlEnabled: hasRouteXLCredentials(credentials),
+    defaults: {
+      ...fallbackRoutePlanningSettings,
+      ...defaults,
+      routeDate: new Date().toISOString().slice(0, 10),
+      startStructuredAddress: normaliseStructuredAddress(defaults.startStructuredAddress, fallbackRoutePlanningSettings.startStructuredAddress),
+    },
   });
 };
 
@@ -180,29 +191,28 @@ function formCoordinate(formData: FormData, name: string) {
   return Number.isFinite(value) ? value : null;
 }
 
-function isDefaultShopAddress(address: string) {
-  const normalisedAddress = address.trim().toLowerCase();
+function formatEtaTime(startTime: string, offsetMinutes: number) {
+  const [hours, minutes = "0"] = startTime.split(":");
+  const startMinutes = Number(hours) * 60 + Number(minutes);
+  const etaMinutes = startMinutes + offsetMinutes;
+  const etaHours = Math.floor(etaMinutes / 60) % 24;
+  const etaMinuteValue = etaMinutes % 60;
 
-  return normalisedAddress === DEFAULT_SHOP_LOCATION.address.toLowerCase() ||
-    (normalisedAddress.includes("olympus") && normalisedAddress.includes("tq12 2sn"));
+  return `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`;
 }
 
 async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
-  const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
+  const trimmedAddress = address?.trim();
+
+  if (!trimmedAddress) {
+    throw new Error("Enter a route start or finish address before optimising.");
+  }
 
   if (typeof latitude === "number" && Number.isFinite(latitude) && typeof longitude === "number" && Number.isFinite(longitude)) {
     return {
       address: trimmedAddress,
       latitude,
       longitude,
-    };
-  }
-
-  if (isDefaultShopAddress(trimmedAddress)) {
-    return {
-      address: DEFAULT_SHOP_LOCATION.address,
-      latitude: DEFAULT_SHOP_LOCATION.latitude,
-      longitude: DEFAULT_SHOP_LOCATION.longitude,
     };
   }
 
@@ -257,8 +267,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const routeName = String(formData.get("routeName") || "").trim();
   const routeDate = String(formData.get("routeDate") || "").trim();
   const plannedStartTime = String(formData.get("plannedStartTime") || "").trim();
-  const timePerDropMinutes = Number(formData.get("timePerDropMinutes") || defaultRoutePlanningSettings.timePerDropMinutes);
-  const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || defaultRoutePlanningSettings.customerSlotMinutes);
+  const timePerDropMinutes = Number(formData.get("timePerDropMinutes") || fallbackRoutePlanningSettings.timePerDropMinutes);
+  const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || fallbackRoutePlanningSettings.customerSlotMinutes);
   const startAddress = String(formData.get("startAddress") || "").trim();
   const finishAddress = String(formData.get("finishAddress") || "").trim();
   const startLatitude = formCoordinate(formData, "startLatitude");
@@ -304,7 +314,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           order.formattedAddress || order.addressSummary,
           order.latitude!,
           order.longitude!,
-          Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : defaultRoutePlanningSettings.timePerDropMinutes,
+          Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : fallbackRoutePlanningSettings.timePerDropMinutes,
         )),
         buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0),
       ];
@@ -355,9 +365,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     startAddress,
     startLatitude,
     startLongitude,
-    finishAddress: returnToBase
-      ? startAddress
-      : finishAddress || selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || startAddress,
+    finishAddress: returnToBase ? startAddress : finishAddress || startAddress,
     finishLatitude,
     finishLongitude,
   });
@@ -404,18 +412,8 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
             </BlockStack>
           </InlineStack>
           <InlineStack gap="100">
-            <Button
-              icon={LockIcon}
-              variant="tertiary"
-              pressed={stop.isLocked}
-              onClick={() => onToggleLock(stop.id)}
-            />
-            <Button
-              icon={DeleteIcon}
-              variant="tertiary"
-              tone="critical"
-              onClick={() => onRemove(stop.id)}
-            />
+            <Button icon={LockIcon} variant="tertiary" pressed={stop.isLocked} onClick={() => onToggleLock(stop.id)} />
+            <Button icon={DeleteIcon} variant="tertiary" tone="critical" onClick={() => onRemove(stop.id)} />
           </InlineStack>
         </InlineStack>
       </Box>
@@ -423,18 +421,8 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
   );
 }
 
-function formatEtaTime(startTime: string, offsetMinutes: number) {
-  const [hours, minutes = "0"] = startTime.split(":");
-  const startMinutes = Number(hours) * 60 + Number(minutes);
-  const etaMinutes = startMinutes + offsetMinutes;
-  const etaHours = Math.floor(etaMinutes / 60) % 24;
-  const etaMinuteValue = etaMinutes % 60;
-
-  return `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`;
-}
-
 function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedStartTime: string, timePerDropMinutes: string): Stop {
-  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
+  const dropMinutes = Number(timePerDropMinutes) || fallbackRoutePlanningSettings.timePerDropMinutes;
 
   return {
     id: order.id,
@@ -447,7 +435,7 @@ function deliveryOrderToStop(order: DeliveryOrder, stopNumber: number, plannedSt
 }
 
 function refreshStopEtas(stops: Stop[], plannedStartTime: string, timePerDropMinutes: string) {
-  const dropMinutes = Number(timePerDropMinutes) || defaultRoutePlanningSettings.timePerDropMinutes;
+  const dropMinutes = Number(timePerDropMinutes) || fallbackRoutePlanningSettings.timePerDropMinutes;
 
   return stops.map((stop, index) => ({
     ...stop,
@@ -471,7 +459,7 @@ function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
     shippingMethod: "Manual route entry",
     fulfilmentStatus: "unfulfilled",
     financialStatus: "manual",
-    postcode: "Manual",
+    postcode: extractPostcode(order.address) || "Manual",
     addressSummary: order.address,
     formattedAddress: order.address,
     hasDeliveryAddress: true,
@@ -625,20 +613,8 @@ function DeliveryMap({
         badge={`${routeStopIds.length} selected`}
         points={[...routePoints, ...unselectedPoints]}
         showRouteLine={routePoints.length > 0}
-        routeStart={{
-          address: startAddress,
-          label: "START",
-          latitude: startLatitude,
-          longitude: startLongitude,
-          status: "START",
-        }}
-        routeFinish={{
-          address: returnToBase ? startAddress : finishAddress || startAddress,
-          label: "FINISH",
-          latitude: returnToBase ? startLatitude : finishLatitude,
-          longitude: returnToBase ? startLongitude : finishLongitude,
-          status: "FINISH",
-        }}
+        routeStart={{ address: startAddress, label: "START", latitude: startLatitude, longitude: startLongitude, status: "START" }}
+        routeFinish={{ address: returnToBase ? startAddress : finishAddress || startAddress, label: "FINISH", latitude: returnToBase ? startLatitude : finishLatitude, longitude: returnToBase ? startLongitude : finishLongitude, status: "FINISH" }}
         onSelectPoint={(point) => {
           const order = ordersById.get(point.id);
           if (order) {
@@ -653,9 +629,7 @@ function DeliveryMap({
             <Text as="h3" variant="headingSm">Needs location check before a pin can be shown</Text>
             {ordersWithoutCoordinates.map((order) => (
               <InlineStack key={order.id} align="space-between">
-                <Text as="span" variant="bodySm">
-                  {order.name} · {order.customerName} · {order.postcode || "No postcode"}
-                </Text>
+                <Text as="span" variant="bodySm">{order.name} · {order.customerName} · {order.postcode || "No postcode"}</Text>
                 <Badge tone={order.orderSource === "manual" ? "info" : "warning"}>{addressLabel(order)}</Badge>
               </InlineStack>
             ))}
@@ -682,15 +656,7 @@ function formatDuration(minutes: number | null) {
   return `${hours} hr ${mins} min`;
 }
 
-function OptimiseRouteButton({
-  onClick,
-  loading,
-  disabled,
-}: {
-  onClick: () => void;
-  loading: boolean;
-  disabled: boolean;
-}) {
+function OptimiseRouteButton({ onClick, loading, disabled }: { onClick: () => void; loading: boolean; disabled: boolean }) {
   return (
     <Button onClick={onClick} loading={loading} disabled={disabled} variant="primary" tone="critical">
       <InlineStack gap="100" blockAlign="center" align="center">
@@ -703,88 +669,60 @@ function OptimiseRouteButton({
   );
 }
 
-function PostcodeAddressPicker({
-  label,
-  postcode,
-  onPostcodeChange,
-  selectedAddress,
-  onSelectAddress,
+function StructuredAddressFields({
+  address,
+  onChange,
 }: {
-  label: string;
-  postcode: string;
-  onPostcodeChange: (value: string) => void;
-  selectedAddress: string;
-  onSelectAddress: (address: AddressOption) => void;
+  address: StructuredAddress;
+  onChange: (address: StructuredAddress) => void;
 }) {
-  const [addresses, setAddresses] = useState<AddressOption[]>([]);
-  const [selectedId, setSelectedId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const addressOptions = [
-    { label: addresses.length ? "Choose exact address" : "No addresses loaded", value: "" },
-    ...addresses.map((address) => ({ label: address.address, value: address.id })),
-  ];
-
-  const findAddresses = async () => {
-    const cleanPostcode = postcode.trim();
-
-    if (!cleanPostcode) {
-      setError("Enter a postcode first.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setAddresses([]);
-    setSelectedId("");
-
-    try {
-      const response = await fetch(`/api/address-options?postcode=${encodeURIComponent(cleanPostcode)}`);
-      const payload = await response.json() as { ok?: boolean; addresses?: AddressOption[]; error?: string };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "Address lookup failed.");
-      }
-
-      const nextAddresses = payload.addresses || [];
-      setAddresses(nextAddresses);
-
-      if (!nextAddresses.length) {
-        setError("No addresses found for that postcode.");
-      }
-    } catch (lookupError) {
-      setError(lookupError instanceof Error ? lookupError.message : "Address lookup failed.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSelectAddress = (id: string) => {
-    setSelectedId(id);
-    const address = addresses.find((option) => option.id === id);
-
-    if (address) {
-      onSelectAddress(address);
-    }
+  const setField = (field: keyof StructuredAddress) => (value: string) => {
+    onChange({ ...address, [field]: value });
   };
 
   return (
     <BlockStack gap="200">
-      <Text as="h4" variant="headingSm">{label}</Text>
-      <InlineStack gap="200" blockAlign="end">
-        <TextField label="Postcode" value={postcode} onChange={onPostcodeChange} autoComplete="off" />
-        <Button onClick={findAddresses} loading={loading}>Find addresses</Button>
-      </InlineStack>
-      <Select label="Registered address" options={addressOptions} value={selectedId} onChange={handleSelectAddress} disabled={!addresses.length} />
-      <Box background="bg-surface-secondary" padding="300" borderRadius="300">
-        <BlockStack gap="100">
-          <Text as="p" variant="bodySm" fontWeight="bold">Selected address</Text>
-          <Text as="p" variant="bodySm" tone="subdued">{selectedAddress || "No address selected yet"}</Text>
-        </BlockStack>
-      </Box>
-      {error ? <Text as="p" variant="bodySm" tone="critical">{error}</Text> : null}
+      <TextField label="House number, unit or building name" value={address.building} onChange={setField("building")} autoComplete="off" />
+      <TextField label="Street / address line 1" value={address.addressLine1} onChange={setField("addressLine1")} autoComplete="off" />
+      <TextField label="Address line 2, optional" value={address.addressLine2} onChange={setField("addressLine2")} autoComplete="off" />
+      <FormLayout.Group>
+        <TextField label="Town / city" value={address.town} onChange={setField("town")} autoComplete="off" />
+        <TextField label="County" value={address.county} onChange={setField("county")} autoComplete="off" />
+      </FormLayout.Group>
+      <FormLayout.Group>
+        <TextField label="Postcode" value={address.postcode} onChange={setField("postcode")} autoComplete="off" />
+        <TextField label="Country" value={address.country} onChange={setField("country")} autoComplete="off" />
+      </FormLayout.Group>
     </BlockStack>
+  );
+}
+
+function CollapsibleAddressEditor({
+  title,
+  address,
+  onChange,
+  summary,
+}: {
+  title: string;
+  address: StructuredAddress;
+  onChange: (address: StructuredAddress) => void;
+  summary: string;
+}) {
+  return (
+    <details style={{ border: "1px solid #d0d5dd", borderRadius: 12, padding: 12 }}>
+      <summary style={{ cursor: "pointer", listStyle: "none" }}>
+        <InlineStack align="space-between" blockAlign="center">
+          <BlockStack gap="050">
+            <Text as="h4" variant="headingSm">{title}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">{summary || "No address entered yet"}</Text>
+          </BlockStack>
+          <span style={{ border: "1px solid #c9cccf", borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 700, color: "#323841" }}>Open</span>
+        </InlineStack>
+      </summary>
+      <div style={{ marginTop: 12 }}>
+        <StructuredAddressFields address={address} onChange={onChange} />
+      </div>
+    </details>
   );
 }
 
@@ -799,18 +737,13 @@ export default function OrdersMap() {
   const [plannedStartTime, setPlannedStartTime] = useState(defaults.plannedStartTime);
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(defaults.timePerDropMinutes));
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
-  const [startAddress, setStartAddress] = useState(defaults.startAddress);
-  const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
-  const [startPostcode, setStartPostcode] = useState(extractPostcode(defaults.startAddress) || "TQ12 2SN");
-  const [finishPostcode, setFinishPostcode] = useState(extractPostcode(defaults.finishAddress) || "TQ12 2SN");
-  const [startLatitude, setStartLatitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.latitude);
-  const [startLongitude, setStartLongitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.longitude);
-  const [finishLatitude, setFinishLatitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.latitude);
-  const [finishLongitude, setFinishLongitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.longitude);
-  const [returnToBase, setReturnToBase] = useState(true);
+  const [returnToBase, setReturnToBase] = useState(defaults.returnToBaseDefault);
+  const [useCustomStartPoint, setUseCustomStartPoint] = useState(false);
+  const [customStartAddress, setCustomStartAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
+  const [customFinishAddress, setCustomFinishAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
   const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
   const [manualCustomerName, setManualCustomerName] = useState("");
-  const [manualAddress, setManualAddress] = useState("");
+  const [manualAddress, setManualAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
   const [manualEmail, setManualEmail] = useState("");
   const [manualPhone, setManualPhone] = useState("");
   const [manualItems, setManualItems] = useState("");
@@ -818,12 +751,21 @@ export default function OrdersMap() {
   const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
 
+  const defaultStartAddress = defaults.startAddress;
+  const defaultStartLatitude = typeof defaults.startLatitude === "number" ? defaults.startLatitude : null;
+  const defaultStartLongitude = typeof defaults.startLongitude === "number" ? defaults.startLongitude : null;
+  const customStartSummary = formatStructuredAddress(customStartAddress);
+  const customFinishSummary = formatStructuredAddress(customFinishAddress);
+  const startAddress = useCustomStartPoint && customStartSummary ? customStartSummary : defaultStartAddress;
+  const startLatitude = useCustomStartPoint ? null : defaultStartLatitude;
+  const startLongitude = useCustomStartPoint ? null : defaultStartLongitude;
+  const finishAddress = returnToBase ? startAddress : customFinishSummary;
+  const finishLatitude = returnToBase ? startLatitude : null;
+  const finishLongitude = returnToBase ? startLongitude : null;
+
   const driverOptions = useMemo(() => [
     { label: "Select driver later", value: "" },
-    ...drivers.map((driver) => ({
-      label: driver.name,
-      value: driver.id,
-    })),
+    ...drivers.map((driver) => ({ label: driver.name, value: driver.id })),
   ], [drivers]);
   const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId);
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
@@ -843,10 +785,7 @@ export default function OrdersMap() {
     const orderedStops = optimisationFetcher.data.orderedIds
       .map((id) => stops.find((stop) => stop.id === id))
       .filter((stop): stop is Stop => Boolean(stop))
-      .map((stop) => ({
-        ...stop,
-        eta: etaById.get(stop.id) || stop.eta,
-      }));
+      .map((stop) => ({ ...stop, eta: etaById.get(stop.id) || stop.eta }));
     const missingStops = stops.filter((stop) => !optimisationFetcher.data?.ok || !optimisationFetcher.data.orderedIds.includes(stop.id));
 
     setStops([...orderedStops, ...missingStops]);
@@ -861,9 +800,7 @@ export default function OrdersMap() {
 
   const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   const clearOptimisedStats = () => {
@@ -910,6 +847,15 @@ export default function OrdersMap() {
     setStops(stops.map((s) => s.id === id ? { ...s, isLocked: !s.isLocked } : s));
   };
 
+  const appendEndpointFields = (formData: FormData) => {
+    formData.set("startAddress", startAddress);
+    formData.set("finishAddress", returnToBase ? startAddress : finishAddress);
+    formData.set("startLatitude", startLatitude === null ? "" : String(startLatitude));
+    formData.set("startLongitude", startLongitude === null ? "" : String(startLongitude));
+    formData.set("finishLatitude", returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude)));
+    formData.set("finishLongitude", returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude)));
+  };
+
   const optimisePlanningRoute = () => {
     const formData = new FormData();
     formData.set("intent", "optimisePlanning");
@@ -919,23 +865,18 @@ export default function OrdersMap() {
     formData.set("plannedStartTime", plannedStartTime);
     formData.set("timePerDropMinutes", timePerDropMinutes);
     formData.set("customerSlotMinutes", customerSlotMinutes);
-    formData.set("startAddress", startAddress);
-    formData.set("finishAddress", returnToBase ? startAddress : finishAddress);
-    formData.set("startLatitude", startLatitude === null ? "" : String(startLatitude));
-    formData.set("startLongitude", startLongitude === null ? "" : String(startLongitude));
-    formData.set("finishLatitude", returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude)));
-    formData.set("finishLongitude", returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude)));
     formData.set("returnToBase", returnToBase ? "true" : "false");
+    appendEndpointFields(formData);
 
     optimisationFetcher.submit(formData, { method: "post" });
   };
 
   const addManualOrder = () => {
     const customerName = manualCustomerName.trim();
-    const address = manualAddress.trim();
+    const address = formatStructuredAddress(manualAddress);
     const lineItemSummary = manualItems.trim();
 
-    if (!customerName || !address || !lineItemSummary) {
+    if (!customerName || !isStructuredAddressReady(manualAddress) || !address || !lineItemSummary) {
       return;
     }
 
@@ -954,7 +895,7 @@ export default function OrdersMap() {
     setStops((currentStops) => refreshStopEtas([...currentStops, deliveryOrderToStop(deliveryOrder, currentStops.length + 1, plannedStartTime, timePerDropMinutes)], plannedStartTime, timePerDropMinutes));
     clearOptimisedStats();
     setManualCustomerName("");
-    setManualAddress("");
+    setManualAddress(normaliseStructuredAddress(emptyStructuredAddress));
     setManualEmail("");
     setManualPhone("");
     setManualItems("");
@@ -963,27 +904,6 @@ export default function OrdersMap() {
   const removeManualOrder = (id: string) => {
     setManualOrders((currentOrders) => currentOrders.filter((order) => order.id !== id));
     setStops((currentStops) => refreshStopEtas(currentStops.filter((stop) => stop.id !== id), plannedStartTime, timePerDropMinutes));
-    clearOptimisedStats();
-  };
-
-  const handleStartAddressSelect = (address: AddressOption) => {
-    setStartAddress(address.address);
-    setStartLatitude(address.latitude);
-    setStartLongitude(address.longitude);
-    clearOptimisedStats();
-
-    if (returnToBase) {
-      setFinishAddress(address.address);
-      setFinishLatitude(address.latitude);
-      setFinishLongitude(address.longitude);
-      setFinishPostcode(address.postcode);
-    }
-  };
-
-  const handleFinishAddressSelect = (address: AddressOption) => {
-    setFinishAddress(address.address);
-    setFinishLatitude(address.latitude);
-    setFinishLongitude(address.longitude);
     clearOptimisedStats();
   };
 
@@ -996,22 +916,10 @@ export default function OrdersMap() {
               <InlineStack align="space-between">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Click delivery pins to build a route, then select a driver, optimise and save the draft.
-                  </Text>
-                  {!addressLookupEnabled ? (
-                    <Text as="p" variant="bodySm" tone="critical">
-                      getAddress.io lookup is not enabled yet. Add GETADDRESS_API_KEY to the app environment before testing live coordinates.
-                    </Text>
-                  ) : null}
-                  {!routexlEnabled ? (
-                    <Text as="p" variant="bodySm" tone="critical">
-                      RouteXL is not enabled yet. Add ROUTEXL_USERNAME and ROUTEXL_PASSWORD before using live planning optimisation.
-                    </Text>
-                  ) : null}
-                  {actionData && "error" in actionData ? (
-                    <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text>
-                  ) : null}
+                  <Text as="p" variant="bodySm" tone="subdued">Click delivery pins to build a route, then select a driver, optimise and save the draft.</Text>
+                  {!addressLookupEnabled ? <Text as="p" variant="bodySm" tone="critical">Address lookup credentials are not set up. Add them in Settings before testing new manual or custom addresses.</Text> : null}
+                  {!routexlEnabled ? <Text as="p" variant="bodySm" tone="critical">RouteXL is not enabled yet. Add RouteXL credentials before using live planning optimisation.</Text> : null}
+                  {actionData && "error" in actionData ? <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text> : null}
                 </BlockStack>
                 <Badge tone="info">{allOrders.length} orders</Badge>
               </InlineStack>
@@ -1019,12 +927,7 @@ export default function OrdersMap() {
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
               {allOrders.length === 0 ? (
-                <EmptyState
-                  heading="No matching delivery orders found"
-                  image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-                >
-                  <p>No orders matched the current delivery filters.</p>
-                </EmptyState>
+                <EmptyState heading="No matching delivery orders found" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>No orders matched the current delivery filters.</p></EmptyState>
               ) : (
                 <DeliveryMap
                   orders={allOrders}
@@ -1049,66 +952,34 @@ export default function OrdersMap() {
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="300">
                 <BlockStack gap="100">
-                  <InlineStack align="space-between">
-                    <Text as="span" variant="bodySm">Stops: {stops.length}</Text>
-                    <Text as="span" variant="bodySm">Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}</Text>
-                  </InlineStack>
-                  <InlineStack align="space-between">
-                    <Text as="span" variant="bodySm">Complete route time: {formatDuration(routeDurationMinutes)}</Text>
-                    <Badge tone={routeDistanceKm === null ? "info" : "success"}>{routeDistanceKm === null ? "Not optimised" : "Optimised"}</Badge>
-                  </InlineStack>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {returnToBase ? "Route includes return to base." : "Route ends at the custom finish location."}
-                    {routeFinishEta ? ` Finish ETA: ${routeFinishEta}.` : ""}
-                  </Text>
-                  {selectedDriver ? (
-                    <Text as="p" variant="bodySm" tone="subdued">Driver selected: {selectedDriver.name}</Text>
-                  ) : null}
+                  <InlineStack align="space-between"><Text as="span" variant="bodySm">Stops: {stops.length}</Text><Text as="span" variant="bodySm">Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}</Text></InlineStack>
+                  <InlineStack align="space-between"><Text as="span" variant="bodySm">Complete route time: {formatDuration(routeDurationMinutes)}</Text><Badge tone={routeDistanceKm === null ? "info" : "success"}>{routeDistanceKm === null ? "Not optimised" : "Optimised"}</Badge></InlineStack>
+                  <Text as="p" variant="bodySm" tone="subdued">{returnToBase ? "Route includes return to base." : "Route ends at the custom finish location."}{routeFinishEta ? ` Finish ETA: ${routeFinishEta}.` : ""}</Text>
+                  {selectedDriver ? <Text as="p" variant="bodySm" tone="subdued">Driver selected: {selectedDriver.name}</Text> : null}
                   {optimisationError ? <Text as="p" variant="bodySm" tone="critical">{optimisationError}</Text> : null}
                 </BlockStack>
 
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Route planning</Text>
                   <TextField label="Route date" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
-                  <Select
-                    label="Driver"
-                    options={driverOptions}
-                    value={selectedDriverId}
-                    onChange={setSelectedDriverId}
-                  />
-                  {!drivers.length ? (
-                    <Text as="p" variant="bodySm" tone="subdued">No active drivers yet. Add one in Driver profiles first.</Text>
-                  ) : null}
+                  <Select label="Driver" options={driverOptions} value={selectedDriverId} onChange={setSelectedDriverId} />
+                  {!drivers.length ? <Text as="p" variant="bodySm" tone="subdued">No active drivers yet. Add one in Driver profiles first.</Text> : null}
                   <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={(value) => { setPlannedStartTime(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={(value) => { setTimePerDropMinutes(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
-                  <PostcodeAddressPicker
-                    label="Driver start location"
-                    postcode={startPostcode}
-                    onPostcodeChange={setStartPostcode}
-                    selectedAddress={startAddress}
-                    onSelectAddress={handleStartAddressSelect}
-                  />
-                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => {
-                    setReturnToBase(checked);
-                    clearOptimisedStats();
 
-                    if (checked) {
-                      setFinishAddress(startAddress);
-                      setFinishLatitude(startLatitude);
-                      setFinishLongitude(startLongitude);
-                      setFinishPostcode(startPostcode);
-                    }
-                  }} />
-                  {!returnToBase ? (
-                    <PostcodeAddressPicker
-                      label="Custom finish location"
-                      postcode={finishPostcode}
-                      onPostcodeChange={setFinishPostcode}
-                      selectedAddress={finishAddress}
-                      onSelectAddress={handleFinishAddressSelect}
-                    />
-                  ) : null}
+                  <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodySm" fontWeight="bold">Default start point</Text>
+                      <Text as="p" variant="bodySm" tone="subdued">{defaultStartAddress}</Text>
+                    </BlockStack>
+                  </Box>
+
+                  <Checkbox label="Use custom start point" checked={useCustomStartPoint} onChange={(checked) => { setUseCustomStartPoint(checked); clearOptimisedStats(); }} />
+                  {useCustomStartPoint ? <CollapsibleAddressEditor title="Custom start point" address={customStartAddress} onChange={(value) => { setCustomStartAddress(value); clearOptimisedStats(); }} summary={customStartSummary} /> : null}
+
+                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
+                  {!returnToBase ? <CollapsibleAddressEditor title="Custom finish location" address={customFinishAddress} onChange={(value) => { setCustomFinishAddress(value); clearOptimisedStats(); }} summary={customFinishSummary} /> : null}
                   <OptimiseRouteButton onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0} />
                 </BlockStack>
               </BlockStack>
@@ -1119,21 +990,18 @@ export default function OrdersMap() {
                 <details>
                   <summary style={{ cursor: "pointer", listStyle: "none" }}>
                     <InlineStack align="space-between" blockAlign="center">
-                      <BlockStack gap="050">
-                        <Text as="h3" variant="headingSm">Add manual order</Text>
-                        <Text as="p" variant="bodySm" tone="subdued">Open this only when you need to add a non-Shopify delivery.</Text>
-                      </BlockStack>
+                      <BlockStack gap="050"><Text as="h3" variant="headingSm">Add manual order</Text><Text as="p" variant="bodySm" tone="subdued">Open this only when you need to add a non-Shopify delivery.</Text></BlockStack>
                       <span style={{ border: "1px solid #c9cccf", borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 700, color: "#323841" }}>Open</span>
                     </InlineStack>
                   </summary>
                   <div style={{ marginTop: 12 }}>
                     <BlockStack gap="200">
                       <TextField label="Customer name" value={manualCustomerName} onChange={setManualCustomerName} autoComplete="off" />
-                      <TextField label="Address" value={manualAddress} onChange={setManualAddress} autoComplete="off" multiline={2} />
+                      <CollapsibleAddressEditor title="Manual delivery address" address={manualAddress} onChange={setManualAddress} summary={formatStructuredAddress(manualAddress)} />
                       <TextField label="Email" type="email" value={manualEmail} onChange={setManualEmail} autoComplete="off" />
                       <TextField label="Phone" value={manualPhone} onChange={setManualPhone} autoComplete="off" />
                       <TextField label="What they ordered" value={manualItems} onChange={setManualItems} autoComplete="off" multiline={2} />
-                      <Button onClick={addManualOrder} disabled={!manualCustomerName.trim() || !manualAddress.trim() || !manualItems.trim()}>Add manual order to route</Button>
+                      <Button onClick={addManualOrder} disabled={!manualCustomerName.trim() || !isStructuredAddressReady(manualAddress) || !manualItems.trim()}>Add manual order to route</Button>
                     </BlockStack>
                   </div>
                 </details>
@@ -1151,15 +1019,9 @@ export default function OrdersMap() {
               </BlockStack>
             </Box>
 
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={stops} strategy={verticalListSortingStrategy}>
-                {stops.map((stop) => (
-                  <SortableStop key={stop.id} stop={stop} onRemove={removeStop} onToggleLock={toggleLock} />
-                ))}
+                {stops.map((stop) => <SortableStop key={stop.id} stop={stop} onRemove={removeStop} onToggleLock={toggleLock} />)}
               </SortableContext>
             </DndContext>
             <Box padding="300">
@@ -1180,14 +1042,7 @@ export default function OrdersMap() {
                 <input type="hidden" name="finishLongitude" value={returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude))} />
                 <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
                 <BlockStack gap="300">
-                  <TextField
-                    label="Draft route name, optional"
-                    name="routeName"
-                    value={routeName}
-                    onChange={setRouteName}
-                    autoComplete="off"
-                    placeholder="Example, Chris, North Route"
-                  />
+                  <TextField label="Draft route name, optional" name="routeName" value={routeName} onChange={setRouteName} autoComplete="off" placeholder="Example, Chris, North Route" />
                   <Button fullWidth submit variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
                 </BlockStack>
               </Form>
