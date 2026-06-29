@@ -13,7 +13,8 @@ const planningPanelStyles = `
     padding: 12px;
   }
 
-  details:has(> summary[style*="list-style"] h3) > summary p {
+  details:has(> summary[style*="list-style"] h3) > summary p,
+  details:has(> summary[style*="list-style"] h4) > summary p {
     display: none;
   }
 
@@ -58,20 +59,37 @@ const planningPanelScript = `
 
       textNodes.forEach((textNode) => {
         if (textNode.nodeValue?.includes('Return to base after last drop')) {
-          textNode.nodeValue = textNode.nodeValue.replace('Return to base after last drop', 'Return to base');
+          textNode.nodeValue = textNode.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
         }
       });
     };
 
-    const observer = new MutationObserver(tidyPlanningLabels);
+    const startObserver = () => {
+      if (!document.body) {
+        return;
+      }
 
-    document.addEventListener('DOMContentLoaded', tidyPlanningLabels);
-    window.addEventListener('pageshow', tidyPlanningLabels);
-
-    if (document.body) {
       tidyPlanningLabels();
-      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+      new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
+
+      let runs = 0;
+      const interval = window.setInterval(() => {
+        tidyPlanningLabels();
+        runs += 1;
+
+        if (runs > 40) {
+          window.clearInterval(interval);
+        }
+      }, 250);
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startObserver, { once: true });
+    } else {
+      startObserver();
     }
+
+    window.addEventListener('pageshow', tidyPlanningLabels);
   })();
 `;
 
