@@ -35,6 +35,46 @@ const planningPanelStyles = `
   }
 `;
 
+const planningPanelScript = `
+  (() => {
+    const tidyPlanningLabels = () => {
+      document.querySelectorAll('details summary h4').forEach((heading) => {
+        const summary = heading.closest('summary');
+        const line = summary?.querySelector('p');
+
+        if (line?.textContent?.trim() === 'United Kingdom') {
+          line.textContent = '';
+        }
+      });
+
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const textNodes = [];
+      let node = walker.nextNode();
+
+      while (node) {
+        textNodes.push(node);
+        node = walker.nextNode();
+      }
+
+      textNodes.forEach((textNode) => {
+        if (textNode.nodeValue?.includes('Return to base after last drop')) {
+          textNode.nodeValue = textNode.nodeValue.replace('Return to base after last drop', 'Return to base');
+        }
+      });
+    };
+
+    const observer = new MutationObserver(tidyPlanningLabels);
+
+    document.addEventListener('DOMContentLoaded', tidyPlanningLabels);
+    window.addEventListener('pageshow', tidyPlanningLabels);
+
+    if (document.body) {
+      tidyPlanningLabels();
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }
+  })();
+`;
+
 export default function App() {
   return (
     <html>
@@ -54,6 +94,7 @@ export default function App() {
         <Outlet />
         <ScrollRestoration />
         <Scripts />
+        <script dangerouslySetInnerHTML={{ __html: planningPanelScript }} />
       </body>
     </html>
   );
