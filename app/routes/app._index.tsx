@@ -574,7 +574,7 @@ export default function OrdersMap() {
   const driverOptions = useMemo(() => [
     { label: "Select driver later", value: "" },
     ...drivers.map((driver) => ({
-      label: `${driver.name}${driver.vehicleName ? `, ${driver.vehicleName}` : ""}${driver.vehicleRegistration ? `, ${driver.vehicleRegistration}` : ""}`,
+      label: driver.name,
       value: driver.id,
     })),
   ], [drivers]);
@@ -816,15 +816,30 @@ export default function OrdersMap() {
 
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="200">
-                <Text as="h3" variant="headingSm">Add manual order</Text>
-                <TextField label="Customer name" value={manualCustomerName} onChange={setManualCustomerName} autoComplete="off" />
-                <TextField label="Address" value={manualAddress} onChange={setManualAddress} autoComplete="off" multiline={2} />
-                <TextField label="Email" type="email" value={manualEmail} onChange={setManualEmail} autoComplete="off" />
-                <TextField label="Phone" value={manualPhone} onChange={setManualPhone} autoComplete="off" />
-                <TextField label="What they ordered" value={manualItems} onChange={setManualItems} autoComplete="off" multiline={2} />
-                <Button onClick={addManualOrder} disabled={!manualCustomerName.trim() || !manualAddress.trim() || !manualItems.trim()}>Add manual order to route</Button>
+                <details>
+                  <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                    <InlineStack align="space-between" blockAlign="center">
+                      <BlockStack gap="050">
+                        <Text as="h3" variant="headingSm">Add manual order</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">Open this only when you need to add a non-Shopify delivery.</Text>
+                      </BlockStack>
+                      <span style={{ border: "1px solid #c9cccf", borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 700, color: "#323841" }}>Open</span>
+                    </InlineStack>
+                  </summary>
+                  <div style={{ marginTop: 12 }}>
+                    <BlockStack gap="200">
+                      <TextField label="Customer name" value={manualCustomerName} onChange={setManualCustomerName} autoComplete="off" />
+                      <TextField label="Address" value={manualAddress} onChange={setManualAddress} autoComplete="off" multiline={2} />
+                      <TextField label="Email" type="email" value={manualEmail} onChange={setManualEmail} autoComplete="off" />
+                      <TextField label="Phone" value={manualPhone} onChange={setManualPhone} autoComplete="off" />
+                      <TextField label="What they ordered" value={manualItems} onChange={setManualItems} autoComplete="off" multiline={2} />
+                      <Button onClick={addManualOrder} disabled={!manualCustomerName.trim() || !manualAddress.trim() || !manualItems.trim()}>Add manual order to route</Button>
+                    </BlockStack>
+                  </div>
+                </details>
                 {manualOrders.length ? (
                   <BlockStack gap="100">
+                    <Text as="h3" variant="headingSm">Manual orders added</Text>
                     {manualOrders.map((order) => (
                       <InlineStack key={order.id} align="space-between">
                         <Text as="span" variant="bodySm">{order.customerName} · {order.lineItemSummary}</Text>
