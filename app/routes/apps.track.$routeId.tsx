@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { CustomerEtaConfidenceCard } from "../components/CustomerEtaConfidenceCard";
 import { CustomerSupportCard } from "../components/CustomerSupportCard";
+import { EstimatedVanProgress } from "../components/EstimatedVanProgress";
 import { formatEtaSlot } from "../lib/etaSlots";
 import { getCustomerTracking } from "../lib/tracking.server";
 
@@ -82,12 +83,13 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
-function trackingStatusLabel(routeStatus: string, stopStatus: string) {
+function trackingStatusLabel(routeStatus: string, stopStatus: string, progressActive: boolean) {
   if (stopStatus === "DELIVERED" || routeStatus === "COMPLETED") return "Delivery completed";
   if (stopStatus === "FAILED") return "Delivery attempted";
   if (routeStatus === "CANCELLED") return "Route inactive";
-  if (routeStatus === "OUT_FOR_DELIVERY") return "Route active";
-  return "Tracking active";
+  if (progressActive) return "Delivery progress active";
+  if (routeStatus === "OUT_FOR_DELIVERY") return "Route active, progress not live yet";
+  return "Progress not live yet";
 }
 
 function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
@@ -125,12 +127,12 @@ function customerStatusMessage(routeStatus: string, stopStatus: string, isNextDr
 function progressSummary(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
-  if (stopStatus === "DELIVERED") return "Panel delivery completed. Live tracking has ended.";
-  if (stopStatus === "FAILED") return "Panel delivery attempted. Live tracking has ended.";
+  if (stopStatus === "DELIVERED") return "Panel delivery completed. Delivery progress has ended.";
+  if (stopStatus === "FAILED") return "Panel delivery attempted. Delivery progress has ended.";
   if (routeStatus !== "OUT_FOR_DELIVERY") return "Your route is planned and will update once the driver starts.";
-  if (isNextDrop || dropsBefore === 0) return "You are next. Live tracking is active.";
-  if (dropsBefore === 1) return "1 panel delivery before yours. Live tracking will activate when you are next.";
-  return `${dropsBefore} panel deliveries before yours. Live tracking will activate when you are next.`;
+  if (isNextDrop || dropsBefore === 0) return "You are next. Delivery progress is active.";
+  if (dropsBefore === 1) return "1 panel delivery before yours. Delivery progress will activate when you are next.";
+  return `${dropsBefore} panel deliveries before yours. Delivery progress will activate when you are next.`;
 }
 
 function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
@@ -141,21 +143,15 @@ function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
   return `${dropsBefore} panel deliveries`;
 }
 
-function liveTrackingLabel(routeStatus: string, stopStatus: string, isNextDrop: boolean) {
-  if (stopStatus === "DELIVERED" || routeStatus === "COMPLETED" || stopStatus === "FAILED") return "Tracking ended";
-  if (routeStatus === "CANCELLED") return "Route inactive";
-  return isNextDrop ? "Live tracking active" : "Activates when next";
-}
-
 function liveTrackingMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
 
-  if (stopStatus === "DELIVERED") return "This panel delivery is complete, so live tracking has ended.";
-  if (stopStatus === "FAILED") return "This panel delivery has been attempted, so live tracking has ended.";
-  if (routeStatus !== "OUT_FOR_DELIVERY") return "Live tracking will become available once the driver is out for delivery and your panel delivery is next.";
-  if (isNextDrop || dropsBefore === 0) return "Your driver is nearby. Keep this page open for the latest update.";
-  if (dropsBefore === 1) return "For privacy, the live map appears when there is 1 panel delivery left and you become the next delivery.";
-  return "For privacy, the live map appears when your panel delivery becomes the next delivery.";
+  if (stopStatus === "DELIVERED") return "This panel delivery is complete, so delivery progress has ended.";
+  if (stopStatus === "FAILED") return "This panel delivery has been attempted, so delivery progress has ended.";
+  if (routeStatus !== "OUT_FOR_DELIVERY") return "Delivery progress will become available once the driver is out for delivery and your panel delivery is next.";
+  if (isNextDrop || dropsBefore === 0) return "Your driver is on the way. Keep this page open for the latest update.";
+  if (dropsBefore === 1) return "For privacy, the progress tracker appears when there is 1 panel delivery left and you become the next delivery.";
+  return "For privacy, the progress tracker appears when your panel delivery becomes the next delivery.";
 }
 
 function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
@@ -290,7 +286,9 @@ export default function CustomerTrackingPage() {
   const stopsBeforeCustomer = normaliseStopsBeforeCustomer(progress.stopsBeforeCustomer);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
   const showFailedDelivery = stop.status === "FAILED";
+  const progressActive = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING" && isNextDrop;
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
   const proofPhotos = deliveryGroup.proofPhotos?.length
     ? deliveryGroup.proofPhotos
@@ -308,12 +306,15 @@ export default function CustomerTrackingPage() {
 
   useEffect(() => {
     setLastUpdatedAt(new Date());
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
 
     if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") {
       window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY);
       setRefreshMessage("Tracking updated");
       window.setTimeout(() => setRefreshMessage(null), 2500);
     }
+
+    return () => window.clearInterval(timer);
   }, []);
 
   function handleRefreshTracking() {
@@ -334,7 +335,7 @@ export default function CustomerTrackingPage() {
               <div>
                 <p style={{ margin: "0 0 4px", color: "#509AE6", fontSize: 13, fontWeight: 800 }}>Tracking status</p>
                 <p style={{ margin: 0, color: "#667085", fontSize: 14 }}>
-                  Last updated {formatLastUpdatedTime(lastUpdatedAt)} · {trackingStatusLabel(route.status, stop.status)}
+                  Last updated {formatLastUpdatedTime(lastUpdatedAt)} · {trackingStatusLabel(route.status, stop.status, progressActive)}
                 </p>
                 {refreshMessage ? <p style={{ margin: "6px 0 0", color: "#16a34a", fontSize: 13, fontWeight: 800 }}>{refreshMessage}</p> : null}
               </div>
@@ -380,25 +381,7 @@ export default function CustomerTrackingPage() {
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 0.8fr)", gap: 18 }}>
           <div style={{ background: "#ffffff", borderRadius: 18, padding: 18, boxShadow: "0 8px 24px rgba(50,56,65,0.08)" }}>
-            <div style={{ minHeight: 360, borderRadius: 14, background: "linear-gradient(180deg, #e8f3ff 0%, #d6ecff 100%)", border: "1px solid #d0d5dd", position: "relative", overflow: "hidden" }}>
-              <div style={{ position: "absolute", inset: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <span style={{ background: "#ffffff", color: "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>Map view</span>
-                <span style={{ background: isNextDrop ? "#16a34a" : "#ffffff", color: isNextDrop ? "#ffffff" : "#323841", padding: "7px 10px", borderRadius: 999, fontSize: 13, fontWeight: 700 }}>{liveTrackingLabel(route.status, stop.status, isNextDrop)}</span>
-              </div>
-
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} aria-hidden="true">
-                <path d="M52 4 C42 10 39 22 41 32 C31 36 30 50 37 59 C29 65 31 79 41 84 C52 90 66 84 68 72 C78 66 78 51 69 44 C72 31 66 15 52 4 Z" fill="#eef7ef" stroke="#b7d7c2" strokeWidth="1" />
-                <path d="M46 54 C38 59 38 72 47 76 C56 80 65 74 64 64 C63 55 54 50 46 54 Z" fill="#e5f4e9" stroke="#b7d7c2" strokeWidth="0.8" />
-              </svg>
-
-              <div style={{ position: "absolute", left: "58%", top: "50%", transform: "translate(-50%, -100%)" }}>
-                <div style={{ width: 36, height: 36, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: "#509AE6", border: "3px solid white", boxShadow: "0 4px 12px rgba(0,0,0,0.2)" }}>
-                  <span style={{ display: "grid", placeItems: "center", height: "100%", transform: "rotate(45deg)", color: "#ffffff", fontSize: 14, fontWeight: 700 }}>You</span>
-                </div>
-              </div>
-
-              {isNextDrop ? <div style={{ position: "absolute", left: "35%", top: "42%", transform: "translate(-50%, -50%)", background: "#323841", color: "#ffffff", padding: "10px 12px", borderRadius: 12, fontWeight: 700 }}>Driver nearby</div> : null}
-            </div>
+            <EstimatedVanProgress active={progressActive} estimatedArrival={stop.estimatedArrival} currentTime={currentTime} message={customerLiveTrackingMessage} />
             <p style={{ margin: "12px 0 0", color: "#667085", fontSize: 14 }}>{customerLiveTrackingMessage}</p>
           </div>
 
