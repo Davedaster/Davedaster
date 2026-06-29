@@ -788,6 +788,25 @@ export function RouteMap({
       touchStartPointRef.current = null;
     };
 
+    const hidePopup = () => {
+      map.getCanvas().style.cursor = "";
+      popupRef.current?.remove();
+    };
+
+    const finishLongPress = () => {
+      const wasLongPress = touchHoldShownRef.current;
+      clearTouchHold();
+      touchHoldShownRef.current = false;
+      hidePopup();
+
+      if (wasLongPress) {
+        ignoreNextPinClickRef.current = true;
+        window.setTimeout(() => {
+          ignoreNextPinClickRef.current = false;
+        }, 450);
+      }
+    };
+
     const handleClusterClick = (event: any) => {
       const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
       const feature = features[0];
@@ -840,11 +859,6 @@ export function RouteMap({
       await showPopupForFeature(event.features?.[0]);
     };
 
-    const hidePopup = () => {
-      map.getCanvas().style.cursor = "";
-      popupRef.current?.remove();
-    };
-
     const handlePinTouchStart = (event: any) => {
       const feature = event.features?.[0];
 
@@ -874,21 +888,32 @@ export function RouteMap({
       if (movedX > 12 || movedY > 12) {
         clearTouchHold();
         touchHoldShownRef.current = false;
+        hidePopup();
       }
     };
 
     const handlePinTouchEnd = () => {
-      const wasLongPress = touchHoldShownRef.current;
+      finishLongPress();
+    };
+
+    const handleBrowserTouchMove = (event: TouchEvent) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    };
+
+    const handleBrowserTouchEnd = (event: TouchEvent) => {
+      if (touchHoldShownRef.current && event.cancelable) {
+        event.preventDefault();
+      }
+
+      finishLongPress();
+    };
+
+    const handleMapMovement = () => {
       clearTouchHold();
       touchHoldShownRef.current = false;
-
-      if (wasLongPress) {
-        hidePopup();
-        ignoreNextPinClickRef.current = true;
-        window.setTimeout(() => {
-          ignoreNextPinClickRef.current = false;
-        }, 450);
-      }
+      hidePopup();
     };
 
     const handleClusterEnter = () => {
@@ -898,6 +923,8 @@ export function RouteMap({
     const handleClusterLeave = () => {
       map.getCanvas().style.cursor = "";
     };
+
+    const mapElement = mapElementRef.current;
 
     map.on("click", clustersLayerId, handleClusterClick);
     map.on("click", pinsLayerId, handlePinClick);
@@ -911,6 +938,11 @@ export function RouteMap({
     map.on("touchmove", handlePinTouchMove);
     map.on("touchend", handlePinTouchEnd);
     map.on("touchcancel", handlePinTouchEnd);
+    map.on("dragstart", handleMapMovement);
+    map.on("movestart", handleMapMovement);
+    mapElement?.addEventListener("touchmove", handleBrowserTouchMove, { passive: false });
+    mapElement?.addEventListener("touchend", handleBrowserTouchEnd, { passive: false });
+    mapElement?.addEventListener("touchcancel", handleBrowserTouchEnd, { passive: false });
 
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
@@ -941,6 +973,11 @@ export function RouteMap({
       map.off("touchmove", handlePinTouchMove);
       map.off("touchend", handlePinTouchEnd);
       map.off("touchcancel", handlePinTouchEnd);
+      map.off("dragstart", handleMapMovement);
+      map.off("movestart", handleMapMovement);
+      mapElement?.removeEventListener("touchmove", handleBrowserTouchMove);
+      mapElement?.removeEventListener("touchend", handleBrowserTouchEnd);
+      mapElement?.removeEventListener("touchcancel", handleBrowserTouchEnd);
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
