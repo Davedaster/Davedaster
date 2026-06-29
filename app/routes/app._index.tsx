@@ -65,6 +65,14 @@ type StopEta = {
   arrivalMinutes: number;
 };
 
+type AddressOption = {
+  id: string;
+  address: string;
+  postcode: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 const defaultRoutePlanningSettings = {
   routeDate: new Date().toISOString().slice(0, 10),
   plannedStartTime: "05:00",
@@ -160,10 +168,31 @@ function extractPostcode(value: string) {
   return match?.[0]?.toUpperCase() || "";
 }
 
-async function resolvePlanningEndpoint(address: string | null | undefined) {
+function formCoordinate(formData: FormData, name: string) {
+  const value = Number(String(formData.get(name) || ""));
+
+  return Number.isFinite(value) ? value : null;
+}
+
+function isDefaultShopAddress(address: string) {
+  const normalisedAddress = address.trim().toLowerCase();
+
+  return normalisedAddress === DEFAULT_SHOP_LOCATION.address.toLowerCase() ||
+    (normalisedAddress.includes("olympus") && normalisedAddress.includes("tq12 2sn"));
+}
+
+async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
   const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
 
-  if (trimmedAddress.toLowerCase() === DEFAULT_SHOP_LOCATION.address.toLowerCase()) {
+  if (typeof latitude === "number" && Number.isFinite(latitude) && typeof longitude === "number" && Number.isFinite(longitude)) {
+    return {
+      address: trimmedAddress,
+      latitude,
+      longitude,
+    };
+  }
+
+  if (isDefaultShopAddress(trimmedAddress)) {
     return {
       address: DEFAULT_SHOP_LOCATION.address,
       latitude: DEFAULT_SHOP_LOCATION.latitude,
@@ -226,7 +255,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const customerSlotMinutes = Number(formData.get("customerSlotMinutes") || defaultRoutePlanningSettings.customerSlotMinutes);
   const startAddress = String(formData.get("startAddress") || "").trim();
   const finishAddress = String(formData.get("finishAddress") || "").trim();
+  const startLatitude = formCoordinate(formData, "startLatitude");
+  const startLongitude = formCoordinate(formData, "startLongitude");
+  const rawFinishLatitude = formCoordinate(formData, "finishLatitude");
+  const rawFinishLongitude = formCoordinate(formData, "finishLongitude");
   const returnToBase = String(formData.get("returnToBase") || "") === "true";
+  const finishLatitude = returnToBase ? startLatitude : rawFinishLatitude;
+  const finishLongitude = returnToBase ? startLongitude : rawFinishLongitude;
   const driverId = String(formData.get("driverId") || "").trim();
   const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
   const selectedOrderIds = String(formData.get("selectedOrderIds") || "")
@@ -246,10 +281,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "optimisePlanning") {
     try {
-      const start = await resolvePlanningEndpoint(startAddress);
+      const start = await resolvePlanningEndpoint(startAddress, startLatitude, startLongitude);
       const finish = returnToBase
         ? start
-        : await resolvePlanningEndpoint(finishAddress || startAddress);
+        : await resolvePlanningEndpoint(finishAddress || startAddress, finishLatitude, finishLongitude);
       const optimisableStops = selectedOrders.filter((order) => typeof order.latitude === "number" && typeof order.longitude === "number");
 
       if (optimisableStops.length !== selectedOrders.length) {
@@ -312,9 +347,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     timePerDropMinutes,
     customerSlotMinutes,
     startAddress,
+    startLatitude,
+    startLongitude,
     finishAddress: returnToBase
       ? startAddress
       : finishAddress || selectedOrders[selectedOrders.length - 1]?.formattedAddress || selectedOrders[selectedOrders.length - 1]?.addressSummary || startAddress,
+    finishLatitude,
+    finishLongitude,
   });
 
   if (driverId) {
@@ -518,6 +557,10 @@ function DeliveryMap({
   routeStopIds,
   startAddress,
   finishAddress,
+  startLatitude,
+  startLongitude,
+  finishLatitude,
+  finishLongitude,
   returnToBase,
   onToggleOrder,
 }: {
@@ -526,6 +569,10 @@ function DeliveryMap({
   routeStopIds: string[];
   startAddress: string;
   finishAddress: string;
+  startLatitude: number | null;
+  startLongitude: number | null;
+  finishLatitude: number | null;
+  finishLongitude: number | null;
   returnToBase: boolean;
   onToggleOrder: (order: DeliveryOrder) => void;
 }) {
@@ -575,11 +622,15 @@ function DeliveryMap({
         routeStart={{
           address: startAddress,
           label: "START",
+          latitude: startLatitude,
+          longitude: startLongitude,
           status: "START",
         }}
         routeFinish={{
           address: returnToBase ? startAddress : finishAddress || startAddress,
           label: "FINISH",
+          latitude: returnToBase ? startLatitude : finishLatitude,
+          longitude: returnToBase ? startLongitude : finishLongitude,
           status: "FINISH",
         }}
         onSelectPoint={(point) => {
@@ -646,6 +697,91 @@ function OptimiseRouteButton({
   );
 }
 
+function PostcodeAddressPicker({
+  label,
+  postcode,
+  onPostcodeChange,
+  selectedAddress,
+  onSelectAddress,
+}: {
+  label: string;
+  postcode: string;
+  onPostcodeChange: (value: string) => void;
+  selectedAddress: string;
+  onSelectAddress: (address: AddressOption) => void;
+}) {
+  const [addresses, setAddresses] = useState<AddressOption[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const addressOptions = [
+    { label: addresses.length ? "Choose exact address" : "No addresses loaded", value: "" },
+    ...addresses.map((address) => ({ label: address.address, value: address.id })),
+  ];
+
+  const findAddresses = async () => {
+    const cleanPostcode = postcode.trim();
+
+    if (!cleanPostcode) {
+      setError("Enter a postcode first.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setAddresses([]);
+    setSelectedId("");
+
+    try {
+      const response = await fetch(`/api/address-options?postcode=${encodeURIComponent(cleanPostcode)}`);
+      const payload = await response.json() as { ok?: boolean; addresses?: AddressOption[]; error?: string };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Address lookup failed.");
+      }
+
+      const nextAddresses = payload.addresses || [];
+      setAddresses(nextAddresses);
+
+      if (!nextAddresses.length) {
+        setError("No addresses found for that postcode.");
+      }
+    } catch (lookupError) {
+      setError(lookupError instanceof Error ? lookupError.message : "Address lookup failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectAddress = (id: string) => {
+    setSelectedId(id);
+    const address = addresses.find((option) => option.id === id);
+
+    if (address) {
+      onSelectAddress(address);
+    }
+  };
+
+  return (
+    <BlockStack gap="200">
+      <Text as="h4" variant="headingSm">{label}</Text>
+      <InlineStack gap="200" blockAlign="end">
+        <TextField label="Postcode" value={postcode} onChange={onPostcodeChange} autoComplete="off" />
+        <Button onClick={findAddresses} loading={loading}>Find addresses</Button>
+      </InlineStack>
+      <Select label="Registered address" options={addressOptions} value={selectedId} onChange={handleSelectAddress} disabled={!addresses.length} />
+      <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+        <BlockStack gap="100">
+          <Text as="p" variant="bodySm" fontWeight="bold">Selected address</Text>
+          <Text as="p" variant="bodySm" tone="subdued">{selectedAddress || "No address selected yet"}</Text>
+        </BlockStack>
+      </Box>
+      {error ? <Text as="p" variant="bodySm" tone="critical">{error}</Text> : null}
+    </BlockStack>
+  );
+}
+
 export default function OrdersMap() {
   const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -659,6 +795,12 @@ export default function OrdersMap() {
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
   const [startAddress, setStartAddress] = useState(defaults.startAddress);
   const [finishAddress, setFinishAddress] = useState(defaults.finishAddress);
+  const [startPostcode, setStartPostcode] = useState(extractPostcode(defaults.startAddress) || "TQ12 2SN");
+  const [finishPostcode, setFinishPostcode] = useState(extractPostcode(defaults.finishAddress) || "TQ12 2SN");
+  const [startLatitude, setStartLatitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.latitude);
+  const [startLongitude, setStartLongitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.longitude);
+  const [finishLatitude, setFinishLatitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.latitude);
+  const [finishLongitude, setFinishLongitude] = useState<number | null>(DEFAULT_SHOP_LOCATION.longitude);
   const [returnToBase, setReturnToBase] = useState(true);
   const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
   const [manualCustomerName, setManualCustomerName] = useState("");
@@ -773,6 +915,10 @@ export default function OrdersMap() {
     formData.set("customerSlotMinutes", customerSlotMinutes);
     formData.set("startAddress", startAddress);
     formData.set("finishAddress", returnToBase ? startAddress : finishAddress);
+    formData.set("startLatitude", startLatitude === null ? "" : String(startLatitude));
+    formData.set("startLongitude", startLongitude === null ? "" : String(startLongitude));
+    formData.set("finishLatitude", returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude)));
+    formData.set("finishLongitude", returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude)));
     formData.set("returnToBase", returnToBase ? "true" : "false");
 
     optimisationFetcher.submit(formData, { method: "post" });
@@ -811,6 +957,27 @@ export default function OrdersMap() {
   const removeManualOrder = (id: string) => {
     setManualOrders((currentOrders) => currentOrders.filter((order) => order.id !== id));
     setStops((currentStops) => refreshStopEtas(currentStops.filter((stop) => stop.id !== id), plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
+  };
+
+  const handleStartAddressSelect = (address: AddressOption) => {
+    setStartAddress(address.address);
+    setStartLatitude(address.latitude);
+    setStartLongitude(address.longitude);
+    clearOptimisedStats();
+
+    if (returnToBase) {
+      setFinishAddress(address.address);
+      setFinishLatitude(address.latitude);
+      setFinishLongitude(address.longitude);
+      setFinishPostcode(address.postcode);
+    }
+  };
+
+  const handleFinishAddressSelect = (address: AddressOption) => {
+    setFinishAddress(address.address);
+    setFinishLatitude(address.latitude);
+    setFinishLongitude(address.longitude);
     clearOptimisedStats();
   };
 
@@ -859,6 +1026,10 @@ export default function OrdersMap() {
                   routeStopIds={stops.map((stop) => stop.id)}
                   startAddress={startAddress}
                   finishAddress={finishAddress}
+                  startLatitude={startLatitude}
+                  startLongitude={startLongitude}
+                  finishLatitude={finishLatitude}
+                  finishLongitude={finishLongitude}
                   returnToBase={returnToBase}
                   onToggleOrder={toggleOrder}
                 />
@@ -905,9 +1076,33 @@ export default function OrdersMap() {
                   <TextField label="Driver start time" type="time" value={plannedStartTime} onChange={(value) => { setPlannedStartTime(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Minutes per drop" type="number" value={timePerDropMinutes} onChange={(value) => { setTimePerDropMinutes(value); clearOptimisedStats(); }} autoComplete="off" />
                   <TextField label="Customer slot minutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
-                  <TextField label="Driver start location" value={startAddress} onChange={(value) => { setStartAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} />
-                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
-                  {!returnToBase ? <TextField label="Custom finish location" value={finishAddress} onChange={(value) => { setFinishAddress(value); clearOptimisedStats(); }} autoComplete="off" multiline={2} /> : null}
+                  <PostcodeAddressPicker
+                    label="Driver start location"
+                    postcode={startPostcode}
+                    onPostcodeChange={setStartPostcode}
+                    selectedAddress={startAddress}
+                    onSelectAddress={handleStartAddressSelect}
+                  />
+                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => {
+                    setReturnToBase(checked);
+                    clearOptimisedStats();
+
+                    if (checked) {
+                      setFinishAddress(startAddress);
+                      setFinishLatitude(startLatitude);
+                      setFinishLongitude(startLongitude);
+                      setFinishPostcode(startPostcode);
+                    }
+                  }} />
+                  {!returnToBase ? (
+                    <PostcodeAddressPicker
+                      label="Custom finish location"
+                      postcode={finishPostcode}
+                      onPostcodeChange={setFinishPostcode}
+                      selectedAddress={finishAddress}
+                      onSelectAddress={handleFinishAddressSelect}
+                    />
+                  ) : null}
                   <OptimiseRouteButton onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0} />
                 </BlockStack>
               </BlockStack>
@@ -973,6 +1168,10 @@ export default function OrdersMap() {
                 <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
                 <input type="hidden" name="startAddress" value={startAddress} />
                 <input type="hidden" name="finishAddress" value={returnToBase ? startAddress : finishAddress} />
+                <input type="hidden" name="startLatitude" value={startLatitude === null ? "" : String(startLatitude)} />
+                <input type="hidden" name="startLongitude" value={startLongitude === null ? "" : String(startLongitude)} />
+                <input type="hidden" name="finishLatitude" value={returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude))} />
+                <input type="hidden" name="finishLongitude" value={returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude))} />
                 <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
                 <BlockStack gap="300">
                   <TextField
