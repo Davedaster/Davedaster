@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { sendFirstOutForDeliveryNotification } from "./routeNotifications.server";
 
 const DRIVER_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
 
@@ -78,7 +79,7 @@ export async function startDriverRoute(routeId: string) {
     return route;
   }
 
-  return prisma.route.update({
+  const updatedRoute = await prisma.route.update({
     where: {
       id: routeId,
     },
@@ -92,4 +93,8 @@ export async function startDriverRoute(routeId: string) {
       },
     },
   });
+
+  await sendFirstOutForDeliveryNotification(routeId);
+
+  return updatedRoute;
 }
