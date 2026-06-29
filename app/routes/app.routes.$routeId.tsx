@@ -13,6 +13,7 @@ import {
   DataTable,
   TextField,
   Select,
+  Box,
 } from "@shopify/polaris";
 import { useState } from "react";
 
@@ -51,6 +52,29 @@ function notificationResultMessage(label: string, result: { smsSent: number; ema
   return `${label}: ${result.smsSent} SMS, ${result.emailsSent} emails, ${result.skipped} skipped${result.failed ? `, ${result.failed} failed` : ""}.`;
 }
 
+function tick(value: boolean) {
+  return value ? "✓" : "✗";
+}
+
+function publishMessage(input: {
+  driverSms: boolean;
+  driverEmail: boolean;
+  customerSms: number;
+  customerEmail: number;
+  customerSkipped: number;
+  errors: string[];
+}) {
+  return [
+    `Route published`,
+    `Driver SMS ${tick(input.driverSms)}`,
+    `Driver email ${tick(input.driverEmail)}`,
+    `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
+    `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
+    input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
+    input.errors.length ? `Errors: ${input.errors.join(" | ")}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const routeId = params.routeId;
@@ -66,7 +90,31 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     try {
       await publishRoute(routeId);
       await tagPublishedRouteOrders(admin, routeId);
-      return redirect(`/app/routes/${routeId}`);
+
+      const driverResult = await sendDriverRouteLink({ routeId, request });
+      const customerResult = await sendBookedSlotNotifications(routeId);
+      const errors = [...driverResult.errors, ...customerResult.errors];
+
+      return json({
+        ok: true,
+        message: publishMessage({
+          driverSms: driverResult.smsSent,
+          driverEmail: driverResult.emailSent,
+          customerSms: customerResult.smsSent,
+          customerEmail: customerResult.emailsSent,
+          customerSkipped: customerResult.skipped,
+          errors,
+        }),
+        publishStatus: {
+          driverSms: driverResult.smsSent,
+          driverEmail: driverResult.emailSent,
+          customerSms: customerResult.smsSent,
+          customerEmail: customerResult.emailsSent,
+          customerSkipped: customerResult.skipped,
+          errors,
+        },
+        errors,
+      });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Route publishing failed." }, { status: 400 });
     }
@@ -74,8 +122,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "sendNotifications") {
     try {
-      await sendBookedSlotNotifications(routeId);
-      return redirect(`/app/routes/${routeId}`);
+      const result = await sendBookedSlotNotifications(routeId);
+      return json({ ok: true, message: notificationResultMessage("Customer notifications sent", result), errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
     }
@@ -112,8 +160,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "sendDriverRouteLink") {
     try {
-      await sendDriverRouteLink({ routeId, request });
-      return redirect(`/app/routes/${routeId}`);
+      const result = await sendDriverRouteLink({ routeId, request });
+      return json({ ok: true, message: `Driver route link sent: SMS ${tick(result.smsSent)}, email ${tick(result.emailSent)}.`, errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Driver route link failed." }, { status: 400 });
     }
@@ -217,6 +265,16 @@ function statusTone(status: string) {
   return "attention" as const;
 }
 
+function StatusTick({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
+  return (
+    <InlineStack gap="200" blockAlign="center">
+      <Badge tone={ok ? "success" : "critical"}>{ok ? "✓" : "✗"}</Badge>
+      <Text as="span" variant="bodyMd" fontWeight="medium">{label}</Text>
+      {detail ? <Text as="span" variant="bodySm" tone="subdued">{detail}</Text> : null}
+    </InlineStack>
+  );
+}
+
 export default function RouteDetails() {
   const { route, drivers, routexlEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -239,6 +297,7 @@ export default function RouteDetails() {
   const canSendDriverRouteLink = route.status !== "DRAFT" && Boolean(route.driverId);
   const canRearrangeDraft = route.status === "DRAFT";
   const canSendManualMessages = route.status !== "DRAFT" && route.stops.length > 0;
+  const publishStatus = actionData?.ok && "publishStatus" in actionData ? actionData.publishStatus : null;
 
   const driverOptions = [
     { label: "No driver assigned", value: "" },
@@ -309,7 +368,7 @@ export default function RouteDetails() {
       backAction={{ content: "Routes", url: "/app/routes" }}
       primaryAction={canPublish ? {
         content: "Publish route",
-        disabled: route.stops.length === 0,
+        disabled: route.stops.length === 0 || !route.driverId,
         onAction: () => document.getElementById("publish-route-form")?.requestSubmit(),
       } : undefined}
       secondaryActions={canSendNotifications ? [
@@ -340,6 +399,11 @@ export default function RouteDetails() {
                       Draft only. You can rearrange drops and customers will not receive tracking links or delivery notifications until this route is published.
                     </Text>
                   ) : null}
+                  {route.status === "DRAFT" && !route.driverId ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      Assign a driver before publishing. The driver link is now sent automatically on publish.
+                    </Text>
+                  ) : null}
                 </BlockStack>
                 <Badge tone={statusTone(route.status)}>{route.status}</Badge>
               </InlineStack>
@@ -349,6 +413,18 @@ export default function RouteDetails() {
               ) : null}
               {actionData?.ok && "message" in actionData ? (
                 <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text>
+              ) : null}
+              {publishStatus ? (
+                <Box background="bg-surface-success" padding="300" borderRadius="300">
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingSm">Publish notification status</Text>
+                    <StatusTick label="Driver SMS" ok={publishStatus.driverSms} />
+                    <StatusTick label="Driver email" ok={publishStatus.driverEmail} />
+                    <StatusTick label="Customer SMS" ok={publishStatus.customerSms > 0} detail={`${publishStatus.customerSms} sent`} />
+                    <StatusTick label="Customer email" ok={publishStatus.customerEmail > 0} detail={`${publishStatus.customerEmail} sent`} />
+                    {publishStatus.customerSkipped ? <Text as="p" variant="bodySm" tone="subdued">{publishStatus.customerSkipped} customer orders skipped.</Text> : null}
+                  </BlockStack>
+                </Box>
               ) : null}
               {actionData?.ok && "errors" in actionData && actionData.errors?.length ? (
                 <Text as="p" variant="bodySm" tone="critical">{actionData.errors.slice(0, 3).join(" ")}</Text>
