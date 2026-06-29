@@ -1,3 +1,4 @@
+import { getAppCredentials, hasResendCredentials, hasTwilioCredentials } from "./appCredentials.server";
 import type { NotificationMessage } from "./notificationTemplates.server";
 
 type SendSmsInput = {
@@ -26,11 +27,9 @@ type ResendResponse = {
   message?: string;
 };
 
-function requireEnv(name: string) {
-  const value = process.env[name];
-
+function requireCredential(value: string, name: string) {
   if (!value) {
-    throw new Error(`${name} is missing from the app environment.`);
+    throw new Error(`${name} is missing from Settings, API Credentials.`);
   }
 
   return value;
@@ -40,18 +39,23 @@ function buildTwilioAuthHeader(accountSid: string, authToken: string) {
   return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
 }
 
-export function isTwilioEnabled() {
-  return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER);
+export async function isTwilioEnabled() {
+  const credentials = await getAppCredentials();
+
+  return hasTwilioCredentials(credentials);
 }
 
-export function isResendEnabled() {
-  return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL);
+export async function isResendEnabled() {
+  const credentials = await getAppCredentials();
+
+  return hasResendCredentials(credentials);
 }
 
 export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult> {
-  const accountSid = requireEnv("TWILIO_ACCOUNT_SID");
-  const authToken = requireEnv("TWILIO_AUTH_TOKEN");
-  const fromNumber = requireEnv("TWILIO_FROM_NUMBER");
+  const credentials = await getAppCredentials();
+  const accountSid = requireCredential(credentials.twilioAccountSid, "Twilio Account SID");
+  const authToken = requireCredential(credentials.twilioAuthToken, "Twilio Auth Token");
+  const fromNumber = requireCredential(credentials.twilioFromNumber, "Twilio From Number");
 
   const body = new URLSearchParams();
   body.set("To", input.to);
@@ -81,8 +85,9 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
 }
 
 export async function sendEmailWithResend(input: SendEmailInput): Promise<SendResult> {
-  const apiKey = requireEnv("RESEND_API_KEY");
-  const fromEmail = requireEnv("RESEND_FROM_EMAIL");
+  const credentials = await getAppCredentials();
+  const apiKey = requireCredential(credentials.resendApiKey, "Resend API Key");
+  const fromEmail = requireCredential(credentials.resendFromEmail, "Resend From Email");
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
