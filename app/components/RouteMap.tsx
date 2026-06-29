@@ -45,9 +45,10 @@ const DEFAULT_SHOP_LOCATION = {
   latitude: 50.5293,
   longitude: -3.6119,
 };
-const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v1";
-const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v1";
-const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v2";
+const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v2";
+const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v2";
+const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v3";
+const ENDPOINT_ICON_SIZE = 0.62;
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -754,7 +755,7 @@ export function RouteMap({
         source: endpointSourceId,
         layout: {
           "icon-image": ["get", "iconImage"],
-          "icon-size": 1,
+          "icon-size": ENDPOINT_ICON_SIZE,
           "icon-anchor": "bottom",
           "icon-allow-overlap": true,
         },
@@ -766,29 +767,13 @@ export function RouteMap({
         source: endpointSourceId,
         paint: {
           "circle-color": ["get", "colour"],
-          "circle-radius": 21,
+          "circle-radius": 18,
           "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 4,
+          "circle-stroke-width": 3,
           "circle-opacity": 0.98,
         },
       });
     }
-
-    map.addLayer({
-      id: endpointLabelLayerId,
-      type: "symbol",
-      source: endpointSourceId,
-      filter: ["==", ["get", "markerType"], "single"],
-      layout: {
-        "text-field": ["get", "label"],
-        "text-size": 9,
-        "text-offset": [0, -1.85],
-        "text-allow-overlap": true,
-      },
-      paint: {
-        "text-color": "#ffffff",
-      },
-    });
 
     const handleClusterClick = (event: any) => {
       const features = map.queryRenderedFeatures(event.point, { layers: [clustersLayerId] });
