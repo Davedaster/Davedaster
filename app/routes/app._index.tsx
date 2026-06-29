@@ -87,6 +87,8 @@ const fallbackRoutePlanningSettings = {
   plannedStartTime: "05:00",
   timePerDropMinutes: 10,
   customerSlotMinutes: 60,
+  fulfilmentWindowDays: 7,
+  useWorkingDaysOnly: true,
   startAddress: "Unit 1 Olympus Business Park, Kingsteignton Road, Newton Abbot, Devon, TQ12 2SN, United Kingdom",
   startLatitude: 50.5293,
   startLongitude: -3.6119,
@@ -105,14 +107,17 @@ const fallbackRoutePlanningSettings = {
   },
 };
 
-async function addFulfilByDates(orders: DeliveryOrder[]) {
+async function addFulfilByDates(orders: DeliveryOrder[], fulfilmentWindowDays: number, useWorkingDaysOnly: boolean) {
   const fulfilByDatesByOrderDate = new Map<string, string>();
 
   for (const order of orders) {
     const orderDateKey = order.createdAt.slice(0, 10);
 
     if (!fulfilByDatesByOrderDate.has(orderDateKey)) {
-      fulfilByDatesByOrderDate.set(orderDateKey, await fulfilByDateFromOrderDate(order.createdAt));
+      fulfilByDatesByOrderDate.set(orderDateKey, await fulfilByDateFromOrderDate(order.createdAt, {
+        days: fulfilmentWindowDays,
+        useWorkingDaysOnly,
+      }));
     }
   }
 
@@ -130,19 +135,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     getRoutePlanningDefaults(),
     getAppCredentials(),
   ]);
-  const ordersWithFulfilByDates = await addFulfilByDates(orders);
+  const mergedDefaults = {
+    ...fallbackRoutePlanningSettings,
+    ...defaults,
+    routeDate: new Date().toISOString().slice(0, 10),
+    startStructuredAddress: normaliseStructuredAddress(defaults.startStructuredAddress, fallbackRoutePlanningSettings.startStructuredAddress),
+  };
+  const ordersWithFulfilByDates = await addFulfilByDates(
+    orders,
+    mergedDefaults.fulfilmentWindowDays,
+    mergedDefaults.useWorkingDaysOnly,
+  );
 
   return json({
     orders: ordersWithFulfilByDates,
     drivers,
     addressLookupEnabled: hasGetAddressCredentials(credentials),
     routexlEnabled: hasRouteXLCredentials(credentials),
-    defaults: {
-      ...fallbackRoutePlanningSettings,
-      ...defaults,
-      routeDate: new Date().toISOString().slice(0, 10),
-      startStructuredAddress: normaliseStructuredAddress(defaults.startStructuredAddress, fallbackRoutePlanningSettings.startStructuredAddress),
-    },
+    defaults: mergedDefaults,
   });
 };
 
@@ -503,6 +513,27 @@ function hasCoordinates(order: DeliveryOrder) {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
+function dateOnly(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function calendarDaysBetween(start: string | Date, end: string | Date) {
+  const startDate = dateOnly(start);
+  const endDate = dateOnly(end);
+
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  return Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 function formatOrderDate(value: string | null | undefined) {
   if (!value) {
     return "Date unavailable";
@@ -521,6 +552,34 @@ function formatOrderDate(value: string | null | undefined) {
   }).format(date);
 }
 
+function fulfilmentHoverDot(fulfilByDate: string | null | undefined, fulfilmentWindowDays: number) {
+  const daysLeft = fulfilByDate ? calendarDaysBetween(new Date(), fulfilByDate) : null;
+
+  if (daysLeft === null) {
+    return "⚪";
+  }
+
+  if (daysLeft <= 0) {
+    return "🔴";
+  }
+
+  const ratio = daysLeft / Math.max(1, fulfilmentWindowDays);
+
+  if (ratio > 0.66) {
+    return "🟢";
+  }
+
+  if (ratio > 0.4) {
+    return "🔵";
+  }
+
+  if (ratio > 0.2) {
+    return "🟠";
+  }
+
+  return "🔴";
+}
+
 function orderItemLines(order: DeliveryOrder) {
   const itemLines = order.lineItemLines?.length
     ? order.lineItemLines
@@ -532,12 +591,14 @@ function orderItemLines(order: DeliveryOrder) {
   return itemLines.length ? itemLines.map((item) => `• ${item}`) : ["Items not listed"];
 }
 
-function orderMapTooltip(order: DeliveryOrder, heading: string) {
+function orderMapTooltip(order: DeliveryOrder, heading: string, fulfilmentWindowDays: number) {
+  const fulfilmentDot = fulfilmentHoverDot(order.fulfilByDate, fulfilmentWindowDays);
+
   return {
     tooltipTitle: heading,
     tooltipLines: [
       `Ordered: ${formatOrderDate(order.createdAt)}`,
-      `Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
+      `${fulfilmentDot} Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
       `Postcode: ${order.postcode || "No postcode"}`,
       "Items:",
       ...orderItemLines(order),
@@ -556,6 +617,7 @@ function DeliveryMap({
   finishLatitude,
   finishLongitude,
   returnToBase,
+  fulfilmentWindowDays,
   onToggleOrder,
 }: {
   orders: DeliveryOrder[];
@@ -568,6 +630,7 @@ function DeliveryMap({
   finishLatitude: number | null;
   finishLongitude: number | null;
   returnToBase: boolean;
+  fulfilmentWindowDays: number;
   onToggleOrder: (order: DeliveryOrder) => void;
 }) {
   const ordersWithCoordinates = orders.filter(hasCoordinates);
@@ -587,7 +650,7 @@ function DeliveryMap({
         latitude: order.latitude,
         longitude: order.longitude,
         selected: true,
-        ...orderMapTooltip(order, heading),
+        ...orderMapTooltip(order, heading, fulfilmentWindowDays),
       };
     });
   const unselectedPoints = ordersWithCoordinates
@@ -602,7 +665,7 @@ function DeliveryMap({
         latitude: order.latitude,
         longitude: order.longitude,
         selected: selectedIds.has(order.id),
-        ...orderMapTooltip(order, heading),
+        ...orderMapTooltip(order, heading, fulfilmentWindowDays),
       };
     });
 
@@ -754,6 +817,7 @@ export default function OrdersMap() {
   const defaultStartAddress = defaults.startAddress;
   const defaultStartLatitude = typeof defaults.startLatitude === "number" ? defaults.startLatitude : null;
   const defaultStartLongitude = typeof defaults.startLongitude === "number" ? defaults.startLongitude : null;
+  const fulfilmentWindowDays = Number(defaults.fulfilmentWindowDays) || fallbackRoutePlanningSettings.fulfilmentWindowDays;
   const customStartSummary = formatStructuredAddress(customStartAddress);
   const customFinishSummary = formatStructuredAddress(customFinishAddress);
   const startAddress = useCustomStartPoint && customStartSummary ? customStartSummary : defaultStartAddress;
@@ -964,6 +1028,7 @@ export default function OrdersMap() {
                   finishLatitude={finishLatitude}
                   finishLongitude={finishLongitude}
                   returnToBase={returnToBase}
+                  fulfilmentWindowDays={fulfilmentWindowDays}
                   onToggleOrder={toggleOrder}
                 />
               )}
