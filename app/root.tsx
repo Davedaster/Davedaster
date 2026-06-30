@@ -354,13 +354,13 @@ const planningPanelScript = `
     };
 
     const updateFulfilmentTooltipColours = () => {
-      document.querySelectorAll('.bpd-tomtom-popup .bpd-tooltip-line').forEach((line) => {
-        if (line.dataset.bpdFulfilStyled === 'true') {
+      document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
+        if (!(line instanceof HTMLElement) || line.dataset.bpdFulfilStyled === 'true') {
           return;
         }
 
         const rawText = line.textContent?.trim() || '';
-        const cleanText = rawText.replace(/^[🟢🔵🟠🔴⚪]\\s*/, '').trim();
+        const cleanText = rawText.replace(/^[^A-Za-z0-9]*\\s*/, '').trim();
 
         if (!cleanText.toLowerCase().startsWith('fulfil by:')) {
           return;
@@ -372,6 +372,10 @@ const planningPanelScript = `
         line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
       });
     };
+
+    document.addEventListener('mouseover', () => window.setTimeout(updateFulfilmentTooltipColours, 0), true);
+    document.addEventListener('touchstart', () => window.setTimeout(updateFulfilmentTooltipColours, 700), true);
+    window.setInterval(updateFulfilmentTooltipColours, 350);
 
     const tidyCustomerTracking = () => {
       if (!window.location.pathname.startsWith('/apps/track/')) {
