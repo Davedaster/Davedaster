@@ -25,6 +25,10 @@ type StopWithPoint = {
   deliveryGroup?: {
     latitude: number | null;
     longitude: number | null;
+    orders?: Array<{
+      lineItemSummary?: string | null;
+      orderSource?: string | null;
+    }>;
   } | null;
 };
 
@@ -60,6 +64,26 @@ function pointForStop(stop: StopWithPoint): RoutePoint | null {
   };
 
   return hasCoordinates(point) ? point : null;
+}
+
+function itemCountFromSummary(summary?: string | null) {
+  return (summary || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .length;
+}
+
+function handlingMinutesForStop(stop: StopWithPoint, defaultMinutes: number) {
+  const orders = stop.deliveryGroup?.orders || [];
+  const orderCount = orders.length;
+  const itemCount = orders.reduce((total, order) => total + itemCountFromSummary(order.lineItemSummary), 0);
+  const manualOrderCount = orders.filter((order) => order.orderSource === "manual").length;
+  const extraOrderMinutes = Math.max(0, orderCount - 1) * 2;
+  const extraItemMinutes = Math.min(8, Math.max(0, itemCount - 6));
+  const manualMinutes = manualOrderCount > 0 ? 2 : 0;
+
+  return Math.max(5, defaultMinutes + extraOrderMinutes + extraItemMinutes + manualMinutes);
 }
 
 function tomTomRouteUrl(from: RoutePoint, to: RoutePoint, apiKey: string) {
@@ -134,12 +158,20 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
     const completedStop = await prisma.stop.findUnique({
       where: { id: stopId },
       include: {
-        deliveryGroup: true,
+        deliveryGroup: {
+          include: {
+            orders: true,
+          },
+        },
         route: {
           include: {
             stops: {
               include: {
-                deliveryGroup: true,
+                deliveryGroup: {
+                  include: {
+                    orders: true,
+                  },
+                },
               },
               orderBy: {
                 orderIndex: "asc",
@@ -155,7 +187,6 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
     }
 
     const route = completedStop.route;
-    const handlingMinutes = Math.max(0, route.timePerDropMinutes);
     const remainingStops = route.stops.filter((stop) => (
       stop.status === "PENDING" && stop.orderIndex > completedStop.orderIndex
     ));
@@ -166,8 +197,10 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
 
     let etaClock = completedAt;
     let previousPoint = pointForStop(completedStop);
+    let previousHandlingMinutes = 0;
     let totalTravelMinutes = 0;
     let totalTrafficDelayMinutes = 0;
+    let totalHandlingMinutes = 0;
     let trafficLegs = 0;
 
     const etaUpdates: Array<{
@@ -175,14 +208,11 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
       estimatedArrival: Date;
     }> = [];
 
-    for (const [index, stop] of remainingStops.entries()) {
+    for (const stop of remainingStops) {
       const nextPoint = pointForStop(stop);
       const leg = await calculateLeg(previousPoint, nextPoint, route.timePerDropMinutes);
 
-      etaClock = addMinutes(
-        etaClock,
-        index === 0 ? leg.travelMinutes : handlingMinutes + leg.travelMinutes,
-      );
+      etaClock = addMinutes(etaClock, previousHandlingMinutes + leg.travelMinutes);
 
       etaUpdates.push({
         stopId: stop.id,
@@ -191,10 +221,13 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
 
       totalTravelMinutes += leg.travelMinutes;
       totalTrafficDelayMinutes += leg.trafficDelayMinutes;
+      totalHandlingMinutes += previousHandlingMinutes;
 
       if (leg.usedTraffic) {
         trafficLegs += 1;
       }
+
+      previousHandlingMinutes = handlingMinutesForStop(stop, route.timePerDropMinutes);
 
       if (nextPoint) {
         previousPoint = nextPoint;
@@ -215,7 +248,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
           history: {
             create: {
               action: "Traffic ETAs recalculated",
-              details: `After stop ${completedStop.orderIndex}, recalculated ${etaUpdates.length} remaining ETA${etaUpdates.length === 1 ? "" : "s"}. ${trafficLegs} leg${trafficLegs === 1 ? "" : "s"} used TomTom live traffic. Total travel ${totalTravelMinutes} min, traffic delay ${totalTrafficDelayMinutes} min.`,
+              details: `After stop ${completedStop.orderIndex}, recalculated ${etaUpdates.length} remaining ETA${etaUpdates.length === 1 ? "" : "s"}. ${trafficLegs} leg${trafficLegs === 1 ? "" : "s"} used TomTom live traffic. Total travel ${totalTravelMinutes} min, traffic delay ${totalTrafficDelayMinutes} min, handling ${totalHandlingMinutes} min.`,
             },
           },
         },
@@ -228,7 +261,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
       estimatedArrival: etaUpdates[0]?.estimatedArrival,
       travelMinutes: totalTravelMinutes,
       trafficDelayMinutes: totalTrafficDelayMinutes,
-      handlingMinutes,
+      handlingMinutes: totalHandlingMinutes,
       recalculatedStops: etaUpdates.length,
       trafficLegs,
     };
