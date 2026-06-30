@@ -101,6 +101,7 @@ const planningPanelScript = `
     const lockedScrollContainers = [];
 
     const isMapEvent = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
+    const shouldUseMobileMapLock = () => window.matchMedia?.('(max-width: 800px), (pointer: coarse)')?.matches === true;
 
     const cancelScheduledUnlock = () => {
       if (unlockTimer) {
@@ -151,6 +152,7 @@ const planningPanelScript = `
     };
 
     const lockPageForMap = (target) => {
+      if (!shouldUseMobileMapLock()) return;
       cancelScheduledUnlock();
       if (!document.body.classList.contains('bpd-map-scroll-locked')) {
         lockedScrollY = window.scrollY || window.pageYOffset || 0;
@@ -175,6 +177,7 @@ const planningPanelScript = `
     };
 
     const scheduleMapUnlock = () => {
+      if (!shouldUseMobileMapLock()) return;
       cancelScheduledUnlock();
       const movedRecently = Date.now() - lastMapMoveAt < 350;
       unlockTimer = window.setTimeout(unlockPageForMapNow, movedRecently ? 1400 : 650);
@@ -184,34 +187,35 @@ const planningPanelScript = `
       if (!touchingMap && !isMapEvent(event.target)) return;
       touchingMap = true;
       lastMapMoveAt = Date.now();
-      lockPageForMap(event.target);
+      if (shouldUseMobileMapLock()) lockPageForMap(event.target);
       if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
     };
 
     const containDesktopMapGesture = (event) => {
       if (!isMapEvent(event.target)) return;
-      const looksLikeTrackpadGesture = event.ctrlKey || event.metaKey || Math.abs(event.deltaX || 0) > 0 || Math.abs(event.deltaY || 0) > 0;
-      if (!looksLikeTrackpadGesture) return;
       if (event.cancelable) event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
     };
 
     const containSafariGesture = (event) => {
       if (!isMapEvent(event.target)) return;
       if (event.cancelable) event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
     };
 
-    document.addEventListener('wheel', containDesktopMapGesture, { passive: false });
-    document.addEventListener('gesturestart', containSafariGesture, { passive: false });
-    document.addEventListener('gesturechange', containSafariGesture, { passive: false });
-    document.addEventListener('gestureend', containSafariGesture, { passive: false });
+    document.addEventListener('wheel', containDesktopMapGesture, { passive: false, capture: true });
+    document.addEventListener('gesturestart', containSafariGesture, { passive: false, capture: true });
+    document.addEventListener('gesturechange', containSafariGesture, { passive: false, capture: true });
+    document.addEventListener('gestureend', containSafariGesture, { passive: false, capture: true });
 
     document.addEventListener('touchstart', (event) => {
       touchingMap = isMapEvent(event.target);
       if (touchingMap) {
         lastMapMoveAt = Date.now();
-        lockPageForMap(event.target);
+        if (shouldUseMobileMapLock()) lockPageForMap(event.target);
       }
     }, { passive: true, capture: true });
 
