@@ -21,9 +21,11 @@ import { getAppCredentials, hasRouteXLCredentials } from "../lib/appCredentials.
 import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { formatEtaSlot } from "../lib/etaSlots";
+import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { sendBookedSlotNotifications, sendManualRouteNotification } from "../lib/routeNotifications.server";
 import { moveDraftRouteStop } from "../lib/routeStopOrder.server";
+import { fulfilRouteOrders } from "../lib/shopifyFulfilment.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
@@ -62,6 +64,9 @@ function publishMessage(input: {
   customerSms: number;
   customerEmail: number;
   customerSkipped: number;
+  fulfilmentMode: string;
+  fulfilmentFulfilled: number;
+  fulfilmentSkipped: number;
   errors: string[];
 }) {
   return [
@@ -71,6 +76,9 @@ function publishMessage(input: {
     `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
     `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
     input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
+    input.fulfilmentMode === "on_publish"
+      ? `Shopify fulfilment on publish: ${input.fulfilmentFulfilled} fulfilled, ${input.fulfilmentSkipped} skipped`
+      : "Shopify fulfilment will happen when each delivery is completed",
     input.errors.length ? `Errors: ${input.errors.join(" | ")}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -91,9 +99,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       await publishRoute(routeId);
       await tagPublishedRouteOrders(admin, routeId);
 
+      const fulfilmentSettings = await getFulfilmentSettings();
+      const fulfilmentResult = fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
+        ? await fulfilRouteOrders(admin, routeId)
+        : { fulfilled: 0, skipped: 0, errors: [] };
       const driverResult = await sendDriverRouteLink({ routeId, request });
       const customerResult = await sendBookedSlotNotifications(routeId);
-      const errors = [...driverResult.errors, ...customerResult.errors];
+      const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
 
       return json({
         ok: true,
@@ -103,6 +115,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           customerSms: customerResult.smsSent,
           customerEmail: customerResult.emailsSent,
           customerSkipped: customerResult.skipped,
+          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
+          fulfilmentFulfilled: fulfilmentResult.fulfilled,
+          fulfilmentSkipped: fulfilmentResult.skipped,
           errors,
         }),
         publishStatus: {
@@ -111,6 +126,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           customerSms: customerResult.smsSent,
           customerEmail: customerResult.emailsSent,
           customerSkipped: customerResult.skipped,
+          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
+          fulfilmentFulfilled: fulfilmentResult.fulfilled,
+          fulfilmentSkipped: fulfilmentResult.skipped,
           errors,
         },
         errors,
@@ -262,290 +280,228 @@ function statusTone(status: string) {
     return "success" as const;
   }
 
+  if (status === "OUT_FOR_DELIVERY") {
+    return "attention" as const;
+  }
+
+  if (status === "COMPLETED") {
+    return "success" as const;
+  }
+
   return "attention" as const;
 }
 
-function StatusTick({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
-  return (
-    <InlineStack gap="200" blockAlign="center">
-      <Badge tone={ok ? "success" : "critical"}>{ok ? "✓" : "✗"}</Badge>
-      <Text as="span" variant="bodyMd" fontWeight="medium">{label}</Text>
-      {detail ? <Text as="span" variant="bodySm" tone="subdued">{detail}</Text> : null}
-    </InlineStack>
-  );
+function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
+  if (!estimatedArrival) {
+    return "Pending";
+  }
+
+  const start = new Date(estimatedArrival);
+  const end = new Date(start.getTime() + slotMinutes * 60 * 1000);
+
+  return formatEtaSlot(start, end);
 }
 
 export default function RouteDetails() {
   const { route, drivers, routexlEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [routeName, setRouteName] = useState(route.name);
-  const [driverId, setDriverId] = useState(route.driverId || "");
+  const [selectedDriverId, setSelectedDriverId] = useState(route.driverId || "");
+  const [delayMinutes, setDelayMinutes] = useState("45");
+  const [selectedNextStopId, setSelectedNextStopId] = useState(route.stops.find((stop) => stop.status === "PENDING")?.id || "");
   const [routeDate, setRouteDate] = useState(dateInputValue(route.date));
   const [plannedStartTime, setPlannedStartTime] = useState(route.plannedStartTime || "05:00");
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(route.timePerDropMinutes || 10));
   const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(route.customerSlotMinutes || 60));
-  const [startAddress, setStartAddress] = useState(route.startAddress || "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom");
-  const [finishAddress, setFinishAddress] = useState(route.finishAddress || "Unit 1 Olympus Business Park, Newton Abbot, TQ12 2SN, United Kingdom");
-  const [startTime, setStartTime] = useState(route.plannedStartTime || "05:00");
-  const [stopMinutes, setStopMinutes] = useState(String(route.timePerDropMinutes || 10));
-  const [slotMinutes, setSlotMinutes] = useState(String(route.customerSlotMinutes || 60));
-  const [delayMinutes, setDelayMinutes] = useState("45");
-  const [nextDropStopId, setNextDropStopId] = useState(route.stops.find((stop) => stop.status === "PENDING")?.id || "");
-  const canPublish = route.status === "DRAFT";
-  const canSendNotifications = route.status === "PUBLISHED" && !route.notificationsSent;
-  const canRename = route.status === "DRAFT" || route.status === "PUBLISHED";
-  const canSendDriverRouteLink = route.status !== "DRAFT" && Boolean(route.driverId);
-  const canRearrangeDraft = route.status === "DRAFT";
-  const canSendManualMessages = route.status !== "DRAFT" && route.stops.length > 0;
-  const publishStatus = actionData?.ok && "publishStatus" in actionData ? actionData.publishStatus : null;
-
-  const driverOptions = [
-    { label: "No driver assigned", value: "" },
-    ...drivers.map((driver) => ({
-      label: driver.name,
-      value: driver.id,
-    })),
-  ];
-
-  const pendingStopOptions = [
-    { label: "Choose pending stop", value: "" },
-    ...route.stops
-      .filter((stop) => stop.status === "PENDING")
-      .map((stop) => ({
-        label: `Stop ${stop.orderIndex} · ${stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders"}`,
-        value: stop.id,
-      })),
-  ];
-
-  const slotMinutesNumber = Number(slotMinutes || route.customerSlotMinutes || 60);
-
-  const stopRows = route.stops.map((stop, index) => {
-    const deliveryGroup = stop.deliveryGroup;
-    const orders = deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
-    const estimatedArrival = stop.estimatedArrival ? new Date(stop.estimatedArrival) : null;
-    const slotEnd = estimatedArrival ? new Date(estimatedArrival.getTime() + (Number.isFinite(slotMinutesNumber) ? slotMinutesNumber : 60) * 60 * 1000) : null;
+  const [startAddress, setStartAddress] = useState(route.startAddress || "Bathroom Panels Direct");
+  const [finishAddress, setFinishAddress] = useState(route.finishAddress || "Bathroom Panels Direct");
+  const driverOptions = [{ label: "No driver assigned", value: "" }, ...drivers.map((driver) => ({ label: driver.name, value: driver.id }))];
+  const stopRows = route.stops.map((stop) => {
+    const orderNumbers = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "";
+    const customerNames = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "";
+    const postcode = stop.deliveryGroup?.postcode || "";
+    const slot = formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60);
 
     return [
-      String(stop.orderIndex),
-      orders,
-      deliveryGroup?.postcode || "No postcode",
-      deliveryGroup?.address || "No address",
-      estimatedArrival && slotEnd ? formatEtaSlot(estimatedArrival, slotEnd) : "Pending",
-      stop.isLocked ? "Locked" : "Open",
-      canRearrangeDraft ? (
-        <InlineStack gap="100">
+      `#${stop.orderIndex}`,
+      orderNumbers,
+      customerNames,
+      postcode,
+      slot,
+      stop.status,
+      route.status === "DRAFT" ? (
+        <InlineStack key={stop.id} gap="100">
           <Form method="post">
             <input type="hidden" name="intent" value="moveStop" />
             <input type="hidden" name="stopId" value={stop.id} />
             <input type="hidden" name="direction" value="up" />
-            <Button submit size="micro" disabled={index === 0}>Up</Button>
+            <Button submit disabled={stop.orderIndex === 1}>Up</Button>
           </Form>
           <Form method="post">
             <input type="hidden" name="intent" value="moveStop" />
             <input type="hidden" name="stopId" value={stop.id} />
             <input type="hidden" name="direction" value="down" />
-            <Button submit size="micro" disabled={index === route.stops.length - 1}>Down</Button>
+            <Button submit disabled={stop.orderIndex === route.stops.length}>Down</Button>
           </Form>
         </InlineStack>
-      ) : "Published",
+      ) : "Locked",
     ];
   });
-
-  const historyRows = route.history.map((event) => [
-    new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(event.createdAt)),
-    event.action,
-    event.details || "",
-  ]);
+  const nextDropOptions = route.stops
+    .filter((stop) => stop.status === "PENDING")
+    .map((stop) => {
+      const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No orders";
+      const postcode = stop.deliveryGroup?.postcode || "No postcode";
+      return { label: `Stop ${stop.orderIndex} · ${orders} · ${postcode}`, value: stop.id };
+    });
 
   return (
-    <Page
-      title={route.name}
-      backAction={{ content: "Routes", url: "/app/routes" }}
-      primaryAction={canPublish ? {
-        content: "Publish route",
-        disabled: route.stops.length === 0 || !route.driverId,
-        onAction: () => document.getElementById("publish-route-form")?.requestSubmit(),
-      } : undefined}
-      secondaryActions={canSendNotifications ? [
-        {
-          content: "Send notifications",
-          onAction: () => document.getElementById("send-notifications-form")?.requestSubmit(),
-        },
-      ] : undefined}
-    >
+    <Page title={route.name} backAction={{ content: "Routes", url: "/app/routes" }}>
       <Layout>
         <Layout.Section>
           <LegacyCard sectioned>
             <BlockStack gap="300">
-              <InlineStack align="space-between">
+              <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Route details</Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {formatDate(route.date)} · {route.stops.length} stops
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    {formatDate(route.date)} · {route.stops.length} stops · Driver: {route.driver?.name || "No driver assigned"}
                   </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Driver: {route.driver?.name || "No driver assigned"}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Distance: {route.totalMileage ? `${route.totalMileage.toFixed(1)} km` : "Pending"} · Time: {route.totalDuration ? `${route.totalDuration} minutes` : "Pending"}
-                  </Text>
-                  {route.status === "DRAFT" ? (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Draft only. You can rearrange drops and customers will not receive tracking links or delivery notifications until this route is published.
-                    </Text>
-                  ) : null}
-                  {route.status === "DRAFT" && !route.driverId ? (
-                    <Text as="p" variant="bodySm" tone="critical">
-                      Assign a driver before publishing. The driver link is now sent automatically on publish.
-                    </Text>
-                  ) : null}
                 </BlockStack>
                 <Badge tone={statusTone(route.status)}>{route.status}</Badge>
               </InlineStack>
+              {actionData && "message" in actionData ? <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text> : null}
+              {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
+            </BlockStack>
+          </LegacyCard>
 
-              {actionData && "error" in actionData ? (
-                <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text>
-              ) : null}
-              {actionData?.ok && "message" in actionData ? (
-                <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text>
-              ) : null}
-              {publishStatus ? (
-                <Box background="bg-surface-success" padding="300" borderRadius="300">
-                  <BlockStack gap="200">
-                    <Text as="h3" variant="headingSm">Publish notification status</Text>
-                    <StatusTick label="Driver SMS" ok={publishStatus.driverSms} />
-                    <StatusTick label="Driver email" ok={publishStatus.driverEmail} />
-                    <StatusTick label="Customer SMS" ok={publishStatus.customerSms > 0} detail={`${publishStatus.customerSms} sent`} />
-                    <StatusTick label="Customer email" ok={publishStatus.customerEmail > 0} detail={`${publishStatus.customerEmail} sent`} />
-                    {publishStatus.customerSkipped ? <Text as="p" variant="bodySm" tone="subdued">{publishStatus.customerSkipped} customer orders skipped.</Text> : null}
-                  </BlockStack>
-                </Box>
-              ) : null}
-              {actionData?.ok && "errors" in actionData && actionData.errors?.length ? (
-                <Text as="p" variant="bodySm" tone="critical">{actionData.errors.slice(0, 3).join(" ")}</Text>
-              ) : null}
-
-              {!routexlEnabled ? (
-                <Text as="p" variant="bodySm" tone="critical">
-                  RouteXL is not enabled yet. Add the RouteXL username and password in Settings, API Credentials before optimising live routes.
-                </Text>
-              ) : null}
-
-              {canRename ? (
-                <Form method="post">
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Route name</Text>
+              <Form method="post">
+                <BlockStack gap="200">
                   <input type="hidden" name="intent" value="rename" />
-                  <InlineStack gap="200" blockAlign="end">
-                    <TextField label="Route name" name="name" value={routeName} onChange={setRouteName} autoComplete="off" />
-                    <Button submit>Save name</Button>
-                  </InlineStack>
-                </Form>
-              ) : null}
-
-              <Form method="post">
-                <input type="hidden" name="intent" value="updatePlanning" />
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingSm">Planning settings</Text>
-                  <InlineStack gap="200" blockAlign="end">
-                    <TextField label="Route date" name="routeDate" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
-                    <TextField label="Driver start time" name="plannedStartTime" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
-                    <TextField label="Minutes per drop" name="timePerDropMinutes" type="number" value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
-                    <TextField label="Customer slot minutes" name="customerSlotMinutes" type="number" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" />
-                  </InlineStack>
-                  <TextField label="Driver start location" name="startAddress" value={startAddress} onChange={setStartAddress} autoComplete="off" multiline={2} />
-                  <TextField label="Driver finish location" name="finishAddress" value={finishAddress} onChange={setFinishAddress} autoComplete="off" multiline={2} />
-                  <Button submit>Save planning settings</Button>
+                  <TextField label="Name" name="name" value={routeName} onChange={setRouteName} autoComplete="off" />
+                  <Button submit>Save name</Button>
                 </BlockStack>
-              </Form>
-
-              <Form method="post">
-                <input type="hidden" name="intent" value="assignDriver" />
-                <InlineStack gap="200" blockAlign="end">
-                  <Select label="Driver" name="driverId" options={driverOptions} value={driverId} onChange={setDriverId} />
-                  <Button submit>Save driver</Button>
-                </InlineStack>
-              </Form>
-
-              <InlineStack gap="200">
-                <Form method="post">
-                  <input type="hidden" name="intent" value="optimise" />
-                  <Button submit disabled={!routexlEnabled || route.stops.length === 0}>Optimise with RouteXL</Button>
-                </Form>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="sendDriverRouteLink" />
-                  <Button submit disabled={!canSendDriverRouteLink}>Send driver route link</Button>
-                </Form>
-              </InlineStack>
-
-              <Form method="post">
-                <input type="hidden" name="intent" value="calculateEtas" />
-                <InlineStack gap="200" blockAlign="end">
-                  <TextField label="Driver start time" name="startTime" type="time" value={startTime} onChange={setStartTime} autoComplete="off" />
-                  <TextField label="Minutes per stop" name="stopMinutes" type="number" value={stopMinutes} onChange={setStopMinutes} autoComplete="off" />
-                  <TextField label="Customer slot minutes" name="slotMinutes" type="number" value={slotMinutes} onChange={setSlotMinutes} autoComplete="off" />
-                  <Button submit disabled={route.stops.length === 0}>Calculate ETA slots</Button>
-                </InlineStack>
-              </Form>
-
-              <Form id="publish-route-form" method="post">
-                <input type="hidden" name="intent" value="publish" />
-              </Form>
-
-              <Form id="send-notifications-form" method="post">
-                <input type="hidden" name="intent" value="sendNotifications" />
               </Form>
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Manual customer messages" sectioned>
+          <LegacyCard sectioned>
             <BlockStack gap="300">
-              <Text as="p" variant="bodySm" tone="subdued">
-                These buttons send the editable templates from the Notifications page. Nothing sends unless you press a button.
-              </Text>
-              {route.status === "DRAFT" ? (
-                <Text as="p" variant="bodySm" tone="critical">Publish this route before sending manual customer messages.</Text>
-              ) : null}
-              <InlineStack gap="200" blockAlign="end">
+              <Text as="h2" variant="headingMd">Route planning</Text>
+              <Text as="p" variant="bodySm" tone="subdued">Set the delivery date, start time and slot length before sending customers their booked delivery slot.</Text>
+              <Form method="post">
+                <BlockStack gap="200">
+                  <input type="hidden" name="intent" value="updatePlanning" />
+                  <TextField label="Route date" name="routeDate" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
+                  <TextField label="Planned start time" name="plannedStartTime" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
+                  <TextField label="Minutes at each drop" name="timePerDropMinutes" type="number" min={1} value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
+                  <TextField label="Customer delivery slot minutes" name="customerSlotMinutes" type="number" min={15} value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" helpText="Example: 60 gives the customer a one hour ETA window." />
+                  <TextField label="Route start address" name="startAddress" value={startAddress} onChange={setStartAddress} autoComplete="off" />
+                  <TextField label="Route finish address" name="finishAddress" value={finishAddress} onChange={setFinishAddress} autoComplete="off" />
+                  <Button submit>Save route planning</Button>
+                </BlockStack>
+              </Form>
+            </BlockStack>
+          </LegacyCard>
+
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Driver</Text>
+              <Form method="post">
+                <BlockStack gap="200">
+                  <input type="hidden" name="intent" value="assignDriver" />
+                  <Select label="Assigned driver" name="driverId" options={driverOptions} value={selectedDriverId} onChange={setSelectedDriverId} />
+                  <Button submit>Save driver</Button>
+                </BlockStack>
+              </Form>
+            </BlockStack>
+          </LegacyCard>
+
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Route actions</Text>
+              <InlineStack gap="200" wrap>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="optimise" />
+                  <Button submit disabled={!routexlEnabled || route.status !== "DRAFT"}>Optimise route</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="calculateEtas" />
+                  <input type="hidden" name="startTime" value={plannedStartTime} />
+                  <input type="hidden" name="stopMinutes" value={timePerDropMinutes} />
+                  <input type="hidden" name="slotMinutes" value={customerSlotMinutes} />
+                  <Button submit>Recalculate ETA slots</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="publish" />
+                  <Button submit variant="primary" disabled={route.status !== "DRAFT"}>Publish route and notify</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sendDriverRouteLink" />
+                  <Button submit disabled={!route.driverId || route.status === "DRAFT"}>Send driver link</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sendNotifications" />
+                  <Button submit disabled={route.notificationsSent || route.status === "DRAFT"}>Send customer booked slot</Button>
+                </Form>
                 <Form method="post">
                   <input type="hidden" name="intent" value="sendOutForDelivery" />
-                  <Button submit disabled={!canSendManualMessages}>Send out for delivery</Button>
-                </Form>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="sendDelayUpdate" />
-                  <InlineStack gap="200" blockAlign="end">
-                    <TextField label="Delay minutes" name="delayMinutes" type="number" value={delayMinutes} onChange={setDelayMinutes} autoComplete="off" />
-                    <Button submit disabled={!canSendManualMessages}>Send delay update</Button>
-                  </InlineStack>
+                  <Button submit disabled={route.status === "DRAFT"}>Send out for delivery</Button>
                 </Form>
               </InlineStack>
-              <Form method="post">
-                <input type="hidden" name="intent" value="sendNextDropTracking" />
-                <InlineStack gap="200" blockAlign="end">
-                  <Select label="Next drop stop" name="stopId" options={pendingStopOptions} value={nextDropStopId} onChange={setNextDropStopId} />
-                  <Button submit disabled={!canSendManualMessages || !nextDropStopId}>Send you are next</Button>
-                </InlineStack>
-              </Form>
+              {!routexlEnabled ? <Text as="p" variant="bodySm" tone="subdued">RouteXL credentials are not set up yet, so optimisation is disabled.</Text> : null}
+            </BlockStack>
+          </LegacyCard>
+
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Manual updates</Text>
+              <InlineStack gap="300" wrap>
+                <Form method="post">
+                  <BlockStack gap="200">
+                    <input type="hidden" name="intent" value="sendDelayUpdate" />
+                    <TextField label="Delay minutes" name="delayMinutes" type="number" min={1} value={delayMinutes} onChange={setDelayMinutes} autoComplete="off" />
+                    <Button submit disabled={route.status === "DRAFT"}>Send delay update to pending drops</Button>
+                  </BlockStack>
+                </Form>
+                <Form method="post">
+                  <BlockStack gap="200">
+                    <input type="hidden" name="intent" value="sendNextDropTracking" />
+                    <Select label="Next drop" name="stopId" options={nextDropOptions.length ? nextDropOptions : [{ label: "No pending stops", value: "" }]} value={selectedNextStopId} onChange={setSelectedNextStopId} />
+                    <Button submit disabled={!selectedNextStopId || route.status === "DRAFT"}>Send you are next</Button>
+                  </BlockStack>
+                </Form>
+              </InlineStack>
             </BlockStack>
           </LegacyCard>
 
           <LegacyCard title="Stops">
             <DataTable
-              columnContentTypes={["numeric", "text", "text", "text", "text", "text", "text"]}
-              headings={["Stop", "Orders", "Postcode", "Address", "ETA slot", "Lock", "Move"]}
+              columnContentTypes={["text", "text", "text", "text", "text", "text", "text"]}
+              headings={["Stop", "Orders", "Customer", "Postcode", "ETA slot", "Status", "Order"]}
               rows={stopRows}
             />
           </LegacyCard>
 
-          <LegacyCard title="History">
-            <DataTable
-              columnContentTypes={["text", "text", "text"]}
-              headings={["Time", "Action", "Details"]}
-              rows={historyRows}
-            />
+          <LegacyCard sectioned>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">History</Text>
+              {route.history.length ? (
+                route.history.map((event) => (
+                  <Box key={event.id} padding="200" background="bg-surface-secondary" borderRadius="200">
+                    <BlockStack gap="050">
+                      <Text as="p" variant="bodyMd" fontWeight="bold">{event.action}</Text>
+                      <Text as="p" variant="bodySm" tone="subdued">{formatDate(event.createdAt)} · {event.details}</Text>
+                    </BlockStack>
+                  </Box>
+                ))
+              ) : (
+                <Text as="p" variant="bodyMd" tone="subdued">No history yet.</Text>
+              )}
+            </BlockStack>
           </LegacyCard>
         </Layout.Section>
       </Layout>
