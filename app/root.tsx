@@ -9,7 +9,7 @@ import {
 const planningPanelStyles = `
   html,
   body {
-    overscroll-behavior-y: none;
+    overscroll-behavior: none;
   }
 
   body.bpd-map-scroll-locked {
@@ -32,13 +32,21 @@ const planningPanelStyles = `
     touch-action: none !important;
   }
 
-  .bpd-scroll-container-locked::-webkit-scrollbar {
-    display: none !important;
-  }
-
   .bpd-tomtom-map,
   .bpd-tomtom-map * {
     overscroll-behavior: contain;
+  }
+
+  .bpd-tomtom-map {
+    contain: layout paint;
+    isolation: isolate;
+    transform: translateZ(0);
+  }
+
+  .bpd-tomtom-map .mapboxgl-map,
+  .bpd-tomtom-map .mapboxgl-canvas-container,
+  .bpd-tomtom-map .mapboxgl-canvas {
+    overscroll-behavior: contain !important;
   }
 
   .bpd-tomtom-popup .mapboxgl-popup-content {
@@ -49,25 +57,11 @@ const planningPanelStyles = `
     opacity: 1;
   }
 
-  .bpd-fulfil-date {
-    font-weight: 800;
-  }
-
-  .bpd-fulfil-date-green {
-    color: #16a34a;
-  }
-
-  .bpd-fulfil-date-orange {
-    color: #f97316;
-  }
-
-  .bpd-fulfil-date-red {
-    color: #b42318;
-  }
-
-  .bpd-fulfil-date-grey {
-    color: #667085;
-  }
+  .bpd-fulfil-date { font-weight: 800; }
+  .bpd-fulfil-date-green { color: #16a34a; }
+  .bpd-fulfil-date-orange { color: #f97316; }
+  .bpd-fulfil-date-red { color: #b42318; }
+  .bpd-fulfil-date-grey { color: #667085; }
 
   details:has(> summary[style*="list-style"] h3) {
     border: 1px solid #d0d5dd;
@@ -106,7 +100,7 @@ const planningPanelScript = `
     let lastMapMoveAt = 0;
     const lockedScrollContainers = [];
 
-    const isMapTouch = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
+    const isMapEvent = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
 
     const cancelScheduledUnlock = () => {
       if (unlockTimer) {
@@ -118,22 +112,10 @@ const planningPanelScript = `
     const lockScrollableElement = (element) => {
       if (!element || element.dataset?.bpdScrollLocked === 'true') return;
       const style = window.getComputedStyle(element);
-      const canScrollY = element.scrollHeight > element.clientHeight + 2;
-      const canScrollX = element.scrollWidth > element.clientWidth + 2;
+      const canScroll = element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2;
       const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
-      if (!(canScrollY || canScrollX) || !scrollable || element.closest?.('.bpd-tomtom-map')) return;
-
-      lockedScrollContainers.push({
-        element,
-        overflow: element.style.overflow,
-        overflowY: element.style.overflowY,
-        overflowX: element.style.overflowX,
-        overscrollBehavior: element.style.overscrollBehavior,
-        touchAction: element.style.touchAction,
-        scrollTop: element.scrollTop,
-        scrollLeft: element.scrollLeft,
-      });
-
+      if (!canScroll || !scrollable || element.closest?.('.bpd-tomtom-map')) return;
+      lockedScrollContainers.push({ element, overflow: element.style.overflow, overflowY: element.style.overflowY, overflowX: element.style.overflowX, overscrollBehavior: element.style.overscrollBehavior, touchAction: element.style.touchAction, scrollTop: element.scrollTop, scrollLeft: element.scrollLeft });
       element.dataset.bpdScrollLocked = 'true';
       element.classList.add('bpd-scroll-container-locked');
       element.style.overflow = 'hidden';
@@ -176,8 +158,6 @@ const planningPanelScript = `
         document.body.style.top = '-' + lockedScrollY + 'px';
         document.body.classList.add('bpd-map-scroll-locked');
         document.documentElement.classList.add('bpd-map-scroll-locked-html');
-        document.documentElement.style.overscrollBehaviorY = 'none';
-        document.body.style.overscrollBehaviorY = 'none';
       }
       lockScrollableContainers(target);
     };
@@ -190,8 +170,6 @@ const planningPanelScript = `
       const restoreY = Number(document.body.dataset.bpdMapScrollY || lockedScrollY || 0);
       document.body.classList.remove('bpd-map-scroll-locked');
       document.body.style.top = '';
-      document.body.style.overscrollBehaviorY = '';
-      document.documentElement.style.overscrollBehaviorY = '';
       delete document.body.dataset.bpdMapScrollY;
       window.scrollTo(0, Number.isFinite(restoreY) ? restoreY : 0);
     };
@@ -203,15 +181,34 @@ const planningPanelScript = `
     };
 
     const blockMapPullRefresh = (event) => {
-      if (!touchingMap && !isMapTouch(event.target)) return;
+      if (!touchingMap && !isMapEvent(event.target)) return;
       touchingMap = true;
       lastMapMoveAt = Date.now();
       lockPageForMap(event.target);
       if (event.cancelable) event.preventDefault();
     };
 
+    const containDesktopMapGesture = (event) => {
+      if (!isMapEvent(event.target)) return;
+      const looksLikeTrackpadGesture = event.ctrlKey || event.metaKey || Math.abs(event.deltaX || 0) > 0 || Math.abs(event.deltaY || 0) > 0;
+      if (!looksLikeTrackpadGesture) return;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const containSafariGesture = (event) => {
+      if (!isMapEvent(event.target)) return;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener('wheel', containDesktopMapGesture, { passive: false });
+    document.addEventListener('gesturestart', containSafariGesture, { passive: false });
+    document.addEventListener('gesturechange', containSafariGesture, { passive: false });
+    document.addEventListener('gestureend', containSafariGesture, { passive: false });
+
     document.addEventListener('touchstart', (event) => {
-      touchingMap = isMapTouch(event.target);
+      touchingMap = isMapEvent(event.target);
       if (touchingMap) {
         lastMapMoveAt = Date.now();
         lockPageForMap(event.target);
@@ -219,23 +216,11 @@ const planningPanelScript = `
     }, { passive: true, capture: true });
 
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
-    document.addEventListener('touchend', () => {
-      if (touchingMap) {
-        touchingMap = false;
-        scheduleMapUnlock();
-        return;
-      }
-      touchingMap = false;
-    }, { passive: true, capture: true });
+    document.addEventListener('touchend', () => { if (touchingMap) { touchingMap = false; scheduleMapUnlock(); return; } touchingMap = false; }, { passive: true, capture: true });
     document.addEventListener('touchcancel', () => { touchingMap = false; scheduleMapUnlock(); }, { passive: true, capture: true });
     window.addEventListener('blur', () => { touchingMap = false; unlockPageForMapNow(); });
 
-    const bpdEscapeHtml = (value) => String(value)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;');
-
+    const bpdEscapeHtml = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -247,10 +232,7 @@ const planningPanelScript = `
       return new Date(Number(match[3]), month, Number(match[1]));
     };
 
-    const isWorkingDay = (date) => {
-      const day = date.getDay();
-      return day !== 0 && day !== 6;
-    };
+    const isWorkingDay = (date) => ![0, 6].includes(date.getDay());
 
     const workingDaysLeft = (dueDate) => {
       const today = dateOnly(new Date());
@@ -303,128 +285,11 @@ const planningPanelScript = `
       markTooltipReady();
     };
 
-    document.addEventListener('mouseover', () => window.setTimeout(updateFulfilmentTooltipColours, 0), true);
-    document.addEventListener('touchstart', () => window.setTimeout(updateFulfilmentTooltipColours, 0), true);
-    window.setInterval(updateFulfilmentTooltipColours, 80);
-
-    const soften = (element, styles) => {
-      if (!(element instanceof HTMLElement)) return;
-      Object.entries(styles).forEach(([key, value]) => {
-        element.style[key] = value;
-      });
-    };
-
-    const findTextElement = (selector, text) => Array.from(document.querySelectorAll(selector)).find((element) => element.textContent?.trim().includes(text));
-
-    const tidyCustomerTrackingPreview = () => {
-      if (!document.body?.innerText?.includes('Customer tracking preview')) return;
-
-      const heading = findTextElement('h1', 'Your panels');
-      if (!(heading instanceof HTMLElement)) return;
-
-      let preview = heading.parentElement;
-      while (preview && !preview.textContent?.includes('Delivery details')) {
-        preview = preview.parentElement;
-      }
-      if (!(preview instanceof HTMLElement)) return;
-
-      preview.dataset.bpdApplePreview = 'true';
-      const isMobilePreview = (preview.style.width || '').includes('390') || preview.getBoundingClientRect().width < 430;
-
-      soften(preview, {
-        background: '#f7f9fb',
-        border: '1px solid #e6ecf2',
-        borderRadius: isMobilePreview ? '24px' : '20px',
-        padding: isMobilePreview ? '10px' : '18px',
-        width: isMobilePreview ? 'min(100%, 360px)' : '100%',
-        maxWidth: isMobilePreview ? '360px' : '980px',
-        boxSizing: 'border-box',
-        fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Arial, sans-serif',
-      });
-
-      const hero = heading.parentElement;
-      soften(hero, {
-        background: '#ffffff',
-        color: '#323841',
-        borderRadius: isMobilePreview ? '20px' : '24px',
-        padding: isMobilePreview ? '16px' : '22px',
-        boxShadow: '0 12px 34px rgba(16,24,40,.055)',
-        border: '1px solid #e8edf3',
-      });
-      soften(heading, {
-        color: '#323841',
-        fontSize: isMobilePreview ? '21px' : '29px',
-        fontWeight: '660',
-        lineHeight: '1.08',
-        letterSpacing: '-0.35px',
-      });
-
-      const heroParagraph = hero?.querySelector('p');
-      soften(heroParagraph, { color: '#667085', fontWeight: '400', fontSize: isMobilePreview ? '13px' : '15px', lineHeight: '1.45' });
-
-      const etaStrong = Array.from(preview.querySelectorAll('strong')).find((item) => item.textContent?.includes('Today between'));
-      const etaBox = etaStrong?.closest('div');
-      soften(etaBox, {
-        background: 'linear-gradient(180deg, rgba(80,154,230,.10), rgba(80,154,230,.045))',
-        border: '1px solid rgba(80,154,230,.18)',
-        borderRadius: '18px',
-        padding: isMobilePreview ? '11px' : '14px',
-      });
-      soften(etaStrong, { color: '#323841', fontSize: isMobilePreview ? '18px' : '24px', fontWeight: '660' });
-
-      preview.querySelectorAll('span').forEach((span) => {
-        const text = span.textContent?.trim();
-        if (text === 'Call our team' || text === 'Email our team') {
-          soften(span, {
-            borderRadius: '15px',
-            padding: isMobilePreview ? '10px 11px' : '12px 13px',
-            fontWeight: '620',
-            fontSize: isMobilePreview ? '12px' : '14px',
-            boxShadow: '0 8px 22px rgba(16,24,40,.055)',
-          });
-        }
-      });
-
-      const driverHeading = findTextElement('h2', 'Your driver today');
-      const driverCard = driverHeading?.closest('div[style*="box-shadow"]');
-      soften(driverCard, {
-        border: '1px solid #e8edf3',
-        borderRadius: isMobilePreview ? '20px' : '24px',
-        padding: isMobilePreview ? '13px' : '16px',
-        boxShadow: '0 10px 32px rgba(16,24,40,.055)',
-      });
-      soften(driverHeading, { fontSize: isMobilePreview ? '16px' : '19px', fontWeight: '640', color: '#323841' });
-
-      preview.querySelectorAll('div').forEach((box) => {
-        const text = box.textContent || '';
-        if ((text.includes('Delivery details') || text.includes('Progress') || text.includes('Your order')) && box.style.boxShadow) {
-          soften(box, {
-            border: '1px solid #e8edf3',
-            borderRadius: isMobilePreview ? '20px' : '24px',
-            boxShadow: '0 10px 32px rgba(16,24,40,.055)',
-            padding: isMobilePreview ? '12px' : '16px',
-          });
-        }
-      });
-    };
-
     const tidyCustomerTracking = () => {
       if (!window.location.pathname.startsWith('/apps/track/')) return;
-      const trackingTextNodes = [];
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node) {
-        trackingTextNodes.push(node);
-        node = walker.nextNode();
-      }
       const pageText = document.body?.innerText || '';
       const isLive = pageText.includes('Live tracking active') && pageText.includes('You are next');
       const isEnded = pageText.includes('Tracking ended') || pageText.includes('Delivery completed') || pageText.includes('Delivery attempted');
-      trackingTextNodes.forEach((textNode) => {
-        if (!isLive && textNode.nodeValue?.includes('Tracking active')) textNode.nodeValue = textNode.nodeValue.replaceAll('Tracking active', 'Tracking not live yet');
-        if (!isLive && textNode.nodeValue?.includes('Route active')) textNode.nodeValue = textNode.nodeValue.replaceAll('Route active', 'Route active, tracking not live yet');
-        if (!isLive && textNode.nodeValue?.includes('Activates when next')) textNode.nodeValue = textNode.nodeValue.replaceAll('Activates when next', 'Tracking locked');
-      });
       if (isLive || isEnded) return;
       document.querySelectorAll('span').forEach((span) => {
         if (span.textContent?.trim() !== 'Map view') return;
@@ -441,23 +306,14 @@ const planningPanelScript = `
         const line = summary?.querySelector('p');
         if (line?.textContent?.trim() === 'United Kingdom') line.textContent = '';
       });
-
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      const textNodes = [];
       let node = walker.nextNode();
       while (node) {
-        textNodes.push(node);
+        if (node.nodeValue?.includes('Return to base after last drop')) node.nodeValue = node.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
         node = walker.nextNode();
       }
-      textNodes.forEach((textNode) => {
-        if (textNode.nodeValue?.includes('Return to base after last drop')) {
-          textNode.nodeValue = textNode.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
-        }
-      });
-
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
-      tidyCustomerTrackingPreview();
     };
 
     const startObserver = () => {
@@ -465,18 +321,11 @@ const planningPanelScript = `
       tidyPlanningLabels();
       new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
       let runs = 0;
-      const interval = window.setInterval(() => {
-        tidyPlanningLabels();
-        runs += 1;
-        if (runs > 80) window.clearInterval(interval);
-      }, 250);
+      const interval = window.setInterval(() => { tidyPlanningLabels(); runs += 1; if (runs > 80) window.clearInterval(interval); }, 250);
     };
 
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', startObserver, { once: true });
-    } else {
-      startObserver();
-    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startObserver, { once: true });
+    else startObserver();
     window.addEventListener('pageshow', tidyPlanningLabels);
   })();
 `;
