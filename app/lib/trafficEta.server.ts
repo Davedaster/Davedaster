@@ -140,6 +140,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
     const travelMinutes = tomTom?.travelMinutes ?? fallbackTravelMinutes(route.timePerDropMinutes);
     const trafficDelayMinutes = tomTom?.trafficDelayMinutes ?? 0;
     const handlingMinutes = Math.max(0, route.timePerDropMinutes);
+    const downstreamStepMinutes = travelMinutes + handlingMinutes;
     const nextEta = addMinutes(completedAt, travelMinutes);
 
     await prisma.$transaction(async (tx) => {
@@ -154,7 +155,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
         await tx.stop.update({
           where: { id: followingStop.id },
           data: {
-            estimatedArrival: addMinutes(nextEta, (index + 1) * handlingMinutes),
+            estimatedArrival: addMinutes(nextEta, (index + 1) * downstreamStepMinutes),
           },
         });
       }
@@ -165,7 +166,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
           history: {
             create: {
               action: "Traffic ETA recalculated",
-              details: `After stop ${completedStop.orderIndex}, next stop ${nextStop.orderIndex} ETA set using ${tomTom ? "TomTom live traffic" : "route timing fallback"}. Travel ${travelMinutes} min, traffic delay ${trafficDelayMinutes} min.`,
+              details: `After stop ${completedStop.orderIndex}, next stop ${nextStop.orderIndex} ETA set using ${tomTom ? "TomTom live traffic" : "route timing fallback"}. ${followingStops.length} downstream stop${followingStops.length === 1 ? "" : "s"} shifted using the latest travel step. Travel ${travelMinutes} min, traffic delay ${trafficDelayMinutes} min.`,
             },
           },
         },
