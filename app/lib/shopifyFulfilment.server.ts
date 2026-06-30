@@ -1,3 +1,5 @@
+import prisma from "../db.server";
+
 type ShopifyAdmin = {
   graphql: (
     query: string,
@@ -191,4 +193,61 @@ export async function markShopifyOrderDelivered(admin: ShopifyAdmin, shopifyOrde
   await tagOrderDelivered(admin, shopifyOrderId);
 
   return fulfilmentResult;
+}
+
+export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
+  const route = await prisma.route.findUnique({
+    where: {
+      id: routeId,
+    },
+    include: {
+      stops: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!route) {
+    throw new Error("Route not found.");
+  }
+
+  let fulfilled = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const stop of route.stops) {
+    for (const order of stop.deliveryGroup?.orders || []) {
+      try {
+        const result = await markShopifyOrderDelivered(admin, order.shopifyOrderId);
+
+        if (result.fulfilled) {
+          fulfilled += 1;
+        } else {
+          skipped += 1;
+        }
+      } catch (error) {
+        errors.push(`${order.shopifyOrderNumber}: ${error instanceof Error ? error.message : "Unknown fulfilment error"}`);
+      }
+    }
+  }
+
+  await prisma.routeHistory.create({
+    data: {
+      routeId: route.id,
+      action: "Route fulfilment checked",
+      details: `${fulfilled} Shopify orders fulfilled, ${skipped} skipped${errors.length ? `. Errors: ${errors.join(" | ")}` : ""}`,
+    },
+  });
+
+  return {
+    fulfilled,
+    skipped,
+    errors,
+  };
 }
