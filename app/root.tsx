@@ -9,27 +9,7 @@ import {
 const planningPanelStyles = `
   html,
   body {
-    overscroll-behavior: none;
-  }
-
-  body.bpd-map-scroll-locked {
-    position: fixed;
-    left: 0;
-    right: 0;
-    width: 100%;
-    overflow: hidden;
-    touch-action: none;
-  }
-
-  html.bpd-map-scroll-locked-html {
-    overflow: hidden !important;
-    overscroll-behavior: none !important;
-  }
-
-  .bpd-scroll-container-locked {
-    overflow: hidden !important;
-    overscroll-behavior: contain !important;
-    touch-action: none !important;
+    overscroll-behavior-y: none;
   }
 
   .bpd-tomtom-map,
@@ -38,15 +18,7 @@ const planningPanelStyles = `
   }
 
   .bpd-tomtom-map {
-    contain: layout paint;
     isolation: isolate;
-    transform: translateZ(0);
-  }
-
-  .bpd-tomtom-map .mapboxgl-map,
-  .bpd-tomtom-map .mapboxgl-canvas-container,
-  .bpd-tomtom-map .mapboxgl-canvas {
-    overscroll-behavior: contain !important;
   }
 
   .bpd-tomtom-popup .mapboxgl-popup-content {
@@ -57,11 +29,25 @@ const planningPanelStyles = `
     opacity: 1;
   }
 
-  .bpd-fulfil-date { font-weight: 800; }
-  .bpd-fulfil-date-green { color: #16a34a; }
-  .bpd-fulfil-date-orange { color: #f97316; }
-  .bpd-fulfil-date-red { color: #b42318; }
-  .bpd-fulfil-date-grey { color: #667085; }
+  .bpd-fulfil-date {
+    font-weight: 800;
+  }
+
+  .bpd-fulfil-date-green {
+    color: #16a34a;
+  }
+
+  .bpd-fulfil-date-orange {
+    color: #f97316;
+  }
+
+  .bpd-fulfil-date-red {
+    color: #b42318;
+  }
+
+  .bpd-fulfil-date-grey {
+    color: #667085;
+  }
 
   details:has(> summary[style*="list-style"] h3) {
     border: 1px solid #d0d5dd;
@@ -94,137 +80,12 @@ const planningPanelStyles = `
 
 const planningPanelScript = `
   (() => {
-    let touchingMap = false;
-    let lockedScrollY = 0;
-    let unlockTimer = null;
-    let lastMapMoveAt = 0;
-    const lockedScrollContainers = [];
+    const bpdEscapeHtml = (value) => String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
 
-    const isMapEvent = (target) => Boolean(target?.closest?.('.bpd-tomtom-map'));
-    const shouldUseMobileMapLock = () => window.matchMedia?.('(max-width: 800px), (pointer: coarse)')?.matches === true;
-
-    const cancelScheduledUnlock = () => {
-      if (unlockTimer) {
-        window.clearTimeout(unlockTimer);
-        unlockTimer = null;
-      }
-    };
-
-    const lockScrollableElement = (element) => {
-      if (!element || element.dataset?.bpdScrollLocked === 'true') return;
-      const style = window.getComputedStyle(element);
-      const canScroll = element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2;
-      const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
-      if (!canScroll || !scrollable || element.closest?.('.bpd-tomtom-map')) return;
-      lockedScrollContainers.push({ element, overflow: element.style.overflow, overflowY: element.style.overflowY, overflowX: element.style.overflowX, overscrollBehavior: element.style.overscrollBehavior, touchAction: element.style.touchAction, scrollTop: element.scrollTop, scrollLeft: element.scrollLeft });
-      element.dataset.bpdScrollLocked = 'true';
-      element.classList.add('bpd-scroll-container-locked');
-      element.style.overflow = 'hidden';
-      element.style.overflowY = 'hidden';
-      element.style.overflowX = 'hidden';
-      element.style.overscrollBehavior = 'contain';
-      element.style.touchAction = 'none';
-    };
-
-    const lockScrollableContainers = (target) => {
-      let element = target?.parentElement;
-      while (element && element !== document.body && element !== document.documentElement) {
-        lockScrollableElement(element);
-        element = element.parentElement;
-      }
-      document.querySelectorAll('[style*="overflow"], .Polaris-Frame, .Polaris-Page, main, section').forEach(lockScrollableElement);
-    };
-
-    const unlockScrollableContainers = () => {
-      while (lockedScrollContainers.length) {
-        const lock = lockedScrollContainers.pop();
-        if (!lock?.element) continue;
-        lock.element.classList.remove('bpd-scroll-container-locked');
-        lock.element.style.overflow = lock.overflow;
-        lock.element.style.overflowY = lock.overflowY;
-        lock.element.style.overflowX = lock.overflowX;
-        lock.element.style.overscrollBehavior = lock.overscrollBehavior;
-        lock.element.style.touchAction = lock.touchAction;
-        lock.element.scrollTop = lock.scrollTop;
-        lock.element.scrollLeft = lock.scrollLeft;
-        delete lock.element.dataset.bpdScrollLocked;
-      }
-    };
-
-    const lockPageForMap = (target) => {
-      if (!shouldUseMobileMapLock()) return;
-      cancelScheduledUnlock();
-      if (!document.body.classList.contains('bpd-map-scroll-locked')) {
-        lockedScrollY = window.scrollY || window.pageYOffset || 0;
-        document.body.dataset.bpdMapScrollY = String(lockedScrollY);
-        document.body.style.top = '-' + lockedScrollY + 'px';
-        document.body.classList.add('bpd-map-scroll-locked');
-        document.documentElement.classList.add('bpd-map-scroll-locked-html');
-      }
-      lockScrollableContainers(target);
-    };
-
-    const unlockPageForMapNow = () => {
-      cancelScheduledUnlock();
-      unlockScrollableContainers();
-      document.documentElement.classList.remove('bpd-map-scroll-locked-html');
-      if (!document.body.classList.contains('bpd-map-scroll-locked')) return;
-      const restoreY = Number(document.body.dataset.bpdMapScrollY || lockedScrollY || 0);
-      document.body.classList.remove('bpd-map-scroll-locked');
-      document.body.style.top = '';
-      delete document.body.dataset.bpdMapScrollY;
-      window.scrollTo(0, Number.isFinite(restoreY) ? restoreY : 0);
-    };
-
-    const scheduleMapUnlock = () => {
-      if (!shouldUseMobileMapLock()) return;
-      cancelScheduledUnlock();
-      const movedRecently = Date.now() - lastMapMoveAt < 350;
-      unlockTimer = window.setTimeout(unlockPageForMapNow, movedRecently ? 1400 : 650);
-    };
-
-    const blockMapPullRefresh = (event) => {
-      if (!touchingMap && !isMapEvent(event.target)) return;
-      touchingMap = true;
-      lastMapMoveAt = Date.now();
-      if (shouldUseMobileMapLock()) lockPageForMap(event.target);
-      if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
-    };
-
-    const containDesktopMapGesture = (event) => {
-      if (!isMapEvent(event.target)) return;
-      if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-    };
-
-    const containSafariGesture = (event) => {
-      if (!isMapEvent(event.target)) return;
-      if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-    };
-
-    document.addEventListener('wheel', containDesktopMapGesture, { passive: false, capture: true });
-    document.addEventListener('gesturestart', containSafariGesture, { passive: false, capture: true });
-    document.addEventListener('gesturechange', containSafariGesture, { passive: false, capture: true });
-    document.addEventListener('gestureend', containSafariGesture, { passive: false, capture: true });
-
-    document.addEventListener('touchstart', (event) => {
-      touchingMap = isMapEvent(event.target);
-      if (touchingMap) {
-        lastMapMoveAt = Date.now();
-        if (shouldUseMobileMapLock()) lockPageForMap(event.target);
-      }
-    }, { passive: true, capture: true });
-
-    document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
-    document.addEventListener('touchend', () => { if (touchingMap) { touchingMap = false; scheduleMapUnlock(); return; } touchingMap = false; }, { passive: true, capture: true });
-    document.addEventListener('touchcancel', () => { touchingMap = false; scheduleMapUnlock(); }, { passive: true, capture: true });
-    window.addEventListener('blur', () => { touchingMap = false; unlockPageForMapNow(); });
-
-    const bpdEscapeHtml = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -236,7 +97,10 @@ const planningPanelScript = `
       return new Date(Number(match[3]), month, Number(match[1]));
     };
 
-    const isWorkingDay = (date) => ![0, 6].includes(date.getDay());
+    const isWorkingDay = (date) => {
+      const day = date.getDay();
+      return day !== 0 && day !== 6;
+    };
 
     const workingDaysLeft = (dueDate) => {
       const today = dateOnly(new Date());
@@ -310,12 +174,16 @@ const planningPanelScript = `
         const line = summary?.querySelector('p');
         if (line?.textContent?.trim() === 'United Kingdom') line.textContent = '';
       });
+
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
       while (node) {
-        if (node.nodeValue?.includes('Return to base after last drop')) node.nodeValue = node.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
+        if (node.nodeValue?.includes('Return to base after last drop')) {
+          node.nodeValue = node.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
+        }
         node = walker.nextNode();
       }
+
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
     };
@@ -325,11 +193,18 @@ const planningPanelScript = `
       tidyPlanningLabels();
       new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
       let runs = 0;
-      const interval = window.setInterval(() => { tidyPlanningLabels(); runs += 1; if (runs > 80) window.clearInterval(interval); }, 250);
+      const interval = window.setInterval(() => {
+        tidyPlanningLabels();
+        runs += 1;
+        if (runs > 80) window.clearInterval(interval);
+      }, 250);
     };
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startObserver, { once: true });
-    else startObserver();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', startObserver, { once: true });
+    } else {
+      startObserver();
+    }
     window.addEventListener('pageshow', tidyPlanningLabels);
   })();
 `;
