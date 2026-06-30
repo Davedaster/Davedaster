@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 type EstimatedVanProgressVisuals = {
   progressLineColour?: string;
   vanLabel?: string;
@@ -66,7 +68,7 @@ function HouseIcon({ colour }: { colour: string }) {
   );
 }
 
-function MarkerIcon({ imageUrl, label, fallback }: { imageUrl?: string; label: string; fallback: React.ReactNode }) {
+function MarkerIcon({ imageUrl, label, fallback }: { imageUrl?: string; label: string; fallback: ReactNode }) {
   if (imageUrl?.trim()) {
     return <img src={imageUrl.trim()} alt={label} style={{ width: 38, height: 38, objectFit: "contain", display: "block" }} />;
   }
