@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { buildEtaSlots } from "./etaSlots.server";
 import { lookupAddress } from "./getAddress.server";
+import { assertOrdersAvailableForRoute } from "./routeAllocations.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
 import { buildRouteXLLocation, optimiseLocations } from "./routexl.server";
 
@@ -125,6 +126,13 @@ function isDefaultShopAddress(address: string) {
     (normalisedAddress.includes("olympus") && normalisedAddress.includes("tq12 2sn"));
 }
 
+function shopifyOrderIds(orders: DeliveryOrder[]) {
+  return orders
+    .filter((order) => order.orderSource !== "manual")
+    .map((order) => order.id)
+    .filter(Boolean);
+}
+
 async function resolveRouteEndpoint(address: string | undefined, latitude?: number | null, longitude?: number | null) {
   const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
   const lockedLatitude = normaliseCoordinate(latitude);
@@ -176,6 +184,8 @@ async function buildPlanningData(input: RoutePlanningSettingsInput) {
 }
 
 export async function createRouteDraft(input: CreateRouteDraftInput) {
+  await assertOrdersAvailableForRoute(shopifyOrderIds(input.orders));
+
   const planning = await buildPlanningData(input);
   const name = buildRouteName(input.orders, input.routeName, planning.date);
 
