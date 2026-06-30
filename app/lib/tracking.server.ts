@@ -7,6 +7,71 @@ function splitLineItems(summary?: string | null) {
     .filter(Boolean);
 }
 
+function addMinutes(value: Date, minutes: number) {
+  return new Date(value.getTime() + Math.max(0, minutes) * 60 * 1000);
+}
+
+async function applyEtaDelayDrift(routeId: string) {
+  const route = await prisma.route.findUnique({
+    where: { id: routeId },
+    include: {
+      stops: {
+        orderBy: {
+          orderIndex: "asc",
+        },
+      },
+    },
+  });
+
+  if (!route || route.status !== "OUT_FOR_DELIVERY") {
+    return;
+  }
+
+  const pendingStops = route.stops.filter((stop) => stop.status === "PENDING");
+  const nextPendingStop = pendingStops[0];
+
+  if (!nextPendingStop?.estimatedArrival) {
+    return;
+  }
+
+  const now = new Date();
+  const driftMinutes = Math.floor((now.getTime() - nextPendingStop.estimatedArrival.getTime()) / 60000);
+  const graceMinutes = 5;
+
+  if (driftMinutes < graceMinutes) {
+    return;
+  }
+
+  const shiftMinutes = Math.min(90, driftMinutes);
+
+  await prisma.$transaction(async (tx) => {
+    for (const stop of pendingStops) {
+      if (!stop.estimatedArrival) {
+        continue;
+      }
+
+      await tx.stop.update({
+        where: { id: stop.id },
+        data: {
+          estimatedArrival: addMinutes(stop.estimatedArrival, shiftMinutes),
+        },
+      });
+    }
+
+    await tx.route.update({
+      where: { id: route.id },
+      data: {
+        history: {
+          create: {
+            action: "ETA delay drift applied",
+            details: `Next pending stop ${nextPendingStop.orderIndex} was ${driftMinutes} min behind its ETA. Shifted ${pendingStops.length} pending ETA${pendingStops.length === 1 ? "" : "s"} forward by ${shiftMinutes} min.`,
+          },
+        },
+      },
+    });
+  });
+}
+
 function parseProofOfDeliveryMetadata(deliveryNote?: string | null) {
   const lines = (deliveryNote || "")
     .split("\n")
@@ -37,6 +102,8 @@ function isReceiverMark(label?: string | null) {
 }
 
 export async function getCustomerTracking(routeId: string, shopifyOrderId: string) {
+  await applyEtaDelayDrift(routeId);
+
   const route = await prisma.route.findUnique({
     where: { id: routeId },
     include: {
