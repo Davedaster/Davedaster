@@ -1,6 +1,7 @@
 import type { AddressOverride } from "@prisma/client";
 import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
+import { getActiveRouteAllocations, type RouteAllocation } from "./routeAllocations.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -98,6 +99,7 @@ export type DeliveryOrder = {
   manualAddress: string | null;
   manualAddressNotes: string | null;
   orderSource?: "shopify" | "manual";
+  routeAllocation?: RouteAllocation | null;
 };
 
 export type ManualDeliveryOrderInput = {
@@ -210,6 +212,22 @@ function manualOrderNumber(reference: string) {
   return reference.replace("manual:", "MANUAL-").toUpperCase();
 }
 
+function allocationLine(allocation: RouteAllocation) {
+  return `Already allocated to ${allocation.routeName}${allocation.driverName ? ` with ${allocation.driverName}` : ""}`;
+}
+
+function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation | undefined): DeliveryOrder {
+  if (!allocation) {
+    return order;
+  }
+
+  return {
+    ...order,
+    routeAllocation: allocation,
+    lineItemLines: [allocationLine(allocation), ...order.lineItemLines],
+  };
+}
+
 function applyOverride(order: DeliveryOrder, override: AddressOverride | undefined): DeliveryOrder {
   if (!override) {
     return order;
@@ -287,6 +305,7 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     manualAddress: null,
     manualAddressNotes: null,
     orderSource: "shopify",
+    routeAllocation: null,
   };
 
   return applyOverride(deliveryOrder, override);
@@ -329,6 +348,7 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
     manualAddress: addressSummary,
     manualAddressNotes: "Manual order added from the planning map",
     orderSource: "manual",
+    routeAllocation: null,
   };
 }
 
@@ -424,6 +444,8 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
 
   const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
   const overrides = await getAddressOverridesByOrderId();
+  const deliveryOrders = await Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
+  const allocations = await getActiveRouteAllocations(deliveryOrders.map((order) => order.id));
 
-  return Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
+  return deliveryOrders.map((order) => applyRouteAllocation(order, allocations.get(order.id)));
 }
