@@ -15,18 +15,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shopifyOrderId = url.searchParams.get("order");
 
-  if (!routeId || !shopifyOrderId) {
-    throw new Response("Tracking link is missing details", { status: 404 });
-  }
+  if (!routeId || !shopifyOrderId) throw new Response("Tracking link is missing details", { status: 404 });
 
-  const [tracking, settings] = await Promise.all([
-    getCustomerTracking(routeId, shopifyOrderId),
-    getCustomerTrackingSettings(),
-  ]);
-
-  if (!tracking) {
-    throw new Response("Tracking details not found", { status: 404 });
-  }
+  const [tracking, settings] = await Promise.all([getCustomerTracking(routeId, shopifyOrderId), getCustomerTrackingSettings()]);
+  if (!tracking) throw new Response("Tracking details not found", { status: 404 });
 
   return json({ tracking, settings });
 };
@@ -68,8 +60,8 @@ function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
 function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
   if (isNextDrop || dropsBefore === 0) return "You are next";
-  if (dropsBefore === 1) return "1 panel delivery";
-  return `${dropsBefore} panel deliveries`;
+  if (dropsBefore === 1) return "1 delivery";
+  return `${dropsBefore} deliveries`;
 }
 
 function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
@@ -87,8 +79,7 @@ function mailHref(email: string) {
 }
 
 function customerInitials(name?: string | null) {
-  const cleanName = (name || "Driver").trim();
-  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const parts = (name || "Driver").trim().split(/\s+/).filter(Boolean);
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "D";
 }
 
@@ -102,7 +93,7 @@ function trackingStatusMessage({ routeStatus, stopStatus, isNextDrop, stopsBefor
   return settings.notNextMessage;
 }
 
-function pageHeading({ routeStatus, stopStatus, isNextDrop, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
+function pageHeading({ routeStatus, stopStatus, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
   if (stopStatus === "DELIVERED") return settings.heroDeliveredTitle;
   if (stopStatus === "FAILED") return settings.heroAttemptedTitle;
   if (routeStatus === "OUT_FOR_DELIVERY") return settings.heroOutForDeliveryTitle;
@@ -111,12 +102,12 @@ function pageHeading({ routeStatus, stopStatus, isNextDrop, settings }: { routeS
 
 function progressMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number, settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>>) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
-  if (stopStatus === "DELIVERED") return "Delivery completed. The live delivery progress has ended.";
-  if (stopStatus === "FAILED") return "Delivery attempted. The live delivery progress has ended.";
-  if (routeStatus !== "OUT_FOR_DELIVERY") return "Delivery progress will become available once the driver starts the route.";
+  if (stopStatus === "DELIVERED") return "Delivery completed. The live progress has ended.";
+  if (stopStatus === "FAILED") return "Delivery attempted. The live progress has ended.";
+  if (routeStatus !== "OUT_FOR_DELIVERY") return "Delivery progress appears once the driver starts the route.";
   if (isNextDrop || dropsBefore === 0) return settings.outForDeliveryMessage;
-  if (dropsBefore === 1) return "There is 1 panel delivery before yours. Live progress appears when you are next.";
-  return `There are ${dropsBefore} panel deliveries before yours. Live progress appears when you are next.`;
+  if (dropsBefore === 1) return "There is 1 delivery before yours. Live progress appears when you are next.";
+  return `There are ${dropsBefore} deliveries before yours. Live progress appears when you are next.`;
 }
 
 function ProofPhotoThumbs({ photos }: { photos: Array<{ id: string; url: string; label?: string | null }> }) {
@@ -138,50 +129,50 @@ function FailedDeliveryCard({ tracking }: { tracking: Awaited<ReturnType<typeof 
   const { stop, deliveryGroup } = tracking;
   const attemptedAt = stop.actualArrival || deliveryGroup.proofPhotos[0]?.createdAt || null;
   const note = deliveryGroup.deliveryNote || deliveryGroup.safePlaceNote || null;
-  return <section className="bpd-card bpd-attempted-card"><p className="bpd-warning-label">Panel delivery attempted</p><h2>We could not complete your delivery this time</h2><p>Our team has recorded an attempted panel delivery. Please contact us and we will help arrange the next step.</p><div className="bpd-detail-grid"><div><span>Attempt recorded</span><strong>{formatDateTime(attemptedAt)}</strong></div><div><span>What happens next</span><strong>Please contact the team</strong></div></div>{note ? <div className="bpd-note-card"><strong>Driver note</strong><p>{note}</p></div> : null}{deliveryGroup.proofPhotos.length ? <><h3>Attempt photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}</section>;
+  return <section className="bpd-card bpd-attempted-card"><p className="bpd-warning-label">Delivery attempted</p><h2>We could not complete your delivery this time</h2><p>Our team has recorded an attempted delivery. Please contact us and we will help arrange the next step.</p><div className="bpd-detail-grid"><div><span>Attempt recorded</span><strong>{formatDateTime(attemptedAt)}</strong></div><div><span>What happens next</span><strong>Please contact the team</strong></div></div>{note ? <div className="bpd-note-card"><strong>Driver note</strong><p>{note}</p></div> : null}{deliveryGroup.proofPhotos.length ? <><h3>Attempt photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}</section>;
 }
 
 function styles(primaryColour: string, customCss: string) {
   return `
-    .bpd-track-page { min-height: 100vh; background: #eef4fb; font-family: Arial, sans-serif; color: #323841; }
-    .bpd-track-wrap { max-width: 920px; margin: 0 auto; padding: 22px 14px 34px; }
+    .bpd-track-page { min-height: 100vh; background: #f6f8fb; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; color: #323841; }
+    .bpd-track-wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px 38px; }
     .bpd-brand-row { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:14px; }
-    .bpd-logo { max-height: 54px; max-width: 210px; object-fit: contain; display:block; }
-    .bpd-company-name { font-size:18px; font-weight:900; color:${primaryColour}; }
-    .bpd-refresh-button, .bpd-outline-button { border:1px solid ${primaryColour}; background:#fff; color:${primaryColour}; border-radius:999px; padding:10px 14px; font-weight:900; cursor:pointer; }
-    .bpd-hero { background: linear-gradient(135deg, ${primaryColour} 0%, #2578bd 100%); color:#fff; border-radius:26px; padding:24px; box-shadow:0 18px 44px rgba(50,56,65,.18); margin-bottom:16px; }
-    .bpd-hero h1 { margin:0; font-size:34px; line-height:1.05; letter-spacing:-.6px; }
-    .bpd-hero p { margin:12px 0 0; font-size:16px; font-weight:700; color:rgba(255,255,255,.92); }
-    .bpd-eta-box { margin-top:18px; background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.28); border-radius:20px; padding:16px; display:grid; gap:5px; }
-    .bpd-eta-box span { font-size:13px; text-transform:uppercase; letter-spacing:.5px; font-weight:900; opacity:.9; }
-    .bpd-eta-box strong { font-size:28px; line-height:1.1; }
-    .bpd-card { background:#fff; border-radius:22px; padding:18px; box-shadow:0 10px 28px rgba(50,56,65,.1); margin-bottom:16px; border:1px solid #e5e7eb; }
-    .bpd-driver-card { display:flex; gap:14px; align-items:center; }
-    .bpd-driver-photo, .bpd-driver-initials { width:74px; height:74px; border-radius:50%; flex:0 0 74px; border:3px solid #fff; box-shadow:0 8px 22px rgba(50,56,65,.16); }
+    .bpd-logo { max-height: 48px; max-width: 190px; object-fit: contain; display:block; }
+    .bpd-company-name { font-size:16px; font-weight:650; color:${primaryColour}; }
+    .bpd-refresh-button, .bpd-outline-button { border:1px solid #dce5ef; background:rgba(255,255,255,.82); color:#323841; border-radius:999px; padding:9px 13px; font-weight:650; cursor:pointer; box-shadow:0 8px 24px rgba(16,24,40,.05); }
+    .bpd-hero { background:#ffffff; color:#323841; border-radius:28px; padding:22px; box-shadow:0 18px 50px rgba(16,24,40,.07); margin-bottom:14px; border:1px solid #e7edf4; }
+    .bpd-hero h1 { margin:0; font-size:31px; line-height:1.08; letter-spacing:-.45px; font-weight:680; }
+    .bpd-hero p { margin:10px 0 0; font-size:15px; font-weight:450; color:#667085; line-height:1.45; }
+    .bpd-eta-box { margin-top:16px; background:linear-gradient(180deg, rgba(80,154,230,.11), rgba(80,154,230,.055)); border:1px solid rgba(80,154,230,.22); border-radius:21px; padding:15px; display:grid; gap:5px; }
+    .bpd-eta-box span { font-size:12px; text-transform:uppercase; letter-spacing:.45px; font-weight:650; color:#667085; }
+    .bpd-eta-box strong { font-size:25px; line-height:1.12; font-weight:680; color:#323841; }
+    .bpd-card { background:#fff; border-radius:24px; padding:17px; box-shadow:0 14px 44px rgba(16,24,40,.06); margin-bottom:14px; border:1px solid #e7edf4; }
+    .bpd-driver-card { display:flex; gap:13px; align-items:center; }
+    .bpd-driver-photo, .bpd-driver-initials { width:62px; height:62px; border-radius:50%; flex:0 0 62px; border:1px solid #e7edf4; box-shadow:0 10px 24px rgba(16,24,40,.08); }
     .bpd-driver-photo { object-fit:cover; }
-    .bpd-driver-initials { display:grid; place-items:center; background:${primaryColour}; color:#fff; font-weight:900; font-size:24px; }
-    .bpd-driver-card h2, .bpd-card h2 { margin:0; font-size:22px; line-height:1.15; }
-    .bpd-driver-card p, .bpd-card p { margin:7px 0 0; color:#667085; line-height:1.45; }
-    .bpd-action-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:16px; }
-    .bpd-action-button { border:0; border-radius:18px; padding:15px 13px; text-align:center; text-decoration:none; font-weight:900; color:#fff; box-shadow:0 8px 20px rgba(50,56,65,.16); }
+    .bpd-driver-initials { display:grid; place-items:center; background:rgba(80,154,230,.12); color:${primaryColour}; font-weight:680; font-size:20px; }
+    .bpd-driver-card h2, .bpd-card h2 { margin:0; font-size:20px; line-height:1.18; font-weight:650; letter-spacing:-.18px; }
+    .bpd-driver-card p, .bpd-card p { margin:7px 0 0; color:#667085; line-height:1.45; font-weight:400; }
+    .bpd-action-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:14px; }
+    .bpd-action-button { border-radius:17px; padding:13px 12px; text-align:center; text-decoration:none; font-weight:650; color:#fff; box-shadow:0 10px 28px rgba(16,24,40,.08); }
     .bpd-email-button { background:#323841; }
     .bpd-call-button { background:${primaryColour}; }
-    .bpd-progress-layout { display:grid; grid-template-columns:minmax(0, 1.4fr) minmax(260px, .8fr); gap:16px; align-items:start; }
-    .bpd-detail-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:14px; }
-    .bpd-detail-grid div, .bpd-order-box, .bpd-note-card { background:#f8fafc; border-radius:16px; padding:12px; border:1px solid #e5e7eb; }
-    .bpd-detail-grid span { display:block; color:#667085; font-size:13px; margin-bottom:4px; }
-    .bpd-detail-grid strong { display:block; font-size:15px; }
-    .bpd-order-box ul { margin:8px 0 0; padding-left:20px; color:#667085; }
+    .bpd-progress-layout { display:grid; grid-template-columns:minmax(0, 1.35fr) minmax(260px, .85fr); gap:14px; align-items:start; }
+    .bpd-detail-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(145px, 1fr)); gap:9px; margin-top:13px; }
+    .bpd-detail-grid div, .bpd-order-box, .bpd-note-card { background:#f8fafc; border-radius:16px; padding:11px 12px; border:1px solid #edf1f5; }
+    .bpd-detail-grid span { display:block; color:#7b8794; font-size:12px; margin-bottom:4px; }
+    .bpd-detail-grid strong { display:block; font-size:14px; font-weight:620; color:#323841; }
+    .bpd-order-box ul { margin:8px 0 0; padding-left:18px; color:#667085; line-height:1.45; }
     .bpd-proof-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:10px; }
-    .bpd-proof-card { display:block; text-decoration:none; color:#323841; border:1px solid #d0d5dd; border-radius:14px; padding:8px; background:#fff; }
-    .bpd-proof-card img { width:100%; height:92px; object-fit:cover; border-radius:10px; display:block; }
-    .bpd-proof-card span { display:block; margin-top:7px; color:${primaryColour}; font-weight:800; font-size:13px; }
-    .bpd-signature-card img { width:100%; max-height:140px; object-fit:contain; border-radius:12px; background:#f8fafc; border:1px solid #d0d5dd; }
-    .bpd-success-label { color:#16a34a !important; font-weight:900; text-transform:uppercase; font-size:13px; letter-spacing:.5px; }
-    .bpd-warning-label { color:#ea580c !important; font-weight:900; text-transform:uppercase; font-size:13px; letter-spacing:.5px; }
+    .bpd-proof-card { display:block; text-decoration:none; color:#323841; border:1px solid #e1e7ef; border-radius:15px; padding:8px; background:#fff; }
+    .bpd-proof-card img { width:100%; height:92px; object-fit:cover; border-radius:11px; display:block; }
+    .bpd-proof-card span { display:block; margin-top:7px; color:${primaryColour}; font-weight:620; font-size:13px; }
+    .bpd-signature-card img { width:100%; max-height:140px; object-fit:contain; border-radius:12px; background:#f8fafc; border:1px solid #e1e7ef; }
+    .bpd-success-label { color:#12803b !important; font-weight:650; text-transform:uppercase; font-size:12px; letter-spacing:.45px; }
+    .bpd-warning-label { color:#c2410c !important; font-weight:650; text-transform:uppercase; font-size:12px; letter-spacing:.45px; }
     .bpd-card-heading-row { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:14px; }
     .bpd-footer-custom { margin-top:16px; }
-    @media (max-width: 760px) { .bpd-track-wrap { padding:16px 12px 28px; } .bpd-hero { padding:20px; border-radius:22px; } .bpd-hero h1 { font-size:29px; } .bpd-eta-box strong { font-size:24px; } .bpd-progress-layout, .bpd-action-grid { grid-template-columns:1fr; } .bpd-brand-row { align-items:flex-start; } }
+    @media (max-width: 760px) { .bpd-track-wrap { padding:16px 12px 28px; } .bpd-brand-row { align-items:center; } .bpd-hero { padding:18px; border-radius:24px; } .bpd-hero h1 { font-size:25px; } .bpd-hero p { font-size:14px; } .bpd-eta-box strong { font-size:21px; } .bpd-card { padding:14px; border-radius:21px; } .bpd-driver-photo, .bpd-driver-initials { width:54px; height:54px; flex-basis:54px; } .bpd-driver-card h2, .bpd-card h2 { font-size:18px; } .bpd-progress-layout, .bpd-action-grid { grid-template-columns:1fr; } }
     ${customCss || ""}
   `;
 }
@@ -204,18 +195,7 @@ export default function CustomerTrackingPage() {
   const progressPanelMessage = progressMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer, settings);
   const callHref = phoneHref(settings.supportPhone);
   const emailHref = mailHref(settings.supportEmail);
-  const progressVisuals = {
-    progressLineColour: settings.progressLineColour,
-    vanLabel: settings.vanLabel,
-    vanIconUrl: settings.vanIconUrl,
-    vanBackgroundColour: settings.vanBackgroundColour,
-    vanTextColour: settings.vanTextColour,
-    homeLabel: settings.homeLabel,
-    homeIconUrl: settings.homeIconUrl,
-    homeBackgroundColour: settings.homeBackgroundColour,
-    homeBorderColour: settings.homeBorderColour,
-    homeTextColour: settings.homeTextColour,
-  };
+  const progressVisuals = { progressLineColour: settings.progressLineColour, vanLabel: settings.vanLabel, vanIconUrl: settings.vanIconUrl, vanBackgroundColour: settings.vanBackgroundColour, vanTextColour: settings.vanTextColour, homeLabel: settings.homeLabel, homeIconUrl: settings.homeIconUrl, homeBackgroundColour: settings.homeBackgroundColour, homeBorderColour: settings.homeBorderColour, homeTextColour: settings.homeTextColour };
 
   useEffect(() => {
     setLastUpdatedAt(new Date());
