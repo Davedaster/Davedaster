@@ -32,41 +32,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 function formatDate(value: string | Date) {
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).format(new Date(value));
 }
 
 function formatDateTime(value?: string | Date | null) {
   if (!value) return "Not recorded yet";
-
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function formatLastUpdatedTime(value: Date | null) {
   if (!value) return "Checking now";
-
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(value);
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(value);
 }
 
 function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
   if (!estimatedArrival) return "Your delivery slot is being confirmed";
-
   const start = new Date(estimatedArrival);
   const end = new Date(start.getTime() + slotMinutes * 60 * 1000);
-
   return formatEtaSlot(start, end);
 }
 
@@ -79,53 +61,15 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
-function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
-  return Math.max(0, Number.isFinite(stopsBeforeCustomer) ? stopsBeforeCustomer : 0);
-}
+function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) { return Math.max(0, Number.isFinite(stopsBeforeCustomer) ? stopsBeforeCustomer : 0); }
+function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) { const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer); if (isNextDrop || dropsBefore === 0) return "You are next"; if (dropsBefore === 1) return "1 panel delivery"; return `${dropsBefore} panel deliveries`; }
+function buildMapUrl(location?: { latitude: number; longitude: number } | null) { if (!location) return null; return `https://maps.google.com/?q=${location.latitude},${location.longitude}`; }
+function phoneHref(phone: string) { const cleanPhone = phone.replace(/[^+\d]/g, ""); return cleanPhone ? `tel:${cleanPhone}` : null; }
+function mailHref(email: string) { return email ? `mailto:${email}` : null; }
+function customerInitials(name?: string | null) { const cleanName = (name || "Driver").trim(); const parts = cleanName.split(/\s+/).filter(Boolean); return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "D"; }
 
-function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
+function trackingStatusMessage({ routeStatus, stopStatus, isNextDrop, stopsBeforeCustomer, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; stopsBeforeCustomer: number; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
-
-  if (isNextDrop || dropsBefore === 0) return "You are next";
-  if (dropsBefore === 1) return "1 panel delivery";
-  return `${dropsBefore} panel deliveries`;
-}
-
-function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
-  if (!location) return null;
-  return `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
-}
-
-function phoneHref(phone: string) {
-  const cleanPhone = phone.replace(/[^+\d]/g, "");
-  return cleanPhone ? `tel:${cleanPhone}` : null;
-}
-
-function mailHref(email: string) {
-  return email ? `mailto:${email}` : null;
-}
-
-function customerInitials(name?: string | null) {
-  const cleanName = (name || "Driver").trim();
-  const parts = cleanName.split(/\s+/).filter(Boolean);
-  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "D";
-}
-
-function trackingStatusMessage({
-  routeStatus,
-  stopStatus,
-  isNextDrop,
-  stopsBeforeCustomer,
-  settings,
-}: {
-  routeStatus: string;
-  stopStatus: string;
-  isNextDrop: boolean;
-  stopsBeforeCustomer: number;
-  settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>>;
-}) {
-  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
-
   if (stopStatus === "DELIVERED") return settings.deliveredMessage;
   if (stopStatus === "FAILED") return settings.attemptedMessage;
   if (routeStatus === "OUT_FOR_DELIVERY" && (isNextDrop || dropsBefore === 0)) return settings.outForDeliveryMessage;
@@ -134,17 +78,7 @@ function trackingStatusMessage({
   return settings.notNextMessage;
 }
 
-function pageHeading({
-  routeStatus,
-  stopStatus,
-  isNextDrop,
-  settings,
-}: {
-  routeStatus: string;
-  stopStatus: string;
-  isNextDrop: boolean;
-  settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>>;
-}) {
+function pageHeading({ routeStatus, stopStatus, isNextDrop, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
   if (stopStatus === "DELIVERED") return settings.heroDeliveredTitle;
   if (stopStatus === "FAILED") return settings.heroAttemptedTitle;
   if (routeStatus === "OUT_FOR_DELIVERY" && isNextDrop) return settings.heroOutForDeliveryTitle;
@@ -154,7 +88,6 @@ function pageHeading({
 
 function progressMessage(routeStatus: string, stopStatus: string, isNextDrop: boolean, stopsBeforeCustomer: number, settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>>) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
-
   if (stopStatus === "DELIVERED") return "Delivery completed. The live delivery progress has ended.";
   if (stopStatus === "FAILED") return "Delivery attempted. The live delivery progress has ended.";
   if (routeStatus !== "OUT_FOR_DELIVERY") return "Delivery progress will become available once the driver starts the route.";
@@ -165,72 +98,24 @@ function progressMessage(routeStatus: string, stopStatus: string, isNextDrop: bo
 
 function ProofPhotoThumbs({ photos }: { photos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!photos.length) return null;
-
-  return (
-    <div className="bpd-proof-grid">
-      {photos.map((photo, index) => (
-        <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="bpd-proof-card">
-          <img src={photo.url} alt={photo.label || `Delivery photo ${index + 1}`} />
-          <span>View photo {index + 1}</span>
-        </a>
-      ))}
-    </div>
-  );
+  return <div className="bpd-proof-grid">{photos.map((photo, index) => <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" className="bpd-proof-card"><img src={photo.url} alt={photo.label || `Delivery photo ${index + 1}`} /><span>View photo {index + 1}</span></a>)}</div>;
 }
 
 function DeliveryConfirmationCard({ tracking, primaryColour }: { tracking: Awaited<ReturnType<typeof getCustomerTracking>>; primaryColour: string }) {
   if (!tracking) return null;
-
   const { stop, deliveryGroup } = tracking;
   const pod = deliveryGroup.proofOfDelivery;
   const mapUrl = buildMapUrl(pod.location);
   const deliveredAt = stop.actualArrival || pod.receiverMark?.createdAt || deliveryGroup.proofPhotos[0]?.createdAt || null;
-
-  return (
-    <section className="bpd-card bpd-proof-section">
-      <div className="bpd-card-heading-row">
-        <div>
-          <p className="bpd-success-label">Delivered</p>
-          <h2>Proof of delivery</h2>
-        </div>
-        <button type="button" onClick={() => window.print()} className="bpd-outline-button" style={{ color: primaryColour, borderColor: primaryColour }}>Download proof</button>
-      </div>
-      <div className="bpd-detail-grid">
-        <div><span>Delivered on</span><strong>{formatDateTime(deliveredAt)}</strong></div>
-        <div><span>Received by</span><strong>{pod.receiverName || "Recorded by driver"}</strong></div>
-        <div><span>Location</span><strong>{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" style={{ color: primaryColour }}>View on map</a> : "Not recorded"}</strong></div>
-      </div>
-      {deliveryGroup.proofPhotos.length ? <><h3>Delivery photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}
-      {pod.receiverMark ? (
-        <div className="bpd-signature-card">
-          <h3>Customer signature</h3>
-          <a href={pod.receiverMark.url} target="_blank" rel="noreferrer"><img src={pod.receiverMark.url} alt="Customer signature" /></a>
-        </div>
-      ) : null}
-    </section>
-  );
+  return <section className="bpd-card bpd-proof-section"><div className="bpd-card-heading-row"><div><p className="bpd-success-label">Delivered</p><h2>Proof of delivery</h2></div><button type="button" onClick={() => window.print()} className="bpd-outline-button" style={{ color: primaryColour, borderColor: primaryColour }}>Download proof</button></div><div className="bpd-detail-grid"><div><span>Delivered on</span><strong>{formatDateTime(deliveredAt)}</strong></div><div><span>Received by</span><strong>{pod.receiverName || "Recorded by driver"}</strong></div><div><span>Location</span><strong>{mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer" style={{ color: primaryColour }}>View on map</a> : "Not recorded"}</strong></div></div>{deliveryGroup.proofPhotos.length ? <><h3>Delivery photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}{pod.receiverMark ? <div className="bpd-signature-card"><h3>Customer signature</h3><a href={pod.receiverMark.url} target="_blank" rel="noreferrer"><img src={pod.receiverMark.url} alt="Customer signature" /></a></div> : null}</section>;
 }
 
-function FailedDeliveryCard({ tracking, primaryColour }: { tracking: Awaited<ReturnType<typeof getCustomerTracking>>; primaryColour: string }) {
+function FailedDeliveryCard({ tracking }: { tracking: Awaited<ReturnType<typeof getCustomerTracking>>; primaryColour: string }) {
   if (!tracking) return null;
-
   const { stop, deliveryGroup } = tracking;
   const attemptedAt = stop.actualArrival || deliveryGroup.proofPhotos[0]?.createdAt || null;
   const note = deliveryGroup.deliveryNote || deliveryGroup.safePlaceNote || null;
-
-  return (
-    <section className="bpd-card bpd-attempted-card">
-      <p className="bpd-warning-label">Panel delivery attempted</p>
-      <h2>We could not complete your delivery this time</h2>
-      <p>Our team has recorded an attempted panel delivery. Please contact us and we will help arrange the next step.</p>
-      <div className="bpd-detail-grid">
-        <div><span>Attempt recorded</span><strong>{formatDateTime(attemptedAt)}</strong></div>
-        <div><span>What happens next</span><strong>Please contact the team</strong></div>
-      </div>
-      {note ? <div className="bpd-note-card"><strong>Driver note</strong><p>{note}</p></div> : null}
-      {deliveryGroup.proofPhotos.length ? <><h3>Attempt photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}
-    </section>
-  );
+  return <section className="bpd-card bpd-attempted-card"><p className="bpd-warning-label">Panel delivery attempted</p><h2>We could not complete your delivery this time</h2><p>Our team has recorded an attempted panel delivery. Please contact us and we will help arrange the next step.</p><div className="bpd-detail-grid"><div><span>Attempt recorded</span><strong>{formatDateTime(attemptedAt)}</strong></div><div><span>What happens next</span><strong>Please contact the team</strong></div></div>{note ? <div className="bpd-note-card"><strong>Driver note</strong><p>{note}</p></div> : null}{deliveryGroup.proofPhotos.length ? <><h3>Attempt photos</h3><ProofPhotoThumbs photos={deliveryGroup.proofPhotos} /></> : null}</section>;
 }
 
 function styles(primaryColour: string, customCss: string) {
@@ -296,84 +181,36 @@ export default function CustomerTrackingPage() {
   const progressPanelMessage = progressMessage(route.status, stop.status, isNextDrop, stopsBeforeCustomer, settings);
   const callHref = phoneHref(settings.supportPhone);
   const emailHref = mailHref(settings.supportEmail);
+  const progressVisuals = {
+    progressLineColour: settings.progressLineColour,
+    vanLabel: settings.vanLabel,
+    vanBackgroundColour: settings.vanBackgroundColour,
+    vanTextColour: settings.vanTextColour,
+    homeLabel: settings.homeLabel,
+    homeBackgroundColour: settings.homeBackgroundColour,
+    homeBorderColour: settings.homeBorderColour,
+    homeTextColour: settings.homeTextColour,
+  };
 
   useEffect(() => {
     setLastUpdatedAt(new Date());
     const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
-
-    if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") {
-      window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY);
-      setRefreshMessage("Tracking updated");
-      window.setTimeout(() => setRefreshMessage(null), 2500);
-    }
-
+    if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") { window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY); setRefreshMessage("Tracking updated"); window.setTimeout(() => setRefreshMessage(null), 2500); }
     return () => window.clearInterval(timer);
   }, []);
 
-  function handleRefreshTracking() {
-    window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true");
-    window.location.reload();
-  }
+  function handleRefreshTracking() { window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true"); window.location.reload(); }
 
   return (
     <main className="bpd-track-page">
       <style>{styles(primaryColour, settings.customCss)}</style>
       <section className="bpd-track-wrap">
-        <div className="bpd-brand-row">
-          <div>{settings.logoUrl ? <img className="bpd-logo" src={settings.logoUrl} alt={settings.companyName} /> : <div className="bpd-company-name">{settings.companyName}</div>}</div>
-          <button type="button" onClick={handleRefreshTracking} className="bpd-refresh-button">Refresh</button>
-        </div>
-
-        <section className="bpd-hero">
-          <h1>{pageTitle}</h1>
-          <p>{statusMessage}</p>
-          <div className="bpd-eta-box">
-            <span>Estimated arrival</span>
-            <strong>{showProof ? "Delivered" : showFailedDelivery ? "Attempt recorded" : slot}</strong>
-            <span>Order {order.shopifyOrderNumber} · Last updated {formatLastUpdatedTime(lastUpdatedAt)}</span>
-            {refreshMessage ? <span>{refreshMessage}</span> : null}
-          </div>
-        </section>
-
-        <section className="bpd-card bpd-driver-card">
-          {route.driver?.photoUrl ? <img src={route.driver.photoUrl} alt={route.driver.name} className="bpd-driver-photo" /> : <div className="bpd-driver-initials">{customerInitials(route.driver?.name)}</div>}
-          <div>
-            <h2>Your driver today is {route.driver?.name || "being confirmed"}</h2>
-            <p>{settings.roomOfChoiceText}</p>
-          </div>
-        </section>
-
-        <div className="bpd-action-grid">
-          {callHref ? <a href={callHref} className="bpd-action-button bpd-call-button">Call our team</a> : null}
-          {emailHref ? <a href={emailHref} className="bpd-action-button bpd-email-button">Email our team</a> : null}
-        </div>
-
-        {showProof ? <DeliveryConfirmationCard tracking={tracking} primaryColour={primaryColour} /> : null}
-        {showFailedDelivery ? <FailedDeliveryCard tracking={tracking} primaryColour={primaryColour} /> : null}
-
-        <section className="bpd-progress-layout">
-          <div className="bpd-card">
-            <EstimatedVanProgress active={progressActive} estimatedArrival={stop.estimatedArrival} currentTime={currentTime} message={progressPanelMessage} />
-            <p>{progressPanelMessage}</p>
-          </div>
-
-          <aside className="bpd-card">
-            <h2>Delivery details</h2>
-            <div className="bpd-detail-grid">
-              <div><span>Status</span><strong>{showProof ? "Delivered" : showFailedDelivery ? "Delivery attempted" : statusLabel(route.status)}</strong></div>
-              <div><span>Delivery date</span><strong>{formatDate(route.date)}</strong></div>
-              <div><span>Your drop</span><strong>Number {stop.orderIndex}</strong></div>
-              <div><span>Before you</span><strong>{stopsBeforeLabel(stopsBeforeCustomer, isNextDrop)}</strong></div>
-              <div><span>Postcode</span><strong>{deliveryGroup.postcode || "Not shown"}</strong></div>
-              <div><span>Route updates</span><strong>{progress.failedStops ? `${progress.failedStops} issue${progress.failedStops === 1 ? "" : "s"}` : "None"}</strong></div>
-            </div>
-            {deliveryGroup.deliveryNote ? <div className="bpd-note-card" style={{ marginTop: 12 }}><strong>Delivery note</strong><p>{deliveryGroup.deliveryNote}</p></div> : null}
-            {deliveryGroup.safePlaceNote ? <div className="bpd-note-card" style={{ marginTop: 12 }}><strong>Safe place note</strong><p>{deliveryGroup.safePlaceNote}</p></div> : null}
-            {order.items.length ? <div className="bpd-order-box" style={{ marginTop: 12 }}><strong>Your order</strong><ul>{order.items.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
-            {showProof && proofPhotos.length ? <div style={{ marginTop: 14 }}><h3>Proof photos</h3><ProofPhotoThumbs photos={proofPhotos} /></div> : null}
-          </aside>
-        </section>
-
+        <div className="bpd-brand-row"><div>{settings.logoUrl ? <img className="bpd-logo" src={settings.logoUrl} alt={settings.companyName} /> : <div className="bpd-company-name">{settings.companyName}</div>}</div><button type="button" onClick={handleRefreshTracking} className="bpd-refresh-button">Refresh</button></div>
+        <section className="bpd-hero"><h1>{pageTitle}</h1><p>{statusMessage}</p><div className="bpd-eta-box"><span>Estimated arrival</span><strong>{showProof ? "Delivered" : showFailedDelivery ? "Attempt recorded" : slot}</strong><span>Order {order.shopifyOrderNumber} · Last updated {formatLastUpdatedTime(lastUpdatedAt)}</span>{refreshMessage ? <span>{refreshMessage}</span> : null}</div></section>
+        <section className="bpd-card bpd-driver-card">{route.driver?.photoUrl ? <img src={route.driver.photoUrl} alt={route.driver.name} className="bpd-driver-photo" /> : <div className="bpd-driver-initials">{customerInitials(route.driver?.name)}</div>}<div><h2>Your driver today is {route.driver?.name || "being confirmed"}</h2><p>{settings.roomOfChoiceText}</p></div></section>
+        <div className="bpd-action-grid">{callHref ? <a href={callHref} className="bpd-action-button bpd-call-button">Call our team</a> : null}{emailHref ? <a href={emailHref} className="bpd-action-button bpd-email-button">Email our team</a> : null}</div>
+        {showProof ? <DeliveryConfirmationCard tracking={tracking} primaryColour={primaryColour} /> : null}{showFailedDelivery ? <FailedDeliveryCard tracking={tracking} primaryColour={primaryColour} /> : null}
+        <section className="bpd-progress-layout"><div className="bpd-card"><EstimatedVanProgress active={progressActive} estimatedArrival={stop.estimatedArrival} currentTime={currentTime} message={progressPanelMessage} visuals={progressVisuals} /><p>{progressPanelMessage}</p></div><aside className="bpd-card"><h2>Delivery details</h2><div className="bpd-detail-grid"><div><span>Status</span><strong>{showProof ? "Delivered" : showFailedDelivery ? "Delivery attempted" : statusLabel(route.status)}</strong></div><div><span>Delivery date</span><strong>{formatDate(route.date)}</strong></div><div><span>Your drop</span><strong>Number {stop.orderIndex}</strong></div><div><span>Before you</span><strong>{stopsBeforeLabel(stopsBeforeCustomer, isNextDrop)}</strong></div><div><span>Postcode</span><strong>{deliveryGroup.postcode || "Not shown"}</strong></div><div><span>Route updates</span><strong>{progress.failedStops ? `${progress.failedStops} issue${progress.failedStops === 1 ? "" : "s"}` : "None"}</strong></div></div>{deliveryGroup.deliveryNote ? <div className="bpd-note-card" style={{ marginTop: 12 }}><strong>Delivery note</strong><p>{deliveryGroup.deliveryNote}</p></div> : null}{deliveryGroup.safePlaceNote ? <div className="bpd-note-card" style={{ marginTop: 12 }}><strong>Safe place note</strong><p>{deliveryGroup.safePlaceNote}</p></div> : null}{order.items.length ? <div className="bpd-order-box" style={{ marginTop: 12 }}><strong>Your order</strong><ul>{order.items.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}{showProof && proofPhotos.length ? <div style={{ marginTop: 14 }}><h3>Proof photos</h3><ProofPhotoThumbs photos={proofPhotos} /></div> : null}</aside></section>
         {settings.customFooterHtml ? <div className="bpd-footer-custom" dangerouslySetInnerHTML={{ __html: settings.customFooterHtml }} /> : null}
       </section>
     </main>
