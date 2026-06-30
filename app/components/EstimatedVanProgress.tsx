@@ -1,8 +1,21 @@
+type EstimatedVanProgressVisuals = {
+  progressLineColour?: string;
+  vanLabel?: string;
+  vanBackgroundColour?: string;
+  vanTextColour?: string;
+  homeLabel?: string;
+  homeBackgroundColour?: string;
+  homeBorderColour?: string;
+  homeTextColour?: string;
+};
+
 type EstimatedVanProgressProps = {
   estimatedArrival?: string | Date | null;
   currentTime: Date;
   active: boolean;
   message: string;
+  visuals?: EstimatedVanProgressVisuals;
+  previewPercent?: number;
 };
 
 function deliveryProgressPercent(estimatedArrival: string | Date | null | undefined, currentTime: Date) {
@@ -27,6 +40,10 @@ function deliveryProgressPercent(estimatedArrival: string | Date | null | undefi
   return Math.min(94, Math.max(40, Math.round(40 + (elapsed / total) * 54)));
 }
 
+function visualValue(value: string | undefined, fallback: string) {
+  return value?.trim() || fallback;
+}
+
 function LockedProgressPanel({ message }: { message: string }) {
   return (
     <div style={{ minHeight: 360, borderRadius: 14, background: "#f8fafc", border: "1px solid #d0d5dd", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
@@ -39,12 +56,20 @@ function LockedProgressPanel({ message }: { message: string }) {
   );
 }
 
-export function EstimatedVanProgress({ estimatedArrival, currentTime, active, message }: EstimatedVanProgressProps) {
+export function EstimatedVanProgress({ estimatedArrival, currentTime, active, message, visuals, previewPercent }: EstimatedVanProgressProps) {
   if (!active) {
     return <LockedProgressPanel message={message} />;
   }
 
-  const percent = deliveryProgressPercent(estimatedArrival, currentTime);
+  const percent = typeof previewPercent === "number" ? Math.min(94, Math.max(10, previewPercent)) : deliveryProgressPercent(estimatedArrival, currentTime);
+  const progressLineColour = visualValue(visuals?.progressLineColour, "#509AE6");
+  const vanLabel = visualValue(visuals?.vanLabel, "VAN");
+  const vanBackgroundColour = visualValue(visuals?.vanBackgroundColour, "#509AE6");
+  const vanTextColour = visualValue(visuals?.vanTextColour, "#ffffff");
+  const homeLabel = visualValue(visuals?.homeLabel, "HOME");
+  const homeBackgroundColour = visualValue(visuals?.homeBackgroundColour, "#ffffff");
+  const homeBorderColour = visualValue(visuals?.homeBorderColour, "#16a34a");
+  const homeTextColour = visualValue(visuals?.homeTextColour, "#16a34a");
 
   return (
     <div style={{ minHeight: 360, borderRadius: 14, background: "linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%)", border: "1px solid #d0d5dd", display: "grid", placeItems: "center", padding: 24 }}>
@@ -56,11 +81,11 @@ export function EstimatedVanProgress({ estimatedArrival, currentTime, active, me
 
         <div style={{ position: "relative", height: 132, margin: "10px 16px 18px" }}>
           <div style={{ position: "absolute", left: 0, right: 0, top: 58, height: 12, borderRadius: 999, background: "#d0d5dd", overflow: "hidden", boxShadow: "inset 0 1px 2px rgba(50,56,65,0.12)" }}>
-            <div style={{ height: "100%", width: `${percent}%`, background: "#509AE6", borderRadius: 999, transition: "width 900ms ease" }} />
+            <div style={{ height: "100%", width: `${percent}%`, background: progressLineColour, borderRadius: 999, transition: "width 900ms ease" }} />
           </div>
-          <div style={{ position: "absolute", left: 0, top: 35, width: 64, height: 64, borderRadius: 18, background: "#ffffff", border: "2px solid #d0d5dd", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, color: "#323841", boxShadow: "0 8px 20px rgba(50,56,65,0.14)" }}>VAN</div>
-          <div style={{ position: "absolute", right: 0, top: 35, width: 64, height: 64, borderRadius: 18, background: "#ffffff", border: "2px solid #16a34a", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, color: "#16a34a", boxShadow: "0 8px 20px rgba(50,56,65,0.14)" }}>HOME</div>
-          <div style={{ position: "absolute", left: `calc(${percent}% - 28px)`, top: 28, width: 76, height: 76, borderRadius: 22, background: "#509AE6", color: "#ffffff", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, boxShadow: "0 12px 28px rgba(80,154,230,0.38)", transition: "left 900ms ease" }}>VAN</div>
+          <div style={{ position: "absolute", left: 0, top: 35, width: 64, height: 64, borderRadius: 18, background: "#ffffff", border: "2px solid #d0d5dd", display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, color: "#323841", boxShadow: "0 8px 20px rgba(50,56,65,0.14)" }}>{vanLabel}</div>
+          <div style={{ position: "absolute", right: 0, top: 35, width: 64, height: 64, borderRadius: 18, background: homeBackgroundColour, border: `2px solid ${homeBorderColour}`, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, color: homeTextColour, boxShadow: "0 8px 20px rgba(50,56,65,0.14)" }}>{homeLabel}</div>
+          <div style={{ position: "absolute", left: `calc(${percent}% - 28px)`, top: 28, width: 76, height: 76, borderRadius: 22, background: vanBackgroundColour, color: vanTextColour, display: "grid", placeItems: "center", fontSize: 13, fontWeight: 900, boxShadow: "0 12px 28px rgba(80,154,230,0.38)", transition: "left 900ms ease" }}>{vanLabel}</div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
