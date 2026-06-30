@@ -218,6 +218,11 @@ export async function completeDriverStopFromToken(input: {
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
   leftInSafePlace?: boolean;
+  podImage?: string | null;
+  podName?: string | null;
+  podTicked?: boolean;
+  podLat?: number | null;
+  podLng?: number | null;
 }) {
   await getStopForDriverToken(input.token, input.stopId);
 
@@ -228,6 +233,11 @@ export async function completeDriverStopFromToken(input: {
     deliveryNote: input.deliveryNote,
     safePlaceNote: input.safePlaceNote,
     leftInSafePlace: input.leftInSafePlace,
+    podImage: input.podImage,
+    podName: input.podName,
+    podTicked: input.podTicked,
+    podLat: input.podLat,
+    podLng: input.podLng,
   });
 }
 
@@ -260,75 +270,62 @@ export async function sendDriverRouteLink(input: {
       },
       include: {
         driver: true,
-        stops: true,
       },
     }),
     isTwilioEnabled(),
     isResendEnabled(),
   ]);
+  const errors: string[] = [];
 
   if (!route) {
     throw new Error("Route not found.");
   }
 
-  if (!route.driver) {
-    throw new Error("Assign a driver before sending the driver route link.");
+  const driver = route.driver;
+
+  if (!driver) {
+    throw new Error("Assign a driver before sending the route link.");
   }
 
   const routeUrl = buildDriverRouteUrl(input.request, token);
-  const plannedStart = route.stops
-    .map((stop) => stop.estimatedArrival)
-    .filter(Boolean)
-    .sort((a, b) => new Date(a!).getTime() - new Date(b!).getTime())[0];
-  const date = formatDate(route.date);
-  const startTime = formatTime(plannedStart || route.date);
-  const smsBody = `New route assigned\n\nDriver: ${route.driver.name}\nRoute: ${route.name}\nDate: ${date}\nPlanned start: ${startTime}\n\nOpen route: ${routeUrl}`;
-  const emailBody = `Hi ${route.driver.name},\n\nA new delivery route has been assigned to you.\n\nRoute: ${route.name}\nDate: ${date}\nPlanned start: ${startTime}\nStops: ${route.stops.length}\n\nOpen your route here:\n${routeUrl}\n\nBathroom Panels Direct`;
-  const errors: string[] = [];
+  const smsBody = `Bathroom Panels Direct route ${route.name} for ${formatDate(route.date)}. Start ${formatTime(route.plannedStartTime)}. Open: ${routeUrl}`;
+  const emailSubject = `Bathroom Panels Direct route ${route.name}`;
+  const emailBody = [
+    `Hi ${driver.name},`,
+    "",
+    `Your route ${route.name} is ready for ${formatDate(route.date)}.`,
+    `Planned start: ${formatTime(route.plannedStartTime)}.`,
+    "",
+    `Open your secure driver route here: ${routeUrl}`,
+    "",
+    "Bathroom Panels Direct",
+  ].join("\n");
   let smsSent = false;
   let emailSent = false;
 
-  if (route.driver.phoneNumber && canSendSms) {
+  if (driver.phone && canSendSms) {
     try {
-      await sendSmsWithTwilio({
-        to: route.driver.phoneNumber,
-        message: {
-          body: smsBody,
-        },
-      });
+      await sendSmsWithTwilio(driver.phone, smsBody);
       smsSent = true;
     } catch (error) {
-      errors.push(`SMS failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      errors.push(`Driver SMS failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   }
 
-  if (route.driver.email && canSendEmail) {
+  if (driver.email && canSendEmail) {
     try {
-      await sendEmailWithResend({
-        to: route.driver.email,
-        message: {
-          subject: `New route assigned, ${route.name}`,
-          body: emailBody,
-        },
-      });
+      await sendEmailWithResend(driver.email, emailSubject, emailBody);
       emailSent = true;
     } catch (error) {
-      errors.push(`Email failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      errors.push(`Driver email failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   }
 
-  await prisma.route.update({
-    where: {
-      id: route.id,
-    },
+  await prisma.routeHistory.create({
     data: {
-      driverRouteLinkSentAt: new Date(),
-      history: {
-        create: {
-          action: "Driver route link sent",
-          details: `Driver route link sent to ${route.driver.name}. SMS: ${smsSent ? "sent" : "not sent"}. Email: ${emailSent ? "sent" : "not sent"}.${errors.length ? ` Errors: ${errors.join(" | ")}` : ""}`,
-        },
-      },
+      routeId: route.id,
+      action: "Driver route link sent",
+      details: `Secure driver route link sent. SMS: ${smsSent ? "sent" : "not sent"}. Email: ${emailSent ? "sent" : "not sent"}.${errors.length ? ` Errors: ${errors.join(" | ")}` : ""}`,
     },
   });
 
