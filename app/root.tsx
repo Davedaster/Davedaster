@@ -21,6 +21,14 @@ const planningPanelStyles = `
     isolation: isolate;
   }
 
+  .bpd-tomtom-popup .mapboxgl-popup-content:not([data-bpd-tooltip-ready="true"]) {
+    opacity: 0;
+  }
+
+  .bpd-tomtom-popup .mapboxgl-popup-content[data-bpd-tooltip-ready="true"] {
+    opacity: 1;
+  }
+
   .bpd-fulfil-date {
     font-weight: 800;
   }
@@ -125,9 +133,15 @@ const planningPanelScript = `
       return 'red';
     };
 
+    const markTooltipReady = () => {
+      document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
+        if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
+      });
+    };
+
     const updateFulfilmentTooltipColours = () => {
       document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
-        if (!(line instanceof HTMLElement) || line.dataset.bpdFulfilStyled === 'true') return;
+        if (!(line instanceof HTMLElement)) return;
         const rawText = line.textContent?.trim() || '';
         const cleanText = rawText.replace(/^[^A-Za-z0-9]*\\s*/, '').trim();
         if (!cleanText.toLowerCase().startsWith('fulfil by:')) return;
@@ -136,6 +150,7 @@ const planningPanelScript = `
         line.dataset.bpdFulfilStyled = 'true';
         line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
       });
+      markTooltipReady();
     };
 
     const tidyCustomerTracking = () => {
@@ -182,8 +197,12 @@ const planningPanelScript = `
         tidyPlanningLabels();
         runs += 1;
         if (runs > 80) window.clearInterval(interval);
-      }, 250);
+      }, 50);
     };
+
+    document.addEventListener('mouseover', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
+    document.addEventListener('mousemove', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
+    document.addEventListener('touchstart', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startObserver, { once: true });
