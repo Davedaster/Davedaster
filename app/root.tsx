@@ -41,6 +41,26 @@ const planningPanelStyles = `
     overscroll-behavior: contain;
   }
 
+  .bpd-fulfil-date {
+    font-weight: 800;
+  }
+
+  .bpd-fulfil-date-green {
+    color: #16a34a;
+  }
+
+  .bpd-fulfil-date-orange {
+    color: #f97316;
+  }
+
+  .bpd-fulfil-date-red {
+    color: #b42318;
+  }
+
+  .bpd-fulfil-date-grey {
+    color: #667085;
+  }
+
   details:has(> summary[style*="list-style"] h3) {
     border: 1px solid #d0d5dd;
     border-radius: 12px;
@@ -237,6 +257,122 @@ const planningPanelScript = `
       unlockPageForMapNow();
     });
 
+    const bpdEscapeHtml = (value) => String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+
+    const monthIndex = {
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11,
+    };
+
+    const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+    const parseTooltipDate = (value) => {
+      const match = String(value).trim().match(/^(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})$/);
+
+      if (!match) {
+        return null;
+      }
+
+      const month = monthIndex[match[2].toLowerCase()];
+
+      if (typeof month !== 'number') {
+        return null;
+      }
+
+      return new Date(Number(match[3]), month, Number(match[1]));
+    };
+
+    const isWorkingDay = (date) => {
+      const day = date.getDay();
+      return day !== 0 && day !== 6;
+    };
+
+    const workingDaysLeft = (dueDate) => {
+      const today = dateOnly(new Date());
+      const due = dateOnly(dueDate);
+
+      if (due < today) {
+        let overdueDays = 0;
+        const cursor = new Date(due);
+
+        while (cursor < today) {
+          if (isWorkingDay(cursor)) {
+            overdueDays += 1;
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+
+        return -overdueDays;
+      }
+
+      let count = 0;
+      const cursor = new Date(today);
+      cursor.setDate(cursor.getDate() + 1);
+
+      while (cursor <= due) {
+        if (isWorkingDay(cursor)) {
+          count += 1;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      return count;
+    };
+
+    const fulfilDateTone = (dateText) => {
+      const dueDate = parseTooltipDate(dateText);
+
+      if (!dueDate) {
+        return 'grey';
+      }
+
+      const daysLeft = workingDaysLeft(dueDate);
+
+      if (daysLeft >= 4) {
+        return 'green';
+      }
+
+      if (daysLeft >= 2) {
+        return 'orange';
+      }
+
+      return 'red';
+    };
+
+    const updateFulfilmentTooltipColours = () => {
+      document.querySelectorAll('.bpd-tomtom-popup .bpd-tooltip-line').forEach((line) => {
+        if (line.dataset.bpdFulfilStyled === 'true') {
+          return;
+        }
+
+        const rawText = line.textContent?.trim() || '';
+        const cleanText = rawText.replace(/^[🟢🔵🟠🔴⚪]\\s*/, '').trim();
+
+        if (!cleanText.toLowerCase().startsWith('fulfil by:')) {
+          return;
+        }
+
+        const dateText = cleanText.replace(/^fulfil by:\\s*/i, '').trim();
+        const tone = fulfilDateTone(dateText);
+        line.dataset.bpdFulfilStyled = 'true';
+        line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
+      });
+    };
+
     const tidyCustomerTracking = () => {
       if (!window.location.pathname.startsWith('/apps/track/')) {
         return;
@@ -314,6 +450,7 @@ const planningPanelScript = `
         }
       });
 
+      updateFulfilmentTooltipColours();
       tidyCustomerTracking();
     };
 
