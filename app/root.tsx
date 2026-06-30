@@ -116,18 +116,12 @@ const planningPanelScript = `
     };
 
     const lockScrollableElement = (element) => {
-      if (!element || element.dataset?.bpdScrollLocked === 'true') {
-        return;
-      }
-
+      if (!element || element.dataset?.bpdScrollLocked === 'true') return;
       const style = window.getComputedStyle(element);
       const canScrollY = element.scrollHeight > element.clientHeight + 2;
       const canScrollX = element.scrollWidth > element.clientWidth + 2;
       const scrollable = /(auto|scroll|overlay)/.test(style.overflowY + style.overflowX);
-
-      if (!(canScrollY || canScrollX) || !scrollable || element.closest?.('.bpd-tomtom-map')) {
-        return;
-      }
+      if (!(canScrollY || canScrollX) || !scrollable || element.closest?.('.bpd-tomtom-map')) return;
 
       lockedScrollContainers.push({
         element,
@@ -151,23 +145,17 @@ const planningPanelScript = `
 
     const lockScrollableContainers = (target) => {
       let element = target?.parentElement;
-
       while (element && element !== document.body && element !== document.documentElement) {
         lockScrollableElement(element);
         element = element.parentElement;
       }
-
       document.querySelectorAll('[style*="overflow"], .Polaris-Frame, .Polaris-Page, main, section').forEach(lockScrollableElement);
     };
 
     const unlockScrollableContainers = () => {
       while (lockedScrollContainers.length) {
         const lock = lockedScrollContainers.pop();
-
-        if (!lock?.element) {
-          continue;
-        }
-
+        if (!lock?.element) continue;
         lock.element.classList.remove('bpd-scroll-container-locked');
         lock.element.style.overflow = lock.overflow;
         lock.element.style.overflowY = lock.overflowY;
@@ -182,7 +170,6 @@ const planningPanelScript = `
 
     const lockPageForMap = (target) => {
       cancelScheduledUnlock();
-
       if (!document.body.classList.contains('bpd-map-scroll-locked')) {
         lockedScrollY = window.scrollY || window.pageYOffset || 0;
         document.body.dataset.bpdMapScrollY = String(lockedScrollY);
@@ -192,7 +179,6 @@ const planningPanelScript = `
         document.documentElement.style.overscrollBehaviorY = 'none';
         document.body.style.overscrollBehaviorY = 'none';
       }
-
       lockScrollableContainers(target);
     };
 
@@ -200,11 +186,7 @@ const planningPanelScript = `
       cancelScheduledUnlock();
       unlockScrollableContainers();
       document.documentElement.classList.remove('bpd-map-scroll-locked-html');
-
-      if (!document.body.classList.contains('bpd-map-scroll-locked')) {
-        return;
-      }
-
+      if (!document.body.classList.contains('bpd-map-scroll-locked')) return;
       const restoreY = Number(document.body.dataset.bpdMapScrollY || lockedScrollY || 0);
       document.body.classList.remove('bpd-map-scroll-locked');
       document.body.style.top = '';
@@ -221,22 +203,15 @@ const planningPanelScript = `
     };
 
     const blockMapPullRefresh = (event) => {
-      if (!touchingMap && !isMapTouch(event.target)) {
-        return;
-      }
-
+      if (!touchingMap && !isMapTouch(event.target)) return;
       touchingMap = true;
       lastMapMoveAt = Date.now();
       lockPageForMap(event.target);
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
+      if (event.cancelable) event.preventDefault();
     };
 
     document.addEventListener('touchstart', (event) => {
       touchingMap = isMapTouch(event.target);
-
       if (touchingMap) {
         lastMapMoveAt = Date.now();
         lockPageForMap(event.target);
@@ -244,26 +219,16 @@ const planningPanelScript = `
     }, { passive: true, capture: true });
 
     document.addEventListener('touchmove', blockMapPullRefresh, { passive: false, capture: true });
-
     document.addEventListener('touchend', () => {
       if (touchingMap) {
         touchingMap = false;
         scheduleMapUnlock();
         return;
       }
-
       touchingMap = false;
     }, { passive: true, capture: true });
-
-    document.addEventListener('touchcancel', () => {
-      touchingMap = false;
-      scheduleMapUnlock();
-    }, { passive: true, capture: true });
-
-    window.addEventListener('blur', () => {
-      touchingMap = false;
-      unlockPageForMapNow();
-    });
+    document.addEventListener('touchcancel', () => { touchingMap = false; scheduleMapUnlock(); }, { passive: true, capture: true });
+    window.addEventListener('blur', () => { touchingMap = false; unlockPageForMapNow(); });
 
     const bpdEscapeHtml = (value) => String(value)
       .replaceAll('&', '&amp;')
@@ -271,36 +236,14 @@ const planningPanelScript = `
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
 
-    const monthIndex = {
-      jan: 0,
-      feb: 1,
-      mar: 2,
-      apr: 3,
-      may: 4,
-      jun: 5,
-      jul: 6,
-      aug: 7,
-      sep: 8,
-      oct: 9,
-      nov: 10,
-      dec: 11,
-    };
-
+    const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
     const parseTooltipDate = (value) => {
       const match = String(value).trim().match(/^(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})$/);
-
-      if (!match) {
-        return null;
-      }
-
+      if (!match) return null;
       const month = monthIndex[match[2].toLowerCase()];
-
-      if (typeof month !== 'number') {
-        return null;
-      }
-
+      if (typeof month !== 'number') return null;
       return new Date(Number(match[3]), month, Number(match[1]));
     };
 
@@ -312,82 +255,51 @@ const planningPanelScript = `
     const workingDaysLeft = (dueDate) => {
       const today = dateOnly(new Date());
       const due = dateOnly(dueDate);
-
       if (due < today) {
         let overdueDays = 0;
         const cursor = new Date(due);
-
         while (cursor < today) {
-          if (isWorkingDay(cursor)) {
-            overdueDays += 1;
-          }
+          if (isWorkingDay(cursor)) overdueDays += 1;
           cursor.setDate(cursor.getDate() + 1);
         }
-
         return -overdueDays;
       }
-
       let count = 0;
       const cursor = new Date(today);
       cursor.setDate(cursor.getDate() + 1);
-
       while (cursor <= due) {
-        if (isWorkingDay(cursor)) {
-          count += 1;
-        }
+        if (isWorkingDay(cursor)) count += 1;
         cursor.setDate(cursor.getDate() + 1);
       }
-
       return count;
     };
 
     const fulfilDateTone = (dateText) => {
       const dueDate = parseTooltipDate(dateText);
-
-      if (!dueDate) {
-        return 'grey';
-      }
-
+      if (!dueDate) return 'grey';
       const daysLeft = workingDaysLeft(dueDate);
-
-      if (daysLeft >= 4) {
-        return 'green';
-      }
-
-      if (daysLeft >= 2) {
-        return 'orange';
-      }
-
+      if (daysLeft >= 4) return 'green';
+      if (daysLeft >= 2) return 'orange';
       return 'red';
     };
 
     const markTooltipReady = () => {
       document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
-        if (content instanceof HTMLElement) {
-          content.dataset.bpdTooltipReady = 'true';
-        }
+        if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
       });
     };
 
     const updateFulfilmentTooltipColours = () => {
       document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
-        if (!(line instanceof HTMLElement) || line.dataset.bpdFulfilStyled === 'true') {
-          return;
-        }
-
+        if (!(line instanceof HTMLElement) || line.dataset.bpdFulfilStyled === 'true') return;
         const rawText = line.textContent?.trim() || '';
         const cleanText = rawText.replace(/^[^A-Za-z0-9]*\\s*/, '').trim();
-
-        if (!cleanText.toLowerCase().startsWith('fulfil by:')) {
-          return;
-        }
-
+        if (!cleanText.toLowerCase().startsWith('fulfil by:')) return;
         const dateText = cleanText.replace(/^fulfil by:\\s*/i, '').trim();
         const tone = fulfilDateTone(dateText);
         line.dataset.bpdFulfilStyled = 'true';
         line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
       });
-
       markTooltipReady();
     };
 
@@ -395,53 +307,129 @@ const planningPanelScript = `
     document.addEventListener('touchstart', () => window.setTimeout(updateFulfilmentTooltipColours, 0), true);
     window.setInterval(updateFulfilmentTooltipColours, 80);
 
-    const tidyCustomerTracking = () => {
-      if (!window.location.pathname.startsWith('/apps/track/')) {
-        return;
-      }
+    const soften = (element, styles) => {
+      if (!(element instanceof HTMLElement)) return;
+      Object.entries(styles).forEach(([key, value]) => {
+        element.style[key] = value;
+      });
+    };
 
+    const findTextElement = (selector, text) => Array.from(document.querySelectorAll(selector)).find((element) => element.textContent?.trim().includes(text));
+
+    const tidyCustomerTrackingPreview = () => {
+      if (!document.body?.innerText?.includes('Customer tracking preview')) return;
+
+      const heading = findTextElement('h1', 'Your panels');
+      if (!(heading instanceof HTMLElement)) return;
+
+      let preview = heading.parentElement;
+      while (preview && !preview.textContent?.includes('Delivery details')) {
+        preview = preview.parentElement;
+      }
+      if (!(preview instanceof HTMLElement)) return;
+
+      preview.dataset.bpdApplePreview = 'true';
+      const isMobilePreview = (preview.style.width || '').includes('390') || preview.getBoundingClientRect().width < 430;
+
+      soften(preview, {
+        background: '#f7f9fb',
+        border: '1px solid #e6ecf2',
+        borderRadius: isMobilePreview ? '24px' : '20px',
+        padding: isMobilePreview ? '10px' : '18px',
+        width: isMobilePreview ? 'min(100%, 360px)' : '100%',
+        maxWidth: isMobilePreview ? '360px' : '980px',
+        boxSizing: 'border-box',
+        fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Arial, sans-serif',
+      });
+
+      const hero = heading.parentElement;
+      soften(hero, {
+        background: '#ffffff',
+        color: '#323841',
+        borderRadius: isMobilePreview ? '20px' : '24px',
+        padding: isMobilePreview ? '16px' : '22px',
+        boxShadow: '0 12px 34px rgba(16,24,40,.055)',
+        border: '1px solid #e8edf3',
+      });
+      soften(heading, {
+        color: '#323841',
+        fontSize: isMobilePreview ? '21px' : '29px',
+        fontWeight: '660',
+        lineHeight: '1.08',
+        letterSpacing: '-0.35px',
+      });
+
+      const heroParagraph = hero?.querySelector('p');
+      soften(heroParagraph, { color: '#667085', fontWeight: '400', fontSize: isMobilePreview ? '13px' : '15px', lineHeight: '1.45' });
+
+      const etaStrong = Array.from(preview.querySelectorAll('strong')).find((item) => item.textContent?.includes('Today between'));
+      const etaBox = etaStrong?.closest('div');
+      soften(etaBox, {
+        background: 'linear-gradient(180deg, rgba(80,154,230,.10), rgba(80,154,230,.045))',
+        border: '1px solid rgba(80,154,230,.18)',
+        borderRadius: '18px',
+        padding: isMobilePreview ? '11px' : '14px',
+      });
+      soften(etaStrong, { color: '#323841', fontSize: isMobilePreview ? '18px' : '24px', fontWeight: '660' });
+
+      preview.querySelectorAll('span').forEach((span) => {
+        const text = span.textContent?.trim();
+        if (text === 'Call our team' || text === 'Email our team') {
+          soften(span, {
+            borderRadius: '15px',
+            padding: isMobilePreview ? '10px 11px' : '12px 13px',
+            fontWeight: '620',
+            fontSize: isMobilePreview ? '12px' : '14px',
+            boxShadow: '0 8px 22px rgba(16,24,40,.055)',
+          });
+        }
+      });
+
+      const driverHeading = findTextElement('h2', 'Your driver today');
+      const driverCard = driverHeading?.closest('div[style*="box-shadow"]');
+      soften(driverCard, {
+        border: '1px solid #e8edf3',
+        borderRadius: isMobilePreview ? '20px' : '24px',
+        padding: isMobilePreview ? '13px' : '16px',
+        boxShadow: '0 10px 32px rgba(16,24,40,.055)',
+      });
+      soften(driverHeading, { fontSize: isMobilePreview ? '16px' : '19px', fontWeight: '640', color: '#323841' });
+
+      preview.querySelectorAll('div').forEach((box) => {
+        const text = box.textContent || '';
+        if ((text.includes('Delivery details') || text.includes('Progress') || text.includes('Your order')) && box.style.boxShadow) {
+          soften(box, {
+            border: '1px solid #e8edf3',
+            borderRadius: isMobilePreview ? '20px' : '24px',
+            boxShadow: '0 10px 32px rgba(16,24,40,.055)',
+            padding: isMobilePreview ? '12px' : '16px',
+          });
+        }
+      });
+    };
+
+    const tidyCustomerTracking = () => {
+      if (!window.location.pathname.startsWith('/apps/track/')) return;
       const trackingTextNodes = [];
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
-
       while (node) {
         trackingTextNodes.push(node);
         node = walker.nextNode();
       }
-
       const pageText = document.body?.innerText || '';
       const isLive = pageText.includes('Live tracking active') && pageText.includes('You are next');
       const isEnded = pageText.includes('Tracking ended') || pageText.includes('Delivery completed') || pageText.includes('Delivery attempted');
-
       trackingTextNodes.forEach((textNode) => {
-        if (!isLive && textNode.nodeValue?.includes('Tracking active')) {
-          textNode.nodeValue = textNode.nodeValue.replaceAll('Tracking active', 'Tracking not live yet');
-        }
-
-        if (!isLive && textNode.nodeValue?.includes('Route active')) {
-          textNode.nodeValue = textNode.nodeValue.replaceAll('Route active', 'Route active, tracking not live yet');
-        }
-
-        if (!isLive && textNode.nodeValue?.includes('Activates when next')) {
-          textNode.nodeValue = textNode.nodeValue.replaceAll('Activates when next', 'Tracking locked');
-        }
+        if (!isLive && textNode.nodeValue?.includes('Tracking active')) textNode.nodeValue = textNode.nodeValue.replaceAll('Tracking active', 'Tracking not live yet');
+        if (!isLive && textNode.nodeValue?.includes('Route active')) textNode.nodeValue = textNode.nodeValue.replaceAll('Route active', 'Route active, tracking not live yet');
+        if (!isLive && textNode.nodeValue?.includes('Activates when next')) textNode.nodeValue = textNode.nodeValue.replaceAll('Activates when next', 'Tracking locked');
       });
-
-      if (isLive || isEnded) {
-        return;
-      }
-
+      if (isLive || isEnded) return;
       document.querySelectorAll('span').forEach((span) => {
-        if (span.textContent?.trim() !== 'Map view') {
-          return;
-        }
-
+        if (span.textContent?.trim() !== 'Map view') return;
         const mapBox = span.closest('div[style*="min-height: 360"]');
-
-        if (!mapBox || mapBox.getAttribute('data-bpd-tracking-locked') === 'true') {
-          return;
-        }
-
+        if (!mapBox || mapBox.getAttribute('data-bpd-tracking-locked') === 'true') return;
         mapBox.setAttribute('data-bpd-tracking-locked', 'true');
         mapBox.innerHTML = '<div style="display:grid;place-items:center;min-height:360px;padding:24px;text-align:center;background:#f8fafc;border-radius:14px;"><div><div style="width:54px;height:54px;border-radius:50%;background:#e5e7eb;display:grid;place-items:center;margin:0 auto 12px;font-size:22px;font-weight:800;color:#667085;">•</div><h2 style="margin:0 0 8px;font-size:20px;color:#323841;">Live tracking is not active yet</h2><p style="margin:0;color:#667085;max-width:420px;">For privacy, the map will only appear when your delivery is the next active drop.</p></div></div>';
       });
@@ -451,21 +439,16 @@ const planningPanelScript = `
       document.querySelectorAll('details summary h4').forEach((heading) => {
         const summary = heading.closest('summary');
         const line = summary?.querySelector('p');
-
-        if (line?.textContent?.trim() === 'United Kingdom') {
-          line.textContent = '';
-        }
+        if (line?.textContent?.trim() === 'United Kingdom') line.textContent = '';
       });
 
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       const textNodes = [];
       let node = walker.nextNode();
-
       while (node) {
         textNodes.push(node);
         node = walker.nextNode();
       }
-
       textNodes.forEach((textNode) => {
         if (textNode.nodeValue?.includes('Return to base after last drop')) {
           textNode.nodeValue = textNode.nodeValue.replaceAll('Return to base after last drop', 'Return to base');
@@ -474,24 +457,18 @@ const planningPanelScript = `
 
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
+      tidyCustomerTrackingPreview();
     };
 
     const startObserver = () => {
-      if (!document.body) {
-        return;
-      }
-
+      if (!document.body) return;
       tidyPlanningLabels();
       new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
-
       let runs = 0;
       const interval = window.setInterval(() => {
         tidyPlanningLabels();
         runs += 1;
-
-        if (runs > 40) {
-          window.clearInterval(interval);
-        }
+        if (runs > 80) window.clearInterval(interval);
       }, 250);
     };
 
@@ -500,7 +477,6 @@ const planningPanelScript = `
     } else {
       startObserver();
     }
-
     window.addEventListener('pageshow', tidyPlanningLabels);
   })();
 `;
