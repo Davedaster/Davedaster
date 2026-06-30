@@ -91,6 +91,7 @@ export async function saveProofOfDelivery(input: {
   const podImage = input.podImage?.trim() || "";
   const podName = input.podName?.trim() || "";
   const podLocationNote = formatPodLocationNote(input.podLat, input.podLng);
+  const leftInSafePlace = Boolean(input.leftInSafePlace);
   const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null, podLocationNote]
     .filter(Boolean)
     .join("\n");
@@ -126,17 +127,21 @@ export async function saveProofOfDelivery(input: {
   }
 
   if (!proofPhotoUrls.length || !primaryProofPhotoUrl) {
-    throw new Error("Proof photo link is required before marking delivered.");
+    throw new Error("Proof photo is required before marking delivered.");
   }
 
   for (const proofPhotoUrl of proofPhotoUrls) {
     if (!isValidProofPhotoUrl(proofPhotoUrl)) {
-      throw new Error("Every proof photo link must be a valid web address.");
+      throw new Error("Every proof photo must be a valid uploaded image or web address.");
     }
   }
 
-  if (!podName || !isValidPodImage(podImage) || !input.podTicked) {
-    throw new Error("Complete the POD fields before marking delivered.");
+  if (!leftInSafePlace && (!podName || !isValidPodImage(podImage) || !input.podTicked)) {
+    throw new Error("Customer received deliveries need a customer name, signature and confirmation before marking delivered.");
+  }
+
+  if (leftInSafePlace && !input.safePlaceNote?.trim()) {
+    throw new Error("Add a safe place note before marking delivered.");
   }
 
   const shopifyResults: string[] = [];
@@ -168,14 +173,14 @@ export async function saveProofOfDelivery(input: {
               url,
               label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
             })),
-            {
+            ...(!leftInSafePlace && isValidPodImage(podImage) ? [{
               url: podImage,
-              label: `Receiver mark ${podName}`,
-            },
+              label: `Customer signature ${podName}`,
+            }] : []),
           ],
         },
         deliveryNote: noteParts || null,
-        safePlaceNote: input.leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
+        safePlaceNote: leftInSafePlace ? input.safePlaceNote?.trim() || "Left in safe place" : input.safePlaceNote?.trim() || null,
       },
     });
 
@@ -201,7 +206,7 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"} and POD name ${podName}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}${leftInSafePlace ? " and safe place confirmation" : ` and customer signature ${podName}`}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
           },
         },
       },
