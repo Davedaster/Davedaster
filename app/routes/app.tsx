@@ -33,6 +33,7 @@ export default function App() {
         <Link to="/app/proof-of-delivery">Proof of Delivery</Link>
         <Link to="/app/returns">Returns</Link>
         <Link to="/app/notifications">Notifications</Link>
+        <Link to="/app/settings/fulfilment">Fulfilment Settings</Link>
         <Link to="/app/area-filters">Area Filters</Link>
         <Link to="/app/settings">Settings</Link>
       </NavMenu>
