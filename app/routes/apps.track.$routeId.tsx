@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useRevalidator } from "@remix-run/react";
 import { useEffect, useState } from "react";
 
 import { EstimatedVanProgress } from "../components/EstimatedVanProgress";
@@ -9,6 +9,7 @@ import { formatEtaSlot } from "../lib/etaSlots";
 import { getCustomerTracking } from "../lib/tracking.server";
 
 const TRACKING_REFRESHED_KEY = "routeBuddyTrackingRefreshed";
+const AUTO_REFRESH_MS = 60000;
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const routeId = params.routeId;
@@ -179,12 +180,15 @@ function styles(primaryColour: string, customCss: string) {
 
 export default function CustomerTrackingPage() {
   const { tracking, settings } = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
   const { route, stop, deliveryGroup, order, isNextDrop, progress } = tracking;
   const slot = formatSlot(stop.estimatedArrival);
   const stopsBeforeCustomer = normaliseStopsBeforeCustomer(progress.stopsBeforeCustomer);
   const showProof = route.status === "COMPLETED" || stop.status === "DELIVERED";
   const showFailedDelivery = stop.status === "FAILED";
   const progressActive = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING" && isNextDrop;
+  const autoRefreshActive = route.status === "OUT_FOR_DELIVERY" && stop.status === "PENDING";
+  const isRefreshing = revalidator.state !== "idle";
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
@@ -208,6 +212,24 @@ export default function CustomerTrackingPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (revalidator.state === "idle") {
+      setLastUpdatedAt(new Date());
+    }
+  }, [revalidator.state, route.status, stop.estimatedArrival, stop.status]);
+
+  useEffect(() => {
+    if (!autoRefreshActive) return undefined;
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && revalidator.state === "idle") {
+        revalidator.revalidate();
+      }
+    }, AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [autoRefreshActive, revalidator]);
+
   function handleRefreshTracking() {
     window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true");
     window.location.reload();
@@ -217,8 +239,8 @@ export default function CustomerTrackingPage() {
     <main className="bpd-track-page">
       <style>{styles(primaryColour, settings.customCss)}</style>
       <section className="bpd-track-wrap">
-        <div className="bpd-brand-row"><div>{settings.logoUrl ? <img className="bpd-logo" src={settings.logoUrl} alt={settings.companyName} /> : <div className="bpd-company-name">{settings.companyName}</div>}</div><button type="button" onClick={handleRefreshTracking} className="bpd-refresh-button">Refresh</button></div>
-        <section className="bpd-hero"><h1>{pageTitle}</h1><p>{statusMessage}</p><div className="bpd-eta-box"><span>Estimated arrival</span><strong>{showProof ? "Delivered" : showFailedDelivery ? "Attempt recorded" : slot}</strong><span>Order {order.shopifyOrderNumber} · Last updated {formatLastUpdatedTime(lastUpdatedAt)}</span>{refreshMessage ? <span>{refreshMessage}</span> : null}</div></section>
+        <div className="bpd-brand-row"><div>{settings.logoUrl ? <img className="bpd-logo" src={settings.logoUrl} alt={settings.companyName} /> : <div className="bpd-company-name">{settings.companyName}</div>}</div><button type="button" onClick={handleRefreshTracking} className="bpd-refresh-button">{isRefreshing ? "Updating..." : "Refresh"}</button></div>
+        <section className="bpd-hero"><h1>{pageTitle}</h1><p>{statusMessage}</p><div className="bpd-eta-box"><span>Estimated arrival</span><strong>{showProof ? "Delivered" : showFailedDelivery ? "Attempt recorded" : slot}</strong><span>Order {order.shopifyOrderNumber} Â· Last updated {formatLastUpdatedTime(lastUpdatedAt)}</span>{isRefreshing ? <span>Checking for the latest update</span> : refreshMessage ? <span>{refreshMessage}</span> : null}</div></section>
         <section className="bpd-card bpd-driver-card">{route.driver?.photoUrl ? <img src={route.driver.photoUrl} alt={route.driver.name} className="bpd-driver-photo" /> : <div className="bpd-driver-initials">{customerInitials(route.driver?.name)}</div>}<div><h2>Your driver today is {route.driver?.name || "being confirmed"}</h2><p>{settings.roomOfChoiceText}</p></div></section>
         <div className="bpd-action-grid">{callHref ? <a href={callHref} className="bpd-action-button bpd-call-button">Call our team</a> : null}{emailHref ? <a href={emailHref} className="bpd-action-button bpd-email-button">Email our team</a> : null}</div>
         {showProof ? <DeliveryConfirmationCard tracking={tracking} primaryColour={primaryColour} /> : null}{showFailedDelivery ? <FailedDeliveryCard tracking={tracking} primaryColour={primaryColour} /> : null}
