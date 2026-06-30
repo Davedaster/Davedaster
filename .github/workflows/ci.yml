@@ -10,7 +10,7 @@ jobs:
       matrix:
         version: [20.19.0, 22, 24]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.version }}
