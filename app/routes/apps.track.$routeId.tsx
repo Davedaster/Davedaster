@@ -61,12 +61,36 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ").toLowerCase();
 }
 
-function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) { return Math.max(0, Number.isFinite(stopsBeforeCustomer) ? stopsBeforeCustomer : 0); }
-function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) { const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer); if (isNextDrop || dropsBefore === 0) return "You are next"; if (dropsBefore === 1) return "1 panel delivery"; return `${dropsBefore} panel deliveries`; }
-function buildMapUrl(location?: { latitude: number; longitude: number } | null) { if (!location) return null; return `https://maps.google.com/?q=${location.latitude},${location.longitude}`; }
-function phoneHref(phone: string) { const cleanPhone = phone.replace(/[^+\d]/g, ""); return cleanPhone ? `tel:${cleanPhone}` : null; }
-function mailHref(email: string) { return email ? `mailto:${email}` : null; }
-function customerInitials(name?: string | null) { const cleanName = (name || "Driver").trim(); const parts = cleanName.split(/\s+/).filter(Boolean); return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "D"; }
+function normaliseStopsBeforeCustomer(stopsBeforeCustomer: number) {
+  return Math.max(0, Number.isFinite(stopsBeforeCustomer) ? stopsBeforeCustomer : 0);
+}
+
+function stopsBeforeLabel(stopsBeforeCustomer: number, isNextDrop: boolean) {
+  const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
+  if (isNextDrop || dropsBefore === 0) return "You are next";
+  if (dropsBefore === 1) return "1 panel delivery";
+  return `${dropsBefore} panel deliveries`;
+}
+
+function buildMapUrl(location?: { latitude: number; longitude: number } | null) {
+  if (!location) return null;
+  return `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+}
+
+function phoneHref(phone: string) {
+  const cleanPhone = phone.replace(/[^+\d]/g, "");
+  return cleanPhone ? `tel:${cleanPhone}` : null;
+}
+
+function mailHref(email: string) {
+  return email ? `mailto:${email}` : null;
+}
+
+function customerInitials(name?: string | null) {
+  const cleanName = (name || "Driver").trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "D";
+}
 
 function trackingStatusMessage({ routeStatus, stopStatus, isNextDrop, stopsBeforeCustomer, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; stopsBeforeCustomer: number; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
   const dropsBefore = normaliseStopsBeforeCustomer(stopsBeforeCustomer);
@@ -81,7 +105,6 @@ function trackingStatusMessage({ routeStatus, stopStatus, isNextDrop, stopsBefor
 function pageHeading({ routeStatus, stopStatus, isNextDrop, settings }: { routeStatus: string; stopStatus: string; isNextDrop: boolean; settings: Awaited<ReturnType<typeof getCustomerTrackingSettings>> }) {
   if (stopStatus === "DELIVERED") return settings.heroDeliveredTitle;
   if (stopStatus === "FAILED") return settings.heroAttemptedTitle;
-  if (routeStatus === "OUT_FOR_DELIVERY" && isNextDrop) return settings.heroOutForDeliveryTitle;
   if (routeStatus === "OUT_FOR_DELIVERY") return settings.heroOutForDeliveryTitle;
   return settings.heroPlannedTitle;
 }
@@ -184,9 +207,11 @@ export default function CustomerTrackingPage() {
   const progressVisuals = {
     progressLineColour: settings.progressLineColour,
     vanLabel: settings.vanLabel,
+    vanIconUrl: settings.vanIconUrl,
     vanBackgroundColour: settings.vanBackgroundColour,
     vanTextColour: settings.vanTextColour,
     homeLabel: settings.homeLabel,
+    homeIconUrl: settings.homeIconUrl,
     homeBackgroundColour: settings.homeBackgroundColour,
     homeBorderColour: settings.homeBorderColour,
     homeTextColour: settings.homeTextColour,
@@ -195,11 +220,18 @@ export default function CustomerTrackingPage() {
   useEffect(() => {
     setLastUpdatedAt(new Date());
     const timer = window.setInterval(() => setCurrentTime(new Date()), 30000);
-    if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") { window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY); setRefreshMessage("Tracking updated"); window.setTimeout(() => setRefreshMessage(null), 2500); }
+    if (window.sessionStorage.getItem(TRACKING_REFRESHED_KEY) === "true") {
+      window.sessionStorage.removeItem(TRACKING_REFRESHED_KEY);
+      setRefreshMessage("Tracking updated");
+      window.setTimeout(() => setRefreshMessage(null), 2500);
+    }
     return () => window.clearInterval(timer);
   }, []);
 
-  function handleRefreshTracking() { window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true"); window.location.reload(); }
+  function handleRefreshTracking() {
+    window.sessionStorage.setItem(TRACKING_REFRESHED_KEY, "true");
+    window.location.reload();
+  }
 
   return (
     <main className="bpd-track-page">
