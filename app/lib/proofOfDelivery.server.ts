@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
+import { recordEtaLearningObservation } from "./etaLearning.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
 import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
@@ -160,6 +161,7 @@ export async function saveProofOfDelivery(input: {
   const notificationErrorDetails = notificationResult.errors.length
     ? `. Notification errors: ${notificationResult.errors.join(" | ")}`
     : "";
+  const actualArrival = new Date();
 
   await prisma.$transaction(async (tx) => {
     await tx.deliveryGroup.update({
@@ -191,7 +193,7 @@ export async function saveProofOfDelivery(input: {
       },
       data: {
         status: "DELIVERED",
-        actualArrival: new Date(),
+        actualArrival,
       },
     });
 
@@ -214,6 +216,16 @@ export async function saveProofOfDelivery(input: {
     });
   });
 
+  await recordEtaLearningObservation({
+    estimatedArrival: stop.estimatedArrival,
+    actualArrival,
+    deliveryGroup: {
+      postcode: stop.deliveryGroup.postcode,
+    },
+    route: {
+      driverId: stop.route.driverId,
+    },
+  });
   await recalculateTrafficEtaAfterStop(input.stopId);
   await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
