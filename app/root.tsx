@@ -21,14 +21,6 @@ const planningPanelStyles = `
     isolation: isolate;
   }
 
-  .bpd-tomtom-popup .mapboxgl-popup-content {
-    opacity: 0;
-  }
-
-  .bpd-tomtom-popup .mapboxgl-popup-content[data-bpd-tooltip-ready="true"] {
-    opacity: 1;
-  }
-
   .bpd-fulfil-date {
     font-weight: 800;
   }
@@ -133,12 +125,6 @@ const planningPanelScript = `
       return 'red';
     };
 
-    const markTooltipReady = () => {
-      document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
-        if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
-      });
-    };
-
     const updateFulfilmentTooltipColours = () => {
       document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
         if (!(line instanceof HTMLElement) || line.dataset.bpdFulfilStyled === 'true') return;
@@ -150,7 +136,6 @@ const planningPanelScript = `
         line.dataset.bpdFulfilStyled = 'true';
         line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
       });
-      markTooltipReady();
     };
 
     const tidyCustomerTracking = () => {
