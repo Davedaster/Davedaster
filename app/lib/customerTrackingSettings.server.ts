@@ -15,6 +15,17 @@ export type CustomerTrackingSettings = {
   deliveredMessage: string;
   attemptedMessage: string;
   roomOfChoiceText: string;
+  progressLineColour: string;
+  vanLabel: string;
+  vanBackgroundColour: string;
+  vanTextColour: string;
+  homeLabel: string;
+  homeBackgroundColour: string;
+  homeBorderColour: string;
+  homeTextColour: string;
+  previewItemOne: string;
+  previewItemTwo: string;
+  previewItemThree: string;
   customFooterHtml: string;
   customCss: string;
 };
@@ -36,6 +47,17 @@ export const defaultCustomerTrackingSettings: CustomerTrackingSettings = {
   deliveredMessage: "Your panel delivery has been completed. Thank you for shopping with us.",
   attemptedMessage: "Our team has recorded an attempted delivery. Please contact us and we will help with the next step.",
   roomOfChoiceText: "Our own team will bring your order to a room of your choice where access allows.",
+  progressLineColour: "#509AE6",
+  vanLabel: "VAN",
+  vanBackgroundColour: "#509AE6",
+  vanTextColour: "#ffffff",
+  homeLabel: "HOME",
+  homeBackgroundColour: "#ffffff",
+  homeBorderColour: "#16a34a",
+  homeTextColour: "#16a34a",
+  previewItemOne: "2 × White Marble Gloss Panels",
+  previewItemTwo: "1 × Chrome End Cap Trim",
+  previewItemThree: "2 × Soudal Grip All Adhesive",
   customFooterHtml: "",
   customCss: "",
 };
@@ -44,8 +66,8 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normaliseColour(value: string) {
-  return /^#[0-9a-f]{6}$/i.test(value) ? value : defaultCustomerTrackingSettings.primaryColour;
+function normaliseColour(value: string, fallback = defaultCustomerTrackingSettings.primaryColour) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
 function normaliseSettings(value: Partial<CustomerTrackingSettings> | null | undefined): CustomerTrackingSettings {
@@ -64,6 +86,17 @@ function normaliseSettings(value: Partial<CustomerTrackingSettings> | null | und
     deliveredMessage: clean(value?.deliveredMessage) || defaultCustomerTrackingSettings.deliveredMessage,
     attemptedMessage: clean(value?.attemptedMessage) || defaultCustomerTrackingSettings.attemptedMessage,
     roomOfChoiceText: clean(value?.roomOfChoiceText) || defaultCustomerTrackingSettings.roomOfChoiceText,
+    progressLineColour: normaliseColour(clean(value?.progressLineColour), defaultCustomerTrackingSettings.progressLineColour),
+    vanLabel: clean(value?.vanLabel) || defaultCustomerTrackingSettings.vanLabel,
+    vanBackgroundColour: normaliseColour(clean(value?.vanBackgroundColour), defaultCustomerTrackingSettings.vanBackgroundColour),
+    vanTextColour: normaliseColour(clean(value?.vanTextColour), defaultCustomerTrackingSettings.vanTextColour),
+    homeLabel: clean(value?.homeLabel) || defaultCustomerTrackingSettings.homeLabel,
+    homeBackgroundColour: normaliseColour(clean(value?.homeBackgroundColour), defaultCustomerTrackingSettings.homeBackgroundColour),
+    homeBorderColour: normaliseColour(clean(value?.homeBorderColour), defaultCustomerTrackingSettings.homeBorderColour),
+    homeTextColour: normaliseColour(clean(value?.homeTextColour), defaultCustomerTrackingSettings.homeTextColour),
+    previewItemOne: clean(value?.previewItemOne) || defaultCustomerTrackingSettings.previewItemOne,
+    previewItemTwo: clean(value?.previewItemTwo) || defaultCustomerTrackingSettings.previewItemTwo,
+    previewItemThree: clean(value?.previewItemThree) || defaultCustomerTrackingSettings.previewItemThree,
     customFooterHtml: clean(value?.customFooterHtml),
     customCss: clean(value?.customCss),
   };
