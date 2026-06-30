@@ -119,6 +119,20 @@ function shippingTitle(order: ShopifyOrderNode) {
   return order.shippingLines.edges.map((edge) => edge.node.title).join(", ");
 }
 
+function isPickupOrCollectionOrder(order: ShopifyOrderNode) {
+  const title = normalise(shippingTitle(order));
+
+  return (
+    !order.shippingAddress ||
+    title.includes("pickup") ||
+    title.includes("pick up") ||
+    title.includes("collection") ||
+    title.includes("click and collect") ||
+    title.includes("collect in store") ||
+    title.includes("customer collect")
+  );
+}
+
 function isFulfilled(order: ShopifyOrderNode) {
   return normalise(order.displayFulfillmentStatus) === "fulfilled";
 }
@@ -256,6 +270,7 @@ export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
   if (isFullyRefunded(order)) return false;
   if (isFulfilled(order)) return false;
   if (isSampleOnly) return false;
+  if (isPickupOrCollectionOrder(order)) return false;
 
   return true;
 }
