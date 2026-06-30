@@ -16,7 +16,7 @@ import {
   InlineStack,
   Box,
 } from "@shopify/polaris";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import {
   getAppCredentials,
@@ -70,11 +70,8 @@ function settingValue(formData: FormData, key: keyof CustomerTrackingSettings) {
 
 function formCoordinate(formData: FormData, key: string) {
   const value = String(formData.get(key) || "").trim();
-
   if (!value) return null;
-
   const numberValue = Number(value);
-
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
@@ -180,28 +177,11 @@ function statusBadge(enabled: boolean, label: string) {
 }
 
 function TabButton({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: active ? "1px solid #509AE6" : "1px solid #d0d5dd",
-        background: active ? "#509AE6" : "#ffffff",
-        color: active ? "#ffffff" : "#323841",
-        borderRadius: 999,
-        padding: "10px 14px",
-        fontWeight: 800,
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
-  );
+  return <button type="button" onClick={onClick} style={{ border: active ? "1px solid #509AE6" : "1px solid #d0d5dd", background: active ? "#509AE6" : "#ffffff", color: active ? "#ffffff" : "#323841", borderRadius: 999, padding: "10px 14px", fontWeight: 800, cursor: "pointer" }}>{children}</button>;
 }
 
 function StructuredAddressFields({ address, onChange, prefix }: { address: StructuredAddress; onChange: (address: StructuredAddress) => void; prefix: string }) {
   const setField = (field: keyof StructuredAddress) => (value: string) => onChange({ ...address, [field]: value });
-
   return (
     <BlockStack gap="300">
       <FormLayout.Group>
@@ -221,36 +201,46 @@ function StructuredAddressFields({ address, onChange, prefix }: { address: Struc
   );
 }
 
-function ApiCredentialForm({
-  title,
-  enabled,
-  label,
-  intent,
-  children,
-  saved,
-}: {
-  title: string;
-  enabled: boolean;
-  label: string;
-  intent: string;
-  children: React.ReactNode;
-  saved: boolean;
-}) {
+function ApiCredentialForm({ title, enabled, label, intent, children, saved }: { title: string; enabled: boolean; label: string; intent: string; children: ReactNode; saved: boolean }) {
   return (
     <Form method="post">
       <input type="hidden" name="intent" value={intent} />
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
           <Text as="h3" variant="headingMd">{title}</Text>
-          <InlineStack gap="200" blockAlign="center">
-            {saved ? <Badge tone="success">Saved</Badge> : null}
-            {statusBadge(enabled, label)}
-            <Button submit variant="primary">Save</Button>
-          </InlineStack>
+          <InlineStack gap="200" blockAlign="center">{saved ? <Badge tone="success">Saved</Badge> : null}{statusBadge(enabled, label)}<Button submit variant="primary">Save</Button></InlineStack>
         </InlineStack>
         {children}
       </BlockStack>
     </Form>
+  );
+}
+
+function CustomerTrackingPreview({ settings }: { settings: CustomerTrackingSettings }) {
+  const primaryColour = settings.primaryColour || "#509AE6";
+  return (
+    <LegacyCard title="Customer tracking preview" sectioned>
+      <BlockStack gap="400">
+        <Text as="p" variant="bodyMd" tone="subdued">Live preview using the wording and branding currently in the boxes below.</Text>
+        <div style={{ background: "#eef4fb", borderRadius: 18, padding: 14, border: "1px solid #d0d5dd" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            {settings.logoUrl ? <img src={settings.logoUrl} alt={settings.companyName} style={{ maxHeight: 44, maxWidth: 170, objectFit: "contain" }} /> : <strong style={{ color: primaryColour, fontSize: 18 }}>{settings.companyName}</strong>}
+            <span style={{ border: `1px solid ${primaryColour}`, color: primaryColour, background: "#fff", borderRadius: 999, padding: "7px 10px", fontWeight: 800, fontSize: 12 }}>Refresh</span>
+          </div>
+          <div style={{ background: `linear-gradient(135deg, ${primaryColour}, #2578bd)`, color: "#fff", borderRadius: 22, padding: 18 }}>
+            <h2 style={{ margin: 0, fontSize: 28, lineHeight: 1.05 }}>{settings.heroOutForDeliveryTitle}</h2>
+            <p style={{ margin: "10px 0 0", fontWeight: 700 }}>{settings.outForDeliveryMessage}</p>
+            <div style={{ marginTop: 14, background: "rgba(255,255,255,.16)", borderRadius: 16, padding: 12 }}><span style={{ display: "block", fontWeight: 900, fontSize: 12 }}>Estimated arrival</span><strong style={{ fontSize: 22 }}>Today between 10:30 and 11:30</strong></div>
+          </div>
+          <div style={{ marginTop: 12, background: "#fff", borderRadius: 18, padding: 14, display: "flex", gap: 12, alignItems: "center" }}>
+            <div style={{ width: 62, height: 62, borderRadius: "50%", background: primaryColour, color: "#fff", display: "grid", placeItems: "center", fontWeight: 900 }}>CG</div>
+            <div><strong>Your driver today is Chris</strong><p style={{ margin: "5px 0 0", color: "#667085" }}>{settings.roomOfChoiceText}</p></div>
+          </div>
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><span style={{ background: primaryColour, color: "#fff", borderRadius: 14, padding: 12, textAlign: "center", fontWeight: 900 }}>Call our team</span><span style={{ background: "#323841", color: "#fff", borderRadius: 14, padding: 12, textAlign: "center", fontWeight: 900 }}>Email our team</span></div>
+        </div>
+        <Text as="p" variant="bodySm" tone="subdued">Custom HTML / Liquid / JavaScript is shown in the footer area of the real page. Custom CSS is applied to the tracking page only.</Text>
+      </BlockStack>
+    </LegacyCard>
   );
 }
 
@@ -272,18 +262,7 @@ export default function Settings() {
   const [startLongitude, setStartLongitude] = useState(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
   const [returnToBaseDefault, setReturnToBaseDefault] = useState(currentSettings.returnToBaseDefault);
 
-  useEffect(() => {
-    setPlannedStartTime(currentSettings.plannedStartTime);
-    setTimePerDropMinutes(String(currentSettings.timePerDropMinutes));
-    setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes));
-    setFulfilmentWindowDays(String(currentSettings.fulfilmentWindowDays || 7));
-    setUseWorkingDaysOnly(currentSettings.useWorkingDaysOnly ?? true);
-    setStartStructuredAddress(currentSettings.startStructuredAddress);
-    setStartLatitude(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude));
-    setStartLongitude(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude));
-    setReturnToBaseDefault(currentSettings.returnToBaseDefault);
-  }, [currentSettings]);
-
+  useEffect(() => { setPlannedStartTime(currentSettings.plannedStartTime); setTimePerDropMinutes(String(currentSettings.timePerDropMinutes)); setCustomerSlotMinutes(String(currentSettings.customerSlotMinutes)); setFulfilmentWindowDays(String(currentSettings.fulfilmentWindowDays || 7)); setUseWorkingDaysOnly(currentSettings.useWorkingDaysOnly ?? true); setStartStructuredAddress(currentSettings.startStructuredAddress); setStartLatitude(currentSettings.startLatitude === null ? "" : String(currentSettings.startLatitude)); setStartLongitude(currentSettings.startLongitude === null ? "" : String(currentSettings.startLongitude)); setReturnToBaseDefault(currentSettings.returnToBaseDefault); }, [currentSettings]);
   useEffect(() => setCredentials(storedCredentials), [storedCredentials]);
   useEffect(() => setTrackingSettings(currentCustomerTrackingSettings), [currentCustomerTrackingSettings]);
 
@@ -293,171 +272,17 @@ export default function Settings() {
   return (
     <Page title="Settings">
       <Layout>
-        <Layout.Section>
-          <LegacyCard sectioned>
-            <InlineStack gap="200" wrap>
-              <TabButton active={activeTab === "delivery"} onClick={() => setActiveTab("delivery")}>Delivery settings</TabButton>
-              <TabButton active={activeTab === "notifications"} onClick={() => setActiveTab("notifications")}>Notifications</TabButton>
-              <TabButton active={activeTab === "tracking"} onClick={() => setActiveTab("tracking")}>Customer tracking screen</TabButton>
-              <TabButton active={activeTab === "maps"} onClick={() => setActiveTab("maps")}>Maps and address lookup</TabButton>
-              <TabButton active={activeTab === "storage"} onClick={() => setActiveTab("storage")}>Storage and developer</TabButton>
-            </InlineStack>
-          </LegacyCard>
-        </Layout.Section>
+        <Layout.Section><LegacyCard sectioned><InlineStack gap="200" wrap><TabButton active={activeTab === "delivery"} onClick={() => setActiveTab("delivery")}>Delivery settings</TabButton><TabButton active={activeTab === "notifications"} onClick={() => setActiveTab("notifications")}>Notifications</TabButton><TabButton active={activeTab === "tracking"} onClick={() => setActiveTab("tracking")}>Customer tracking screen</TabButton><TabButton active={activeTab === "maps"} onClick={() => setActiveTab("maps")}>Maps and address lookup</TabButton><TabButton active={activeTab === "storage"} onClick={() => setActiveTab("storage")}>Storage and developer</TabButton></InlineStack></LegacyCard></Layout.Section>
 
-        {activeTab === "delivery" ? (
-          <Layout.Section>
-            <LegacyCard title="Route Planning Defaults" sectioned>
-              <Form method="post">
-                <input type="hidden" name="intent" value="saveRouteSettings" />
-                <BlockStack gap="400">
-                  <Text as="p" variant="bodyMd" tone="subdued">These values are used automatically on the Orders Map when building a new delivery route.</Text>
-                  {actionData?.ok && actionData.savedSection === "Route settings" ? <Badge tone="success">Route settings saved</Badge> : null}
-                  <FormLayout>
-                    <FormLayout.Group>
-                      <TextField label="Default driver start time" name="plannedStartTime" value={plannedStartTime} onChange={setPlannedStartTime} type="time" autoComplete="off" />
-                      <TextField label="Default minutes per drop" name="timePerDropMinutes" value={timePerDropMinutes} onChange={setTimePerDropMinutes} type="number" autoComplete="off" />
-                    </FormLayout.Group>
-                    <TextField label="Default customer delivery slot minutes" name="customerSlotMinutes" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} type="number" autoComplete="off" helpText="60 means customers get a one hour delivery slot." />
-                    <BlockStack gap="300">
-                      <Text as="h3" variant="headingMd">Fulfilment hover settings</Text>
-                      <TextField label="Fulfilment window days" name="fulfilmentWindowDays" value={fulfilmentWindowDays} onChange={setFulfilmentWindowDays} type="number" autoComplete="off" helpText="Used for the fulfil by date shown in the map hover card." />
-                      <Checkbox label="Use working days only, exclude weekends and bank holidays" checked={useWorkingDaysOnly} onChange={setUseWorkingDaysOnly} helpText="Ticked means weekends and England and Wales bank holidays are not counted." />
-                      <input type="hidden" name="useWorkingDaysOnly" value={useWorkingDaysOnly ? "true" : "false"} />
-                    </BlockStack>
-                    <BlockStack gap="300">
-                      <Text as="h3" variant="headingMd">Default route start address</Text>
-                      <StructuredAddressFields address={startStructuredAddress} onChange={setStartStructuredAddress} prefix="start" />
-                      <FormLayout.Group>
-                        <TextField label="Exact depot latitude" name="startLatitude" value={startLatitude} onChange={setStartLatitude} autoComplete="off" />
-                        <TextField label="Exact depot longitude" name="startLongitude" value={startLongitude} onChange={setStartLongitude} autoComplete="off" />
-                      </FormLayout.Group>
-                      <Box background="bg-surface-secondary" padding="300" borderRadius="300">
-                        <BlockStack gap="100">
-                          <Text as="p" variant="bodySm" fontWeight="bold">Saved address format</Text>
-                          <Text as="p" variant="bodySm" tone="subdued">{formatStructuredAddress(startStructuredAddress) || currentSettings.startAddress}</Text>
-                          {currentSettings.startLatitude && currentSettings.startLongitude ? <Text as="p" variant="bodySm" tone="subdued">Coordinates saved: {currentSettings.startLatitude}, {currentSettings.startLongitude}</Text> : <Text as="p" variant="bodySm" tone="critical">Coordinates not saved yet.</Text>}
-                        </BlockStack>
-                      </Box>
-                    </BlockStack>
-                    <Checkbox label="Return to base by default" checked={returnToBaseDefault} onChange={setReturnToBaseDefault} helpText="When ticked, new routes finish at the same address as the start point unless you set a custom finish on the planning page." />
-                    <input type="hidden" name="returnToBaseDefault" value={returnToBaseDefault ? "true" : "false"} />
-                    <Button submit variant="primary">Save route settings</Button>
-                  </FormLayout>
-                </BlockStack>
-              </Form>
-            </LegacyCard>
-          </Layout.Section>
-        ) : null}
+        {activeTab === "delivery" ? <Layout.Section><LegacyCard title="Route Planning Defaults" sectioned><Form method="post"><input type="hidden" name="intent" value="saveRouteSettings" /><BlockStack gap="400"><Text as="p" variant="bodyMd" tone="subdued">These values are used automatically on the Orders Map when building a new delivery route.</Text>{actionData?.ok && actionData.savedSection === "Route settings" ? <Badge tone="success">Route settings saved</Badge> : null}<FormLayout><FormLayout.Group><TextField label="Default driver start time" name="plannedStartTime" value={plannedStartTime} onChange={setPlannedStartTime} type="time" autoComplete="off" /><TextField label="Default minutes per drop" name="timePerDropMinutes" value={timePerDropMinutes} onChange={setTimePerDropMinutes} type="number" autoComplete="off" /></FormLayout.Group><TextField label="Default customer delivery slot minutes" name="customerSlotMinutes" value={customerSlotMinutes} onChange={setCustomerSlotMinutes} type="number" autoComplete="off" helpText="60 means customers get a one hour delivery slot." /><BlockStack gap="300"><Text as="h3" variant="headingMd">Fulfilment hover settings</Text><TextField label="Fulfilment window days" name="fulfilmentWindowDays" value={fulfilmentWindowDays} onChange={setFulfilmentWindowDays} type="number" autoComplete="off" helpText="Used for the fulfil by date shown in the map hover card." /><Checkbox label="Use working days only, exclude weekends and bank holidays" checked={useWorkingDaysOnly} onChange={setUseWorkingDaysOnly} helpText="Ticked means weekends and England and Wales bank holidays are not counted." /><input type="hidden" name="useWorkingDaysOnly" value={useWorkingDaysOnly ? "true" : "false"} /></BlockStack><BlockStack gap="300"><Text as="h3" variant="headingMd">Default route start address</Text><StructuredAddressFields address={startStructuredAddress} onChange={setStartStructuredAddress} prefix="start" /><FormLayout.Group><TextField label="Exact depot latitude" name="startLatitude" value={startLatitude} onChange={setStartLatitude} autoComplete="off" /><TextField label="Exact depot longitude" name="startLongitude" value={startLongitude} onChange={setStartLongitude} autoComplete="off" /></FormLayout.Group><Box background="bg-surface-secondary" padding="300" borderRadius="300"><BlockStack gap="100"><Text as="p" variant="bodySm" fontWeight="bold">Saved address format</Text><Text as="p" variant="bodySm" tone="subdued">{formatStructuredAddress(startStructuredAddress) || currentSettings.startAddress}</Text>{currentSettings.startLatitude && currentSettings.startLongitude ? <Text as="p" variant="bodySm" tone="subdued">Coordinates saved: {currentSettings.startLatitude}, {currentSettings.startLongitude}</Text> : <Text as="p" variant="bodySm" tone="critical">Coordinates not saved yet.</Text>}</BlockStack></Box></BlockStack><Checkbox label="Return to base by default" checked={returnToBaseDefault} onChange={setReturnToBaseDefault} helpText="When ticked, new routes finish at the same address as the start point unless you set a custom finish on the planning page." /><input type="hidden" name="returnToBaseDefault" value={returnToBaseDefault ? "true" : "false"} /><Button submit variant="primary">Save route settings</Button></FormLayout></BlockStack></Form></LegacyCard></Layout.Section> : null}
 
-        {activeTab === "notifications" ? (
-          <Layout.Section>
-            <LegacyCard title="Notifications" sectioned>
-              <BlockStack gap="500">
-                <Text as="p" variant="bodyMd" tone="subdued">SMS and email provider settings used when sending driver links and customer updates.</Text>
-                <ApiCredentialForm title="Twilio SMS" enabled={credentialStatus.twilioEnabled} label="Twilio" intent="saveTwilio" saved={actionData?.ok && actionData.savedSection === "Twilio"}>
-                  <TextField label="Account SID" name="twilioAccountSid" value={credentials.twilioAccountSid} onChange={setCredential("twilioAccountSid")} autoComplete="off" />
-                  <TextField label="Auth token" name="twilioAuthToken" value={credentials.twilioAuthToken} onChange={setCredential("twilioAuthToken")} type="password" autoComplete="off" />
-                  <TextField label="From number" name="twilioFromNumber" value={credentials.twilioFromNumber} onChange={setCredential("twilioFromNumber")} autoComplete="off" />
-                </ApiCredentialForm>
-                <Divider />
-                <ApiCredentialForm title="Resend Email" enabled={credentialStatus.resendEnabled} label="Resend" intent="saveResend" saved={actionData?.ok && actionData.savedSection === "Resend"}>
-                  <TextField label="Resend API key" name="resendApiKey" value={credentials.resendApiKey} onChange={setCredential("resendApiKey")} type="password" autoComplete="off" />
-                  <TextField label="From email" name="resendFromEmail" value={credentials.resendFromEmail} onChange={setCredential("resendFromEmail")} type="email" autoComplete="off" />
-                </ApiCredentialForm>
-              </BlockStack>
-            </LegacyCard>
-          </Layout.Section>
-        ) : null}
+        {activeTab === "notifications" ? <Layout.Section><LegacyCard title="Notifications" sectioned><BlockStack gap="500"><Text as="p" variant="bodyMd" tone="subdued">SMS and email provider settings used when sending driver links and customer updates.</Text><ApiCredentialForm title="Twilio SMS" enabled={credentialStatus.twilioEnabled} label="Twilio" intent="saveTwilio" saved={actionData?.ok && actionData.savedSection === "Twilio"}><TextField label="Account SID" name="twilioAccountSid" value={credentials.twilioAccountSid} onChange={setCredential("twilioAccountSid")} autoComplete="off" /><TextField label="Auth token" name="twilioAuthToken" value={credentials.twilioAuthToken} onChange={setCredential("twilioAuthToken")} type="password" autoComplete="off" /><TextField label="From number" name="twilioFromNumber" value={credentials.twilioFromNumber} onChange={setCredential("twilioFromNumber")} autoComplete="off" /></ApiCredentialForm><Divider /><ApiCredentialForm title="Resend Email" enabled={credentialStatus.resendEnabled} label="Resend" intent="saveResend" saved={actionData?.ok && actionData.savedSection === "Resend"}><TextField label="Resend API key" name="resendApiKey" value={credentials.resendApiKey} onChange={setCredential("resendApiKey")} type="password" autoComplete="off" /><TextField label="From email" name="resendFromEmail" value={credentials.resendFromEmail} onChange={setCredential("resendFromEmail")} type="email" autoComplete="off" /></ApiCredentialForm></BlockStack></LegacyCard></Layout.Section> : null}
 
-        {activeTab === "tracking" ? (
-          <Layout.Section>
-            <LegacyCard title="Customer tracking screen" sectioned>
-              <Form method="post">
-                <input type="hidden" name="intent" value="saveCustomerTracking" />
-                <BlockStack gap="400">
-                  <Text as="p" variant="bodyMd" tone="subdued">Control the branded customer tracking page. The core tracking layout stays protected, but the wording, contact details, logo and optional custom footer can be edited.</Text>
-                  {actionData?.ok && actionData.savedSection === "Customer tracking screen" ? <Badge tone="success">Customer tracking screen saved</Badge> : null}
-                  <FormLayout>
-                    <FormLayout.Group>
-                      <TextField label="Company name" name="companyName" value={trackingSettings.companyName} onChange={setTracking("companyName")} autoComplete="off" />
-                      <TextField label="Brand colour" name="primaryColour" value={trackingSettings.primaryColour} onChange={setTracking("primaryColour")} autoComplete="off" helpText="Use a hex colour, for example #509AE6." />
-                    </FormLayout.Group>
-                    <TextField label="Logo URL" name="logoUrl" value={trackingSettings.logoUrl} onChange={setTracking("logoUrl")} autoComplete="off" helpText="Optional. Leave blank to use the company name instead." />
-                    <FormLayout.Group>
-                      <TextField label="Support phone" name="supportPhone" value={trackingSettings.supportPhone} onChange={setTracking("supportPhone")} autoComplete="off" />
-                      <TextField label="Support email" name="supportEmail" value={trackingSettings.supportEmail} onChange={setTracking("supportEmail")} type="email" autoComplete="off" />
-                    </FormLayout.Group>
-                    <Divider />
-                    <Text as="h3" variant="headingMd">Page headings</Text>
-                    <TextField label="Planned delivery heading" name="heroPlannedTitle" value={trackingSettings.heroPlannedTitle} onChange={setTracking("heroPlannedTitle")} autoComplete="off" />
-                    <TextField label="Out for delivery heading" name="heroOutForDeliveryTitle" value={trackingSettings.heroOutForDeliveryTitle} onChange={setTracking("heroOutForDeliveryTitle")} autoComplete="off" />
-                    <TextField label="Delivered heading" name="heroDeliveredTitle" value={trackingSettings.heroDeliveredTitle} onChange={setTracking("heroDeliveredTitle")} autoComplete="off" />
-                    <TextField label="Attempted delivery heading" name="heroAttemptedTitle" value={trackingSettings.heroAttemptedTitle} onChange={setTracking("heroAttemptedTitle")} autoComplete="off" />
-                    <Divider />
-                    <Text as="h3" variant="headingMd">Customer messages</Text>
-                    <TextField label="Out for delivery message" name="outForDeliveryMessage" value={trackingSettings.outForDeliveryMessage} onChange={setTracking("outForDeliveryMessage")} multiline={2} autoComplete="off" />
-                    <TextField label="Not next yet message" name="notNextMessage" value={trackingSettings.notNextMessage} onChange={setTracking("notNextMessage")} multiline={2} autoComplete="off" />
-                    <TextField label="Delivered message" name="deliveredMessage" value={trackingSettings.deliveredMessage} onChange={setTracking("deliveredMessage")} multiline={2} autoComplete="off" />
-                    <TextField label="Attempted delivery message" name="attemptedMessage" value={trackingSettings.attemptedMessage} onChange={setTracking("attemptedMessage")} multiline={2} autoComplete="off" />
-                    <TextField label="Room of choice text" name="roomOfChoiceText" value={trackingSettings.roomOfChoiceText} onChange={setTracking("roomOfChoiceText")} multiline={2} autoComplete="off" />
-                    <Divider />
-                    <Text as="h3" variant="headingMd">Optional custom content</Text>
-                    <TextField label="Custom footer HTML" name="customFooterHtml" value={trackingSettings.customFooterHtml} onChange={setTracking("customFooterHtml")} multiline={4} autoComplete="off" helpText="Shown at the bottom of the tracking page. Keep this customer friendly." />
-                    <TextField label="Custom CSS" name="customCss" value={trackingSettings.customCss} onChange={setTracking("customCss")} multiline={4} autoComplete="off" helpText="Optional styling for the tracking page only." />
-                    <Button submit variant="primary">Save customer tracking screen</Button>
-                  </FormLayout>
-                </BlockStack>
-              </Form>
-            </LegacyCard>
-          </Layout.Section>
-        ) : null}
+        {activeTab === "tracking" ? <Layout.Section><BlockStack gap="400"><CustomerTrackingPreview settings={trackingSettings} /><LegacyCard title="Customer tracking screen" sectioned><Form method="post"><input type="hidden" name="intent" value="saveCustomerTracking" /><BlockStack gap="400"><Text as="p" variant="bodyMd" tone="subdued">Control the branded customer tracking page. The core tracking layout stays protected, but the wording, contact details, logo and optional custom footer can be edited.</Text>{actionData?.ok && actionData.savedSection === "Customer tracking screen" ? <Badge tone="success">Customer tracking screen saved</Badge> : null}<FormLayout><FormLayout.Group><TextField label="Company name" name="companyName" value={trackingSettings.companyName} onChange={setTracking("companyName")} autoComplete="off" /><TextField label="Brand colour" name="primaryColour" value={trackingSettings.primaryColour} onChange={setTracking("primaryColour")} autoComplete="off" helpText="Use a hex colour, for example #509AE6." /></FormLayout.Group><TextField label="Logo URL" name="logoUrl" value={trackingSettings.logoUrl} onChange={setTracking("logoUrl")} autoComplete="off" helpText="Optional. Leave blank to use the company name instead." /><FormLayout.Group><TextField label="Support phone" name="supportPhone" value={trackingSettings.supportPhone} onChange={setTracking("supportPhone")} autoComplete="off" /><TextField label="Support email" name="supportEmail" value={trackingSettings.supportEmail} onChange={setTracking("supportEmail")} type="email" autoComplete="off" /></FormLayout.Group><Divider /><Text as="h3" variant="headingMd">Page headings</Text><TextField label="Planned delivery heading" name="heroPlannedTitle" value={trackingSettings.heroPlannedTitle} onChange={setTracking("heroPlannedTitle")} autoComplete="off" /><TextField label="Out for delivery heading" name="heroOutForDeliveryTitle" value={trackingSettings.heroOutForDeliveryTitle} onChange={setTracking("heroOutForDeliveryTitle")} autoComplete="off" /><TextField label="Delivered heading" name="heroDeliveredTitle" value={trackingSettings.heroDeliveredTitle} onChange={setTracking("heroDeliveredTitle")} autoComplete="off" /><TextField label="Attempted delivery heading" name="heroAttemptedTitle" value={trackingSettings.heroAttemptedTitle} onChange={setTracking("heroAttemptedTitle")} autoComplete="off" /><Divider /><Text as="h3" variant="headingMd">Customer messages</Text><TextField label="Out for delivery message" name="outForDeliveryMessage" value={trackingSettings.outForDeliveryMessage} onChange={setTracking("outForDeliveryMessage")} multiline={2} autoComplete="off" /><TextField label="Not next yet message" name="notNextMessage" value={trackingSettings.notNextMessage} onChange={setTracking("notNextMessage")} multiline={2} autoComplete="off" /><TextField label="Delivered message" name="deliveredMessage" value={trackingSettings.deliveredMessage} onChange={setTracking("deliveredMessage")} multiline={2} autoComplete="off" /><TextField label="Attempted delivery message" name="attemptedMessage" value={trackingSettings.attemptedMessage} onChange={setTracking("attemptedMessage")} multiline={2} autoComplete="off" /><TextField label="Room of choice text" name="roomOfChoiceText" value={trackingSettings.roomOfChoiceText} onChange={setTracking("roomOfChoiceText")} multiline={2} autoComplete="off" /><Divider /><Text as="h3" variant="headingMd">Optional custom code</Text><TextField label="Custom HTML / Liquid / JavaScript" name="customFooterHtml" value={trackingSettings.customFooterHtml} onChange={setTracking("customFooterHtml")} multiline={5} autoComplete="off" helpText="Shown at the bottom of the customer tracking page. Use this for extra footer content or merchant specific code." /><TextField label="Custom CSS" name="customCss" value={trackingSettings.customCss} onChange={setTracking("customCss")} multiline={5} autoComplete="off" helpText="Optional styling for the tracking page only. Keep CSS scoped to your custom block or .bpd-track-page." /><Button submit variant="primary">Save customer tracking screen</Button></FormLayout></BlockStack></Form></LegacyCard></BlockStack></Layout.Section> : null}
 
-        {activeTab === "maps" ? (
-          <Layout.Section>
-            <LegacyCard title="Maps and address lookup" sectioned>
-              <BlockStack gap="500">
-                <ApiCredentialForm title="TomTom" enabled={credentialStatus.tomtomEnabled} label="TomTom" intent="saveTomTom" saved={actionData?.ok && actionData.savedSection === "TomTom"}>
-                  <TextField label="TomTom API key" name="tomtomApiKey" value={credentials.tomtomApiKey} onChange={setCredential("tomtomApiKey")} type="password" autoComplete="off" helpText="Used for live maps, route markers and address matching." />
-                </ApiCredentialForm>
-                <Divider />
-                <ApiCredentialForm title="RouteXL" enabled={credentialStatus.routexlEnabled} label="RouteXL" intent="saveRouteXL" saved={actionData?.ok && actionData.savedSection === "RouteXL"}>
-                  <FormLayout.Group>
-                    <TextField label="RouteXL username" name="routexlUsername" value={credentials.routexlUsername} onChange={setCredential("routexlUsername")} autoComplete="off" />
-                    <TextField label="RouteXL password" name="routexlPassword" value={credentials.routexlPassword} onChange={setCredential("routexlPassword")} type="password" autoComplete="off" />
-                  </FormLayout.Group>
-                </ApiCredentialForm>
-                <Divider />
-                <ApiCredentialForm title="getAddress.io" enabled={credentialStatus.getAddressEnabled} label="getAddress.io" intent="saveGetAddress" saved={actionData?.ok && actionData.savedSection === "getAddress.io"}>
-                  <TextField label="getAddress.io API key" name="getAddressApiKey" value={credentials.getAddressApiKey} onChange={setCredential("getAddressApiKey")} type="password" autoComplete="off" helpText="Stored for address lookup support." />
-                </ApiCredentialForm>
-              </BlockStack>
-            </LegacyCard>
-          </Layout.Section>
-        ) : null}
+        {activeTab === "maps" ? <Layout.Section><LegacyCard title="Maps and address lookup" sectioned><BlockStack gap="500"><ApiCredentialForm title="TomTom" enabled={credentialStatus.tomtomEnabled} label="TomTom" intent="saveTomTom" saved={actionData?.ok && actionData.savedSection === "TomTom"}><TextField label="TomTom API key" name="tomtomApiKey" value={credentials.tomtomApiKey} onChange={setCredential("tomtomApiKey")} type="password" autoComplete="off" helpText="Used for live maps, route markers and address matching." /></ApiCredentialForm><Divider /><ApiCredentialForm title="RouteXL" enabled={credentialStatus.routexlEnabled} label="RouteXL" intent="saveRouteXL" saved={actionData?.ok && actionData.savedSection === "RouteXL"}><FormLayout.Group><TextField label="RouteXL username" name="routexlUsername" value={credentials.routexlUsername} onChange={setCredential("routexlUsername")} autoComplete="off" /><TextField label="RouteXL password" name="routexlPassword" value={credentials.routexlPassword} onChange={setCredential("routexlPassword")} type="password" autoComplete="off" /></FormLayout.Group></ApiCredentialForm><Divider /><ApiCredentialForm title="getAddress.io" enabled={credentialStatus.getAddressEnabled} label="getAddress.io" intent="saveGetAddress" saved={actionData?.ok && actionData.savedSection === "getAddress.io"}><TextField label="getAddress.io API key" name="getAddressApiKey" value={credentials.getAddressApiKey} onChange={setCredential("getAddressApiKey")} type="password" autoComplete="off" helpText="Stored for address lookup support." /></ApiCredentialForm></BlockStack></LegacyCard></Layout.Section> : null}
 
-        {activeTab === "storage" ? (
-          <Layout.Section>
-            <LegacyCard title="Storage and developer" sectioned>
-              <BlockStack gap="500">
-                <ApiCredentialForm title="Proof Photo Storage" enabled={credentialStatus.proofPhotoStorageEnabled} label="Photo storage" intent="saveProofPhotoStorage" saved={actionData?.ok && actionData.savedSection === "Proof photo storage"}>
-                  <TextField label="Storage endpoint" name="proofPhotoStorageEndpoint" value={credentials.proofPhotoStorageEndpoint} onChange={setCredential("proofPhotoStorageEndpoint")} autoComplete="off" />
-                  <FormLayout.Group>
-                    <TextField label="Region" name="proofPhotoStorageRegion" value={credentials.proofPhotoStorageRegion} onChange={setCredential("proofPhotoStorageRegion")} autoComplete="off" />
-                    <TextField label="Bucket" name="proofPhotoStorageBucket" value={credentials.proofPhotoStorageBucket} onChange={setCredential("proofPhotoStorageBucket")} autoComplete="off" />
-                  </FormLayout.Group>
-                  <TextField label="Access key ID" name="proofPhotoStorageAccessKeyId" value={credentials.proofPhotoStorageAccessKeyId} onChange={setCredential("proofPhotoStorageAccessKeyId")} autoComplete="off" />
-                  <TextField label="Secret access key" name="proofPhotoStorageSecretAccessKey" value={credentials.proofPhotoStorageSecretAccessKey} onChange={setCredential("proofPhotoStorageSecretAccessKey")} type="password" autoComplete="off" />
-                  <TextField label="Public base URL" name="proofPhotoPublicBaseUrl" value={credentials.proofPhotoPublicBaseUrl} onChange={setCredential("proofPhotoPublicBaseUrl")} autoComplete="off" />
-                </ApiCredentialForm>
-                <Divider />
-                <ApiCredentialForm title="Customer Tracking URL" enabled={credentialStatus.shopPublicUrlEnabled} label="Tracking URL" intent="saveTrackingUrl" saved={actionData?.ok && actionData.savedSection === "Tracking URL"}>
-                  <TextField label="Public shop URL" name="shopPublicUrl" value={credentials.shopPublicUrl} onChange={setCredential("shopPublicUrl")} autoComplete="off" helpText="Used when customer SMS and email messages include their tracking link." />
-                </ApiCredentialForm>
-              </BlockStack>
-            </LegacyCard>
-          </Layout.Section>
-        ) : null}
+        {activeTab === "storage" ? <Layout.Section><LegacyCard title="Storage and developer" sectioned><BlockStack gap="500"><ApiCredentialForm title="Proof Photo Storage" enabled={credentialStatus.proofPhotoStorageEnabled} label="Photo storage" intent="saveProofPhotoStorage" saved={actionData?.ok && actionData.savedSection === "Proof photo storage"}><TextField label="Storage endpoint" name="proofPhotoStorageEndpoint" value={credentials.proofPhotoStorageEndpoint} onChange={setCredential("proofPhotoStorageEndpoint")} autoComplete="off" /><FormLayout.Group><TextField label="Region" name="proofPhotoStorageRegion" value={credentials.proofPhotoStorageRegion} onChange={setCredential("proofPhotoStorageRegion")} autoComplete="off" /><TextField label="Bucket" name="proofPhotoStorageBucket" value={credentials.proofPhotoStorageBucket} onChange={setCredential("proofPhotoStorageBucket")} autoComplete="off" /></FormLayout.Group><TextField label="Access key ID" name="proofPhotoStorageAccessKeyId" value={credentials.proofPhotoStorageAccessKeyId} onChange={setCredential("proofPhotoStorageAccessKeyId")} autoComplete="off" /><TextField label="Secret access key" name="proofPhotoStorageSecretAccessKey" value={credentials.proofPhotoStorageSecretAccessKey} onChange={setCredential("proofPhotoStorageSecretAccessKey")} type="password" autoComplete="off" /><TextField label="Public base URL" name="proofPhotoPublicBaseUrl" value={credentials.proofPhotoPublicBaseUrl} onChange={setCredential("proofPhotoPublicBaseUrl")} autoComplete="off" /></ApiCredentialForm><Divider /><ApiCredentialForm title="Customer Tracking URL" enabled={credentialStatus.shopPublicUrlEnabled} label="Tracking URL" intent="saveTrackingUrl" saved={actionData?.ok && actionData.savedSection === "Tracking URL"}><TextField label="Public shop URL" name="shopPublicUrl" value={credentials.shopPublicUrl} onChange={setCredential("shopPublicUrl")} autoComplete="off" helpText="Used when customer SMS and email messages include their tracking link." /></ApiCredentialForm></BlockStack></LegacyCard></Layout.Section> : null}
       </Layout>
     </Page>
   );
