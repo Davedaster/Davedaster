@@ -2,6 +2,7 @@ import prisma from "../db.server";
 import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
+import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -213,5 +214,6 @@ export async function saveProofOfDelivery(input: {
     });
   });
 
+  await recalculateTrafficEtaAfterStop(input.stopId);
   await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
