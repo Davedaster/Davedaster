@@ -17,9 +17,11 @@ export type CustomerTrackingSettings = {
   roomOfChoiceText: string;
   progressLineColour: string;
   vanLabel: string;
+  vanIconUrl: string;
   vanBackgroundColour: string;
   vanTextColour: string;
   homeLabel: string;
+  homeIconUrl: string;
   homeBackgroundColour: string;
   homeBorderColour: string;
   homeTextColour: string;
@@ -48,10 +50,12 @@ export const defaultCustomerTrackingSettings: CustomerTrackingSettings = {
   attemptedMessage: "Our team has recorded an attempted delivery. Please contact us and we will help with the next step.",
   roomOfChoiceText: "Our own team will bring your order to a room of your choice where access allows.",
   progressLineColour: "#509AE6",
-  vanLabel: "VAN",
+  vanLabel: "Van",
+  vanIconUrl: "",
   vanBackgroundColour: "#509AE6",
   vanTextColour: "#ffffff",
-  homeLabel: "HOME",
+  homeLabel: "Home",
+  homeIconUrl: "",
   homeBackgroundColour: "#ffffff",
   homeBorderColour: "#16a34a",
   homeTextColour: "#16a34a",
@@ -88,9 +92,11 @@ function normaliseSettings(value: Partial<CustomerTrackingSettings> | null | und
     roomOfChoiceText: clean(value?.roomOfChoiceText) || defaultCustomerTrackingSettings.roomOfChoiceText,
     progressLineColour: normaliseColour(clean(value?.progressLineColour), defaultCustomerTrackingSettings.progressLineColour),
     vanLabel: clean(value?.vanLabel) || defaultCustomerTrackingSettings.vanLabel,
+    vanIconUrl: clean(value?.vanIconUrl),
     vanBackgroundColour: normaliseColour(clean(value?.vanBackgroundColour), defaultCustomerTrackingSettings.vanBackgroundColour),
     vanTextColour: normaliseColour(clean(value?.vanTextColour), defaultCustomerTrackingSettings.vanTextColour),
     homeLabel: clean(value?.homeLabel) || defaultCustomerTrackingSettings.homeLabel,
+    homeIconUrl: clean(value?.homeIconUrl),
     homeBackgroundColour: normaliseColour(clean(value?.homeBackgroundColour), defaultCustomerTrackingSettings.homeBackgroundColour),
     homeBorderColour: normaliseColour(clean(value?.homeBorderColour), defaultCustomerTrackingSettings.homeBorderColour),
     homeTextColour: normaliseColour(clean(value?.homeTextColour), defaultCustomerTrackingSettings.homeTextColour),
