@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { getAppCredentials } from "./appCredentials.server";
+import { getEtaLearningAdjustmentMinutes } from "./etaLearning.server";
 
 type RoutePoint = {
   latitude: number;
@@ -25,6 +26,7 @@ type StopWithPoint = {
   deliveryGroup?: {
     latitude: number | null;
     longitude: number | null;
+    postcode?: string | null;
     orders?: Array<{
       lineItemSummary?: string | null;
       orderSource?: string | null;
@@ -201,6 +203,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
     let totalTravelMinutes = 0;
     let totalTrafficDelayMinutes = 0;
     let totalHandlingMinutes = 0;
+    let totalLearningAdjustmentMinutes = 0;
     let trafficLegs = 0;
 
     const etaUpdates: Array<{
@@ -211,8 +214,12 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
     for (const stop of remainingStops) {
       const nextPoint = pointForStop(stop);
       const leg = await calculateLeg(previousPoint, nextPoint, route.timePerDropMinutes);
+      const learningAdjustmentMinutes = await getEtaLearningAdjustmentMinutes({
+        postcode: stop.deliveryGroup?.postcode,
+        driverId: route.driverId,
+      });
 
-      etaClock = addMinutes(etaClock, previousHandlingMinutes + leg.travelMinutes);
+      etaClock = addMinutes(etaClock, previousHandlingMinutes + leg.travelMinutes + learningAdjustmentMinutes);
 
       etaUpdates.push({
         stopId: stop.id,
@@ -222,6 +229,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
       totalTravelMinutes += leg.travelMinutes;
       totalTrafficDelayMinutes += leg.trafficDelayMinutes;
       totalHandlingMinutes += previousHandlingMinutes;
+      totalLearningAdjustmentMinutes += learningAdjustmentMinutes;
 
       if (leg.usedTraffic) {
         trafficLegs += 1;
@@ -248,7 +256,7 @@ export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<Tr
           history: {
             create: {
               action: "Traffic ETAs recalculated",
-              details: `After stop ${completedStop.orderIndex}, recalculated ${etaUpdates.length} remaining ETA${etaUpdates.length === 1 ? "" : "s"}. ${trafficLegs} leg${trafficLegs === 1 ? "" : "s"} used TomTom live traffic. Total travel ${totalTravelMinutes} min, traffic delay ${totalTrafficDelayMinutes} min, handling ${totalHandlingMinutes} min.`,
+              details: `After stop ${completedStop.orderIndex}, recalculated ${etaUpdates.length} remaining ETA${etaUpdates.length === 1 ? "" : "s"}. ${trafficLegs} leg${trafficLegs === 1 ? "" : "s"} used TomTom live traffic. Total travel ${totalTravelMinutes} min, traffic delay ${totalTrafficDelayMinutes} min, handling ${totalHandlingMinutes} min, learning adjustment ${totalLearningAdjustmentMinutes} min.`,
             },
           },
         },
