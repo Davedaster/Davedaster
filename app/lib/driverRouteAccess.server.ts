@@ -44,11 +44,21 @@ function formatTime(value: Date | string | null | undefined) {
     return "time to be confirmed";
   }
 
+  if (typeof value === "string" && /^\d{2}:\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/London",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function dateKey(value: Date | string) {
