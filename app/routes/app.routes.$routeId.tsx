@@ -96,6 +96,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (intent === "publish") {
     try {
+      const routeBeforePublish = await getRoute(routeId);
+
+      if (!routeBeforePublish?.driverId) {
+        return json({ ok: false, error: "Assign a driver before publishing this route." }, { status: 400 });
+      }
+
       await publishRoute(routeId);
       await tagPublishedRouteOrders(admin, routeId);
 
@@ -437,7 +443,7 @@ export default function RouteDetails() {
                 </Form>
                 <Form method="post">
                   <input type="hidden" name="intent" value="publish" />
-                  <Button submit variant="primary" disabled={route.status !== "DRAFT"}>Publish route and notify</Button>
+                  <Button submit variant="primary" disabled={!route.driverId || route.status !== "DRAFT"}>Publish route and notify</Button>
                 </Form>
                 <Form method="post">
                   <input type="hidden" name="intent" value="sendDriverRouteLink" />
