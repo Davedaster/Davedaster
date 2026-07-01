@@ -11,6 +11,7 @@ type DeliveryCompleteOrder = {
 type DeliveryCompleteInput = {
   routeName: string;
   proofPhotoUrl?: string | null;
+  signaturePhotoUrl?: string | null;
   orders: DeliveryCompleteOrder[];
 };
 
@@ -50,6 +51,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       orderNumber: order.shopifyOrderNumber,
       routeName: input.routeName,
       proofPhotoUrl: input.proofPhotoUrl,
+      signaturePhotoUrl: input.signaturePhotoUrl,
     };
 
     let sentAnything = false;
