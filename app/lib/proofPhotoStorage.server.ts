@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import prisma from "../db.server";
 import { getAppCredentials, hasProofPhotoStorageCredentials } from "./appCredentials.server";
 
 const MAX_PROOF_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -18,6 +19,8 @@ type ProofImageUploadOptions = {
   stopId: string;
   orderNumber?: string | null;
   customerName?: string | null;
+  driverName?: string | null;
+  routeDate?: string | Date | null;
   kind?: ProofImageKind;
   index?: number;
 };
@@ -65,6 +68,20 @@ function cleanOrderNumber(value?: string | null) {
   return cleanNamePart(value?.replace(/^#/, "")) || "order";
 }
 
+function formatDatePart(value?: string | Date | null) {
+  if (!value) {
+    return "date-pending";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "date-pending";
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
 function getFileExtensionFromType(contentType: string) {
   if (contentType === "image/png") return "png";
   if (contentType === "image/webp") return "webp";
@@ -73,15 +90,61 @@ function getFileExtensionFromType(contentType: string) {
   return "jpg";
 }
 
+async function hydrateProofImageOptions(options: ProofImageUploadOptions): Promise<ProofImageUploadOptions> {
+  if (options.orderNumber && options.customerName && options.driverName && options.routeDate) {
+    return options;
+  }
+
+  const stop = await prisma.stop.findUnique({
+    where: {
+      id: options.stopId,
+    },
+    include: {
+      route: {
+        include: {
+          driver: true,
+        },
+      },
+      deliveryGroup: {
+        include: {
+          orders: true,
+        },
+      },
+    },
+  });
+
+  if (!stop) {
+    return options;
+  }
+
+  const orderNumber = stop.deliveryGroup?.orders
+    .map((order) => order.shopifyOrderNumber)
+    .filter(Boolean)
+    .join("-");
+  const customerName = stop.deliveryGroup?.orders
+    .map((order) => order.customerName)
+    .filter(Boolean)[0];
+
+  return {
+    ...options,
+    orderNumber: options.orderNumber || orderNumber,
+    customerName: options.customerName || customerName,
+    driverName: options.driverName || stop.route.driver?.name || null,
+    routeDate: options.routeDate || stop.route.date,
+  };
+}
+
 function buildObjectKey(options: ProofImageUploadOptions, contentType: string) {
   const extension = getFileExtensionFromType(contentType);
   const safeStopId = options.stopId.replace(/[^a-zA-Z0-9_-]/g, "") || "stop";
   const orderNumber = cleanOrderNumber(options.orderNumber);
   const customerName = cleanNamePart(options.customerName) || "customer";
+  const driverName = cleanNamePart(options.driverName) || "driver-unassigned";
+  const routeDate = formatDatePart(options.routeDate);
   const kind = options.kind === "signature" ? "signature" : "image";
   const indexSuffix = kind === "image" ? `-${Math.max(1, options.index || 1)}` : "";
 
-  return `proof-of-delivery/${safeStopId}/${orderNumber}-${customerName}-${kind}${indexSuffix}-${Date.now()}-${crypto.randomUUID()}.${extension}`;
+  return `proof-of-delivery/${orderNumber}/${routeDate}/${driverName}/stop-${safeStopId}/${orderNumber}-${customerName}-${kind}${indexSuffix}-${Date.now()}-${crypto.randomUUID()}.${extension}`;
 }
 
 function getStorageCredentials() {
@@ -178,7 +241,8 @@ export async function uploadProofPhoto(file: File, stopId: string, options: Omit
   }
 
   const body = Buffer.from(await file.arrayBuffer());
-  const objectKey = buildObjectKey({ ...options, stopId, kind: "image" }, file.type);
+  const uploadOptions = await hydrateProofImageOptions({ ...options, stopId, kind: "image" });
+  const objectKey = buildObjectKey(uploadOptions, file.type);
 
   return putProofImage(body, file.type, objectKey);
 }
@@ -202,7 +266,8 @@ export async function uploadProofImageDataUrl(dataUrl: string, options: ProofIma
     throw new Error("Signature image must be smaller than 10MB.");
   }
 
-  const objectKey = buildObjectKey(options, contentType);
+  const uploadOptions = await hydrateProofImageOptions(options);
+  const objectKey = buildObjectKey(uploadOptions, contentType);
 
   return putProofImage(body, contentType, objectKey);
 }
