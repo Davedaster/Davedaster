@@ -790,17 +790,23 @@ export function RouteMap({
     };
 
     const hidePopup = (force = false) => {
+      if (touchHoldShownRef.current && !force) {
+        return;
+      }
+
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
     };
 
     const finishLongPress = () => {
       const wasLongPress = touchHoldShownRef.current;
+
       clearTouchHold();
       touchHoldShownRef.current = false;
-      hidePopup();
+      lastTouchTimeRef.current = Date.now();
 
       if (wasLongPress) {
+        hidePopup(true);
         ignoreNextPinClickRef.current = true;
         window.setTimeout(() => {
           ignoreNextPinClickRef.current = false;
@@ -856,6 +862,10 @@ export function RouteMap({
     };
 
     const showPopup = async (event: any) => {
+      if (Date.now() - lastTouchTimeRef.current < 700) {
+        return;
+      }
+
       map.getCanvas().style.cursor = "pointer";
       await showPopupForFeature(event.features?.[0]);
     };
@@ -879,6 +889,10 @@ export function RouteMap({
     };
 
     const handlePinTouchMove = (event: any) => {
+      if (touchHoldShownRef.current) {
+        return;
+      }
+
       if (!touchStartPointRef.current || !event.point) {
         return;
       }
@@ -887,8 +901,8 @@ export function RouteMap({
       const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
 
       if (movedX > 12 || movedY > 12) {
-  clearTouchHold();
-}
+        clearTouchHold();
+      }
     };
 
     const handlePinTouchEnd = () => {
@@ -896,7 +910,7 @@ export function RouteMap({
     };
 
     const handleBrowserTouchMove = (_event: TouchEvent) => {
-  // Let TomTom handle the map drag while the order card is open.
+      // Let TomTom handle the map drag while the order card is open.
     };
 
     const handleBrowserTouchEnd = (event: TouchEvent) => {
@@ -908,8 +922,11 @@ export function RouteMap({
     };
 
     const handleMapMovement = () => {
+      if (touchHoldShownRef.current) {
+        return;
+      }
+
       clearTouchHold();
-      touchHoldShownRef.current = false;
       hidePopup();
     };
 
