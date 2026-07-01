@@ -49,6 +49,9 @@ const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v3";
 const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
 const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
+const LONG_PRESS_DELAY_MS = 520;
+const LONG_PRESS_CANCEL_DISTANCE_PX = 36;
+const LONG_PRESS_CLICK_GUARD_MS = 650;
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -443,6 +446,7 @@ export function RouteMap({
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const touchHoldShownRef = useRef(false);
   const ignoreNextPinClickRef = useRef(false);
+  const lastTouchTimeRef = useRef(0);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
@@ -788,22 +792,28 @@ export function RouteMap({
       touchStartPointRef.current = null;
     };
 
-    const hidePopup = () => {
+    const hidePopup = (force = false) => {
+      if (touchHoldShownRef.current && !force) {
+        return;
+      }
+
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
     };
 
     const finishLongPress = () => {
       const wasLongPress = touchHoldShownRef.current;
+
       clearTouchHold();
       touchHoldShownRef.current = false;
-      hidePopup();
+      lastTouchTimeRef.current = Date.now();
 
       if (wasLongPress) {
+        hidePopup(true);
         ignoreNextPinClickRef.current = true;
         window.setTimeout(() => {
           ignoreNextPinClickRef.current = false;
-        }, 450);
+        }, LONG_PRESS_CLICK_GUARD_MS);
       }
     };
 
@@ -855,6 +865,10 @@ export function RouteMap({
     };
 
     const showPopup = async (event: any) => {
+      if (Date.now() - lastTouchTimeRef.current < 700) {
+        return;
+      }
+
       map.getCanvas().style.cursor = "pointer";
       await showPopupForFeature(event.features?.[0]);
     };
@@ -870,14 +884,19 @@ export function RouteMap({
       touchHoldShownRef.current = false;
       touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
       touchHoldTimerRef.current = setTimeout(() => {
+        touchHoldTimerRef.current = null;
         touchHoldShownRef.current = true;
         ignoreNextPinClickRef.current = true;
         map.getCanvas().style.cursor = "pointer";
         void showPopupForFeature(feature);
-      }, 300);
+      }, LONG_PRESS_DELAY_MS);
     };
 
     const handlePinTouchMove = (event: any) => {
+      if (touchHoldShownRef.current) {
+        return;
+      }
+
       if (!touchStartPointRef.current || !event.point) {
         return;
       }
@@ -885,10 +904,8 @@ export function RouteMap({
       const movedX = Math.abs(event.point.x - touchStartPointRef.current.x);
       const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
 
-      if (movedX > 12 || movedY > 12) {
+      if (movedX > LONG_PRESS_CANCEL_DISTANCE_PX || movedY > LONG_PRESS_CANCEL_DISTANCE_PX) {
         clearTouchHold();
-        touchHoldShownRef.current = false;
-        hidePopup();
       }
     };
 
@@ -896,10 +913,8 @@ export function RouteMap({
       finishLongPress();
     };
 
-    const handleBrowserTouchMove = (event: TouchEvent) => {
-      if (event.cancelable) {
-        event.preventDefault();
-      }
+    const handleBrowserTouchMove = (_event: TouchEvent) => {
+      // Let TomTom handle the map drag while the order card is open.
     };
 
     const handleBrowserTouchEnd = (event: TouchEvent) => {
@@ -911,10 +926,13 @@ export function RouteMap({
     };
 
     const handleMapMovement = () => {
-      clearTouchHold();
-      touchHoldShownRef.current = false;
-      hidePopup();
-    };
+  if (touchStartPointRef.current || touchHoldShownRef.current) {
+    return;
+  }
+
+  clearTouchHold();
+  hidePopup();
+};
 
     const handleClusterEnter = () => {
       map.getCanvas().style.cursor = "pointer";
@@ -935,6 +953,7 @@ export function RouteMap({
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
     map.on("touchstart", pinsLayerId, handlePinTouchStart);
+    map.on("touchstart", pinLabelLayerId, handlePinTouchStart);
     map.on("touchmove", handlePinTouchMove);
     map.on("touchend", handlePinTouchEnd);
     map.on("touchcancel", handlePinTouchEnd);
@@ -970,6 +989,7 @@ export function RouteMap({
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
       map.off("touchstart", pinsLayerId, handlePinTouchStart);
+      map.off("touchstart", pinLabelLayerId, handlePinTouchStart);
       map.off("touchmove", handlePinTouchMove);
       map.off("touchend", handlePinTouchEnd);
       map.off("touchcancel", handlePinTouchEnd);
