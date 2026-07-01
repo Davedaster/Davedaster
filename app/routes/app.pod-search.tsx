@@ -1,11 +1,12 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { Badge, BlockStack, Box, Button, Divider, FormLayout, InlineStack, Layout, LegacyCard, Page, Text, TextField } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 
 import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { searchProofOfDelivery } from "../lib/proofOfDeliverySearch.server";
+import { deleteProofPhoto } from "../lib/proofPhotos.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -15,6 +16,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const results = query.trim() ? await searchProofOfDelivery(query) : [];
 
   return json({ query, results });
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  await authenticate.admin(request);
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q") || "";
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+
+  if (intent !== "deleteProofPhoto") {
+    return redirect(`/app/pod-search${query ? `?q=${encodeURIComponent(query)}` : ""}`);
+  }
+
+  const routeId = String(formData.get("routeId") || "").trim();
+  const proofPhotoId = String(formData.get("proofPhotoId") || "").trim();
+
+  if (!routeId || !proofPhotoId) {
+    return json({ ok: false, error: "Proof photo removal is missing route details." }, { status: 400 });
+  }
+
+  try {
+    await deleteProofPhoto({ routeId, proofPhotoId });
+  } catch (error) {
+    return json({ ok: false, error: error instanceof Error ? error.message : "Proof photo remove failed." }, { status: 400 });
+  }
+
+  return redirect(`/app/pod-search${query ? `?q=${encodeURIComponent(query)}` : ""}`);
 };
 
 function formatDateTime(value?: string | Date | null) {
@@ -115,7 +143,7 @@ export default function PodSearchPage() {
                         {group.safePlaceNote ? <Text as="p" variant="bodySm">Safe place: {group.safePlaceNote}</Text> : null}
                       </BlockStack>
                     </Box>
-                    <ProofPhotoGallery proofPhotos={group.proofPhotos} />
+                    <ProofPhotoGallery proofPhotos={group.proofPhotos} routeId={route?.id} />
                   </BlockStack>
                 </LegacyCard>
               );
