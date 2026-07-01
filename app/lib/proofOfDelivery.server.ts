@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
 import { recordEtaLearningObservation } from "./etaLearning.server";
+import { createSignedProofPhotoUrl, isPrivateProofPhotoKey, uploadProofImageDataUrl } from "./proofPhotoStorage.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
 import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
@@ -13,6 +14,10 @@ type ShopifyAdmin = {
 };
 
 function isValidProofPhotoUrl(value: string) {
+  if (isPrivateProofPhotoKey(value)) {
+    return true;
+  }
+
   try {
     const url = new URL(value);
     return url.protocol === "https:" || url.protocol === "http:";
@@ -41,6 +46,14 @@ function formatPodLocationNote(latitude?: number | null, longitude?: number | nu
   }
 
   return `POD location: ${latitude},${longitude}`;
+}
+
+function orderReference(orders: { shopifyOrderNumber: string }[]) {
+  return orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join("-") || "order";
+}
+
+function customerReference(orders: { customerName?: string | null }[], podName: string) {
+  return podName || orders.map((order) => order.customerName).filter(Boolean)[0] || "customer";
 }
 
 export async function listStopsForProofOfDelivery() {
@@ -94,7 +107,6 @@ export async function saveProofOfDelivery(input: {
   const podName = input.podName?.trim() || "";
   const podLocationNote = formatPodLocationNote(input.podLat, input.podLng);
   const leftInSafePlace = Boolean(input.leftInSafePlace);
-  const signaturePhotoUrl = !leftInSafePlace && isValidPodImage(podImage) ? podImage : null;
   const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null, podLocationNote]
     .filter(Boolean)
     .join("\n");
@@ -133,6 +145,14 @@ export async function saveProofOfDelivery(input: {
     throw new Error("Proof photo is required before marking delivered.");
   }
 
+  if (proofPhotoUrls.length > 3) {
+    throw new Error("A maximum of 3 proof photos can be uploaded for one delivery.");
+  }
+
+  if (leftInSafePlace && proofPhotoUrls.length < 2) {
+    throw new Error("Safe place deliveries need at least 2 proof photos.");
+  }
+
   for (const proofPhotoUrl of proofPhotoUrls) {
     if (!isValidProofPhotoUrl(proofPhotoUrl)) {
       throw new Error("Every proof photo must be a valid uploaded image or web address.");
@@ -147,6 +167,16 @@ export async function saveProofOfDelivery(input: {
     throw new Error("Add a safe place note before marking delivered.");
   }
 
+  const signaturePhotoUrl = !leftInSafePlace && isValidPodImage(podImage)
+    ? await uploadProofImageDataUrl(podImage, {
+      stopId: input.stopId,
+      orderNumber: orderReference(stop.deliveryGroup.orders),
+      customerName: customerReference(stop.deliveryGroup.orders, podName),
+      kind: "signature",
+    })
+    : null;
+  const signedPrimaryProofPhotoUrl = await createSignedProofPhotoUrl(primaryProofPhotoUrl);
+  const signedSignaturePhotoUrl = await createSignedProofPhotoUrl(signaturePhotoUrl);
   const shopifyResults: string[] = [];
 
   for (const order of stop.deliveryGroup.orders) {
@@ -156,8 +186,8 @@ export async function saveProofOfDelivery(input: {
 
   const notificationResult = await sendDeliveryCompleteNotifications({
     routeName: stop.route.name,
-    proofPhotoUrl: primaryProofPhotoUrl,
-    signaturePhotoUrl,
+    proofPhotoUrl: signedPrimaryProofPhotoUrl,
+    signaturePhotoUrl: signedSignaturePhotoUrl,
     orders: stop.deliveryGroup.orders,
   });
   const notificationErrorDetails = notificationResult.errors.length
@@ -178,8 +208,8 @@ export async function saveProofOfDelivery(input: {
               url,
               label: index === 0 ? "Primary proof photo" : `Proof photo ${index + 1}`,
             })),
-            ...(!leftInSafePlace && isValidPodImage(podImage) ? [{
-              url: podImage,
+            ...(!leftInSafePlace && signaturePhotoUrl ? [{
+              url: signaturePhotoUrl,
               label: `Customer signature ${podName}`,
             }] : []),
           ],
