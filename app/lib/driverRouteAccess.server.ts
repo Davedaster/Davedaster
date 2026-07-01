@@ -4,6 +4,7 @@ import prisma from "../db.server";
 import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
+import { sendNextPendingStopNotification } from "./routeNotifications.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -258,7 +259,7 @@ export async function markDriverStopMissedFromToken(input: {
   reason: string;
   note?: string | null;
 }) {
-  await getStopForDriverToken(input.token, input.stopId);
+  const stop = await getStopForDriverToken(input.token, input.stopId);
 
   await markStopFailedDelivery({
     admin: input.admin,
@@ -266,6 +267,8 @@ export async function markDriverStopMissedFromToken(input: {
     reason: input.reason,
     note: input.note,
   });
+
+  await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
 
 export async function sendDriverRouteLink(input: {
