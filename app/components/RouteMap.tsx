@@ -443,6 +443,7 @@ export function RouteMap({
   const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
   const touchHoldShownRef = useRef(false);
   const ignoreNextPinClickRef = useRef(false);
+  const lastTouchTimeRef = useRef(0);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
@@ -788,7 +789,7 @@ export function RouteMap({
       touchStartPointRef.current = null;
     };
 
-    const hidePopup = () => {
+    const hidePopup = (force = false) => {
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
     };
@@ -886,10 +887,8 @@ export function RouteMap({
       const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
 
       if (movedX > 12 || movedY > 12) {
-        clearTouchHold();
-        touchHoldShownRef.current = false;
-        hidePopup();
-      }
+  clearTouchHold();
+}
     };
 
     const handlePinTouchEnd = () => {
