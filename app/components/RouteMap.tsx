@@ -896,10 +896,8 @@ export function RouteMap({
       finishLongPress();
     };
 
-    const handleBrowserTouchMove = (event: TouchEvent) => {
-      if (event.cancelable) {
-        event.preventDefault();
-      }
+    const handleBrowserTouchMove = (_event: TouchEvent) => {
+  // Let TomTom handle the map drag while the order card is open.
     };
 
     const handleBrowserTouchEnd = (event: TouchEvent) => {
