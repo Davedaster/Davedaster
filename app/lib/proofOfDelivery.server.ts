@@ -20,7 +20,7 @@ function isValidProofPhotoUrl(value: string) {
 
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
+    return url.protocol === "https:";
   } catch {
     return false;
   }
@@ -149,13 +149,9 @@ export async function saveProofOfDelivery(input: {
     throw new Error("A maximum of 3 proof photos can be uploaded for one delivery.");
   }
 
-  if (leftInSafePlace && proofPhotoUrls.length < 2) {
-    throw new Error("Safe place deliveries need at least 2 proof photos.");
-  }
-
   for (const proofPhotoUrl of proofPhotoUrls) {
     if (!isValidProofPhotoUrl(proofPhotoUrl)) {
-      throw new Error("Every proof photo must be a valid uploaded image or web address.");
+      throw new Error("Every proof photo must be a valid uploaded image or secure web address.");
     }
   }
 
@@ -258,6 +254,7 @@ export async function saveProofOfDelivery(input: {
       driverId: stop.route.driverId,
     },
   });
+
   await recalculateTrafficEtaAfterStop(input.stopId);
   await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
