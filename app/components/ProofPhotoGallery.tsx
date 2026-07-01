@@ -8,7 +8,7 @@ type ProofPhoto = {
   label?: string | null;
 };
 
-export function ProofPhotoGallery({ proofPhotos }: { proofPhotos: ProofPhoto[] }) {
+export function ProofPhotoGallery({ proofPhotos, routeId }: { proofPhotos: ProofPhoto[]; routeId?: string | null }) {
   const [photoToRemove, setPhotoToRemove] = useState<ProofPhoto | null>(null);
 
   if (!proofPhotos.length) {
@@ -65,6 +65,7 @@ export function ProofPhotoGallery({ proofPhotos }: { proofPhotos: ProofPhoto[] }
                 <Form method="post">
                   <input type="hidden" name="intent" value="deleteProofPhoto" />
                   <input type="hidden" name="proofPhotoId" value={photoToRemove.id} />
+                  {routeId ? <input type="hidden" name="routeId" value={routeId} /> : null}
                   <Button submit tone="critical">Remove proof photo</Button>
                 </Form>
               ) : null}
