@@ -198,14 +198,14 @@ export async function saveProofOfDelivery(input: {
     });
 
     const otherStops = stop.route.stops.filter((routeStop) => routeStop.id !== input.stopId);
-    const allStopsDelivered = otherStops.every((routeStop) => routeStop.status === "DELIVERED");
+    const allStopsResolved = otherStops.every((routeStop) => ["DELIVERED", "FAILED"].includes(routeStop.status));
 
     await tx.route.update({
       where: {
         id: stop.routeId,
       },
       data: {
-        status: allStopsDelivered ? "COMPLETED" : stop.route.status,
+        status: allStopsResolved ? "COMPLETED" : stop.route.status,
         history: {
           create: {
             action: "Stop delivered",
