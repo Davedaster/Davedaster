@@ -441,6 +441,7 @@ export default function RouteDetails() {
                   <input type="hidden" name="slotMinutes" value={customerSlotMinutes} />
                   <Button submit>Recalculate ETA slots</Button>
                 </Form>
+                <Button url={`/app/routes/${route.id}/packing-list`} target="_blank">Print packing list</Button>
                 <Form method="post">
                   <input type="hidden" name="intent" value="publish" />
                   <Button submit variant="primary" disabled={!route.driverId || route.status !== "DRAFT"}>Publish route and notify</Button>
