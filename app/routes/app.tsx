@@ -30,7 +30,7 @@ export default function App() {
         <Link to="/app/driver-routes">Driver Routes</Link>
         <Link to="/app/drivers">Drivers</Link>
         <Link to="/app/address-checks">Address Checks</Link>
-        <Link to="/app/proof-of-delivery">Proof of Delivery</Link>
+        <Link to="/app/pod-search">Proof of Delivery</Link>
         <Link to="/app/returns">Returns</Link>
         <Link to="/app/notifications">Notifications</Link>
         <Link to="/app/fulfilment-settings">Fulfilment Settings</Link>
