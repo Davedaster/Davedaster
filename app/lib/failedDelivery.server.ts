@@ -79,7 +79,11 @@ export async function markStopFailedDelivery(input: {
       id: input.stopId,
     },
     include: {
-      route: true,
+      route: {
+        include: {
+          stops: true,
+        },
+      },
       deliveryGroup: {
         include: {
           orders: true,
@@ -127,11 +131,15 @@ export async function markStopFailedDelivery(input: {
       },
     });
 
+    const otherStops = stop.route.stops.filter((routeStop) => routeStop.id !== input.stopId);
+    const allStopsResolved = otherStops.every((routeStop) => ["DELIVERED", "FAILED"].includes(routeStop.status));
+
     await tx.route.update({
       where: {
         id: stop.routeId,
       },
       data: {
+        status: allStopsResolved ? "COMPLETED" : stop.route.status,
         history: {
           create: {
             action: "Stop failed",
