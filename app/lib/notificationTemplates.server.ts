@@ -39,11 +39,12 @@ export type EditableNotificationTemplate = {
 };
 
 const SETTING_KEY = "notification_templates";
-const EMAIL_TEMPLATE_VERSION = "clean_logo_delivery_emails_2026_07_01";
+const EMAIL_TEMPLATE_VERSION = "clean_logo_delivery_emails_2026_07_01_logo_default";
 const COMPANY_NAME = "Bathroom Panels Direct";
 const COMPANY_PHONE = "01803 222784";
 const COMPANY_EMAIL = "deliveries@bathroompanelsdirect.co.uk";
 const COMPANY_ACCENT = "#509AE6";
+const COMPANY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/bathroom-panels-direct-logo-dark.png?v=1723113120";
 
 export function notificationTemplateSupportsEmail(id: string) {
   return id !== "delayUpdate";
@@ -257,7 +258,7 @@ function companyContext(settings?: Awaited<ReturnType<typeof getCustomerTracking
     name: clean(settings?.companyName) || COMPANY_NAME,
     phone: clean(settings?.supportPhone) || COMPANY_PHONE,
     email: clean(settings?.supportEmail) || COMPANY_EMAIL,
-    logo_url: clean(settings?.logoUrl),
+    logo_url: clean(settings?.logoUrl) || COMPANY_LOGO_URL,
     accent_colour: clean(settings?.primaryColour) || COMPANY_ACCENT,
   };
 }
