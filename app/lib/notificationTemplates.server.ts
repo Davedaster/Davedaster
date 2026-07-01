@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { getCustomerTrackingSettings } from "./customerTrackingSettings.server";
 import { formatEtaSlot } from "./etaSlots.server";
 
 export type NotificationChannel = "sms" | "email";
@@ -38,40 +39,57 @@ export type EditableNotificationTemplate = {
 
 const SETTING_KEY = "notification_templates";
 const COMPANY_NAME = "Bathroom Panels Direct";
-const COMPANY_PHONE = "01803 411 234";
-const COMPANY_EMAIL = "sales@bathroompanelsdirect.co.uk";
+const COMPANY_PHONE = "01803 222784";
+const COMPANY_EMAIL = "deliveries@bathroompanelsdirect.co.uk";
 const COMPANY_ACCENT = "#509AE6";
 
+export function notificationTemplateSupportsEmail(id: string) {
+  return id !== "delayUpdate";
+}
+
 function shell(title: string, intro: string, highlight: string, extra = "") {
-  return `<div style="margin:0;background:#f4f7fb;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#323841;">
-  <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #d9e2ec;border-radius:18px;overflow:hidden;">
-    <div style="background:#323841;color:#ffffff;padding:26px 30px;">
-      <p style="margin:0;color:#d6ecff;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">{{ company.name }}</p>
-      <h1 style="margin:8px 0 0;font-size:26px;line-height:1.2;">${title}</h1>
+  return `<div style="margin:0;background:#f6f8fb;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#323841;">
+  <div style="max-width:640px;margin:0 auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;">
+      <div>{% if company.logo_url %}<img src="{{ company.logo_url }}" alt="{{ company.name }}" style="display:block;max-height:48px;max-width:190px;object-fit:contain;">{% else %}<p style="margin:0;color:{{ company.accent_colour }};font-size:16px;font-weight:700;">{{ company.name }}</p>{% endif %}</div>
+      <div style="background:#ffffff;border:1px solid #dce5ef;border-radius:999px;padding:9px 13px;color:#323841;font-size:13px;font-weight:700;box-shadow:0 8px 24px rgba(16,24,40,.05);">Delivery update</div>
     </div>
-    <div style="padding:30px;">
-      <p style="font-size:16px;line-height:1.6;margin:0 0 18px;">Hi {{ customer.name }},</p>
-      <p style="font-size:16px;line-height:1.6;margin:0 0 22px;">${intro}</p>
-      <div style="background:#eef7ff;border:1px solid #c8e4ff;border-radius:16px;padding:20px;margin-bottom:22px;">
-        <p style="margin:0 0 6px;color:#509AE6;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;">Delivery update</p>
-        <p style="margin:0;font-size:24px;font-weight:800;line-height:1.25;">${highlight}</p>
-        <p style="margin:8px 0 0;color:#667085;font-size:14px;">Order {{ order.number }}</p>
+    <div style="background:#ffffff;border:1px solid #e7edf4;border-radius:28px;padding:22px;box-shadow:0 18px 50px rgba(16,24,40,.07);margin:0 0 14px;">
+      <h1 style="margin:0;color:#323841;font-size:31px;line-height:1.08;letter-spacing:-.45px;font-weight:700;">${title}</h1>
+      <p style="margin:12px 0 0;color:#667085;font-size:15px;line-height:1.55;">Hi {{ customer.name }},</p>
+      <p style="margin:8px 0 0;color:#667085;font-size:15px;line-height:1.55;">${intro}</p>
+      <div style="margin-top:16px;background:#eef7ff;border:1px solid #c8e4ff;border-radius:21px;padding:15px;">
+        <p style="margin:0 0 5px;color:#667085;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Estimated arrival</p>
+        <p style="margin:0;color:#323841;font-size:25px;line-height:1.12;font-weight:700;">${highlight}</p>
+        <p style="margin:8px 0 0;color:#667085;font-size:13px;line-height:1.4;">Order {{ order.number }} · {{ delivery.date }}</p>
       </div>
-      {% if driver.name %}
-      <div style="border:1px solid #e4e7ec;border-radius:16px;padding:16px;margin-bottom:22px;">
-        {% if driver.photo_url %}<img src="{{ driver.photo_url }}" alt="{{ driver.name }}" width="64" height="64" style="float:left;margin:0 14px 10px 0;border-radius:50%;object-fit:cover;border:3px solid #509AE6;">{% endif %}
-        <p style="margin:0 0 4px;color:#667085;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;">Your driver</p>
-        <p style="margin:0;font-size:18px;font-weight:800;">{{ driver.name }}</p>
-        {% if driver.vehicle_registration %}<p style="margin:4px 0 0;color:#667085;font-size:14px;">Vehicle registration {{ driver.vehicle_registration }}</p>{% endif %}
-        <div style="clear:both;"></div>
+    </div>
+    {% if driver.name %}
+    <div style="background:#ffffff;border:1px solid #e7edf4;border-radius:24px;padding:17px;box-shadow:0 14px 44px rgba(16,24,40,.06);margin:0 0 14px;">
+      {% if driver.photo_url %}<img src="{{ driver.photo_url }}" alt="{{ driver.name }}" width="54" height="54" style="float:left;width:54px;height:54px;object-fit:cover;border-radius:50%;border:1px solid #e7edf4;margin:0 13px 10px 0;box-shadow:0 8px 18px rgba(16,24,40,.06);">{% endif %}
+      <p style="margin:0 0 4px;color:#667085;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Your driver today</p>
+      <p style="margin:0;color:#323841;font-size:20px;line-height:1.18;font-weight:700;">{{ driver.name }}</p>
+      {% if driver.vehicle_registration %}<p style="margin:7px 0 0;color:#667085;font-size:14px;line-height:1.45;">Vehicle registration {{ driver.vehicle_registration }}</p>{% endif %}
+      <div style="clear:both;"></div>
+    </div>
+    {% endif %}
+    <div style="background:#ffffff;border:1px solid #e7edf4;border-radius:24px;padding:17px;box-shadow:0 14px 44px rgba(16,24,40,.06);margin:0 0 14px;">
+      <h2 style="margin:0;color:#323841;font-size:20px;line-height:1.18;font-weight:700;">Delivery details</h2>
+      <div style="background:#f8fafc;border:1px solid #edf1f5;border-radius:16px;padding:11px 12px;margin-top:13px;">
+        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;">Status</p>
+        <p style="margin:0;color:#323841;font-size:14px;font-weight:700;">${highlight}</p>
       </div>
-      {% endif %}
+      <div style="background:#f8fafc;border:1px solid #edf1f5;border-radius:16px;padding:11px 12px;margin-top:9px;">
+        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;">Order</p>
+        <p style="margin:0;color:#323841;font-size:14px;font-weight:700;">{{ order.number }}{% if order.items_summary %} · {{ order.items_summary }}{% endif %}</p>
+      </div>
       ${extra}
-      {% if tracking.url %}<p style="margin:0 0 24px;"><a href="{{ tracking.url }}" style="display:inline-block;background:#509AE6;color:#ffffff;text-decoration:none;border-radius:999px;padding:14px 22px;font-weight:800;">Track your delivery</a></p>{% endif %}
-      <div style="background:#f9fafb;border-radius:14px;padding:16px;margin-bottom:22px;color:#475467;font-size:14px;line-height:1.6;">Our own delivery team will bring your order to a room of your choice where access is safe and practical.</div>
-      <p style="margin:0;font-size:15px;line-height:1.6;">Thank you,<br><strong>{{ company.name }}</strong></p>
+      {% if tracking.url %}<p style="margin:16px 0 0;"><a href="{{ tracking.url }}" style="display:inline-block;background:{{ company.accent_colour }};color:#ffffff;text-decoration:none;border-radius:17px;padding:13px 18px;font-weight:700;box-shadow:0 10px 28px rgba(16,24,40,.08);">Track your delivery</a></p>{% endif %}
     </div>
-    <div style="background:#f9fafb;border-top:1px solid #e4e7ec;color:#667085;padding:18px 30px;font-size:13px;line-height:1.5;">Need help? Call {{ company.phone }} or email {{ company.email }}</div>
+    <div style="background:#ffffff;border:1px solid #e7edf4;border-radius:24px;padding:17px;box-shadow:0 14px 44px rgba(16,24,40,.06);margin:0 0 14px;">
+      <p style="margin:0;color:#667085;font-size:14px;line-height:1.55;">Our own team will bring your panel order to a room of your choice where access allows.</p>
+    </div>
+    <p style="margin:0;padding:8px 2px 0;color:#667085;font-size:13px;line-height:1.5;">Need help? Call {{ company.phone }} or email {{ company.email }}.</p>
   </div>
 </div>`;
 }
@@ -82,7 +100,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     label: "Booked delivery slot",
     description: "Sent when a delivery slot is confirmed for a customer.",
     emailSubject: "Your delivery slot for {{ order.number }}",
-    emailHtml: shell("Your delivery slot is booked", "Your Bathroom Panels Direct delivery has been booked for {{ delivery.date }}.", "{{ delivery.eta_slot }}"),
+    emailHtml: shell("Your panel delivery is planned", "Your Bathroom Panels Direct delivery has been booked for the slot below.", "{{ delivery.eta_slot }}"),
     smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
   },
   outForDelivery: {
@@ -90,7 +108,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     label: "Out for delivery",
     description: "Sent when the route is out for delivery.",
     emailSubject: "Your Bathroom Panels Direct order is out for delivery",
-    emailHtml: shell("Your order is out for delivery", "Your order is now with our delivery team and is currently booked for the slot below.", "{{ delivery.eta_slot }}"),
+    emailHtml: shell("Your panels are out for delivery", "Your order is now with our delivery team and is currently booked for the slot below.", "{{ delivery.eta_slot }}"),
     smsBody: "Hi {{ customer.name }}, your order is out for delivery. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
   },
   nextDropTracking: {
@@ -98,15 +116,15 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     label: "Next drop tracking",
     description: "Sent when the customer is the next delivery stop.",
     emailSubject: "You are the next delivery",
-    emailHtml: shell("You are the next delivery", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next.", "Live tracking is now available", "<p style=\"margin:0 0 22px;font-size:15px;line-height:1.6;color:#475467;\">You will only see live tracking while you are the next drop.</p>"),
+    emailHtml: shell("You are the next delivery", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next drop.</p>"),
     smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}",
   },
   delayUpdate: {
     id: "delayUpdate",
-    label: "Delay update",
-    description: "Sent when a route is running behind schedule.",
-    emailSubject: "Delivery update for {{ order.number }}",
-    emailHtml: shell("Delivery update", "We are sorry, your delivery is currently running around {{ delay.minutes }} minutes later than planned.", "Updated slot: {{ delivery.eta_slot }}"),
+    label: "Late delivery update",
+    description: "SMS only. Sent when a route is running behind schedule.",
+    emailSubject: "",
+    emailHtml: "",
     smsBody: "Hi {{ customer.name }}, sorry, your delivery is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
   },
   deliveryComplete: {
@@ -114,12 +132,12 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     label: "Delivery complete",
     description: "Sent after a stop has been completed.",
     emailSubject: "Delivery complete for {{ order.number }}",
-    emailHtml: shell("Delivery complete", "Your Bathroom Panels Direct delivery has been completed. Thank you for your order.", "Completed today", "{% if proof.photo_url %}<p style=\"margin:0 0 22px;font-size:15px;line-height:1.6;\">Proof of delivery photo: <a href=\"{{ proof.photo_url }}\" style=\"color:#509AE6;font-weight:700;\">View photo</a></p>{% endif %}"),
+    emailHtml: shell("Your panels have been delivered", "Your Bathroom Panels Direct delivery has been completed. Thank you for your order.", "Completed today", "{% if proof.photo_url %}<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Proof of delivery photo: <a href=\"{{ proof.photo_url }}\" style=\"color:{{ company.accent_colour }};font-weight:700;\">View photo</a></p>{% endif %}"),
     smsBody: "Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order.{% if proof.photo_url %} Proof photo: {{ proof.photo_url }}{% endif %}",
   },
 };
 
-export const notificationTemplateDefinitions = Object.values(defaults).map((template) => ({ id: template.id, label: template.label, description: template.description }));
+export const notificationTemplateDefinitions = Object.values(defaults).map((template) => ({ id: template.id, label: template.label, description: template.description, supportsEmail: notificationTemplateSupportsEmail(template.id) }));
 export const notificationTemplateNames = notificationTemplateDefinitions.map((template) => template.label);
 
 function clean(value: unknown) {
@@ -128,12 +146,13 @@ function clean(value: unknown) {
 
 function normaliseTemplate(id: NotificationTemplateId, value?: Partial<EditableNotificationTemplate> | null): EditableNotificationTemplate {
   const fallback = defaults[id];
+  const supportsEmail = notificationTemplateSupportsEmail(id);
   return {
     id,
     label: fallback.label,
     description: fallback.description,
-    emailSubject: clean(value?.emailSubject) || fallback.emailSubject,
-    emailHtml: clean(value?.emailHtml) || fallback.emailHtml,
+    emailSubject: supportsEmail ? clean(value?.emailSubject) || fallback.emailSubject : "",
+    emailHtml: supportsEmail ? clean(value?.emailHtml) || fallback.emailHtml : "",
     smsBody: clean(value?.smsBody) || fallback.smsBody,
   };
 }
@@ -239,7 +258,17 @@ function renderLiquid(template: string, context: Record<string, unknown>, mode: 
   }).replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function buildTemplateContext(input: NotificationTemplateInput) {
+function companyContext(settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null) {
+  return {
+    name: clean(settings?.companyName) || COMPANY_NAME,
+    phone: clean(settings?.supportPhone) || COMPANY_PHONE,
+    email: clean(settings?.supportEmail) || COMPANY_EMAIL,
+    logo_url: clean(settings?.logoUrl),
+    accent_colour: clean(settings?.primaryColour) || COMPANY_ACCENT,
+  };
+}
+
+function buildTemplateContext(input: NotificationTemplateInput, settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null) {
   const slotMinutes = input.slotMinutes || 60;
   const start = input.estimatedArrival ? new Date(input.estimatedArrival) : null;
   const end = start ? new Date(start.getTime() + slotMinutes * 60 * 1000) : null;
@@ -251,22 +280,26 @@ function buildTemplateContext(input: NotificationTemplateInput) {
     delivery: { date: formatDate(input.deliveryDate), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes) },
     tracking: { url: input.trackingUrl || "" },
     driver: { name: input.driverName || "", photo_url: input.driverPhotoUrl || "", vehicle_name: input.driverVehicleName || "", vehicle_registration: input.driverVehicleRegistration || "" },
-    company: { name: COMPANY_NAME, phone: COMPANY_PHONE, email: COMPANY_EMAIL, accent_colour: COMPANY_ACCENT },
+    company: companyContext(settings),
     proof: { photo_url: input.proofPhotoUrl || "" },
     delay: { minutes: input.delayMinutes || 45 },
   };
 }
 
-function renderTemplate(template: EditableNotificationTemplate, input: NotificationTemplateInput, channel: NotificationChannel): NotificationMessage {
-  const context = buildTemplateContext(input);
+function renderTemplate(template: EditableNotificationTemplate, input: NotificationTemplateInput, channel: NotificationChannel, settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null): NotificationMessage {
+  const context = buildTemplateContext(input, settings);
   const body = renderLiquid(template.smsBody, context, "text");
-  if (channel === "sms") return { body };
+  if (channel === "sms" || !notificationTemplateSupportsEmail(template.id)) return { body };
   return { subject: renderLiquid(template.emailSubject, context, "text"), body, html: renderLiquid(template.emailHtml, context, "html") };
 }
 
 async function buildNotificationMessage(templateId: NotificationTemplateId, input: NotificationTemplateInput, channel: NotificationChannel) {
-  const templates = await getNotificationTemplates();
-  return renderTemplate(templates[templateId] || defaults[templateId], input, channel);
+  const [templates, trackingSettings] = await Promise.all([
+    getNotificationTemplates(),
+    getCustomerTrackingSettings(),
+  ]);
+
+  return renderTemplate(templates[templateId] || defaults[templateId], input, channel, trackingSettings);
 }
 
 export function buildNotificationTemplatePreview(input: NotificationTemplateInput, template: EditableNotificationTemplate, channel: NotificationChannel) {
@@ -275,7 +308,7 @@ export function buildNotificationTemplatePreview(input: NotificationTemplateInpu
 
 export function availableNotificationVariables() {
   return [
-    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ proof.photo_url }}", "{{ delay.minutes }}",
+    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ company.logo_url }}", "{{ company.accent_colour }}", "{{ proof.photo_url }}", "{{ delay.minutes }}",
   ];
 }
 
