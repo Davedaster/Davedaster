@@ -832,10 +832,23 @@ export function RouteMap({
         .addTo(map);
     };
 
-    const showPopup = async (event: any) => {
-      map.getCanvas().style.cursor = "pointer";
-      await showPopupForFeature(event.features?.[0]);
-    };
+   const shouldShowDesktopPopup = () => {
+  if (typeof window === "undefined") {
+    return true;
+  }
+
+  return !window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches;
+};
+
+const showPopup = async (event: any) => {
+  if (!shouldShowDesktopPopup()) {
+    hidePopup();
+    return;
+  }
+
+  map.getCanvas().style.cursor = "pointer";
+  await showPopupForFeature(event.features?.[0]);
+};
 
     const handleMapMovement = () => {
       hidePopup();
