@@ -1,8 +1,8 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useSubmit } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
+import type { FormEvent, PointerEvent } from "react";
 
 import { RouteMap } from "../components/RouteMap";
 import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
@@ -17,6 +17,21 @@ import {
 import { formatEtaSlot } from "../lib/etaSlots";
 import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";
 import { sendFirstOutForDeliveryNotification } from "../lib/routeNotifications.server";
+import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
+
+const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
+
+function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
+  if (!value) return true;
+  const etaMs = new Date(value).getTime();
+  if (!Number.isFinite(etaMs)) return true;
+  return etaMs - Date.now() <= FIRST_OUT_FOR_DELIVERY_LEAD_MS;
+}
+
+function numberFromFormValue(value: FormDataEntryValue | null) {
+  const parsed = Number(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const token = params.token;
@@ -46,8 +61,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   try {
     if (intent === "startRoute") {
+      const routeBeforeStart = await getDriverRouteByToken(token);
       const route = await startDriverRouteFromToken(token);
-      await sendFirstOutForDeliveryNotification(route.id);
+      const startLat = numberFromFormValue(formData.get("startLat"));
+      const startLng = numberFromFormValue(formData.get("startLng"));
+      let firstEta = routeBeforeStart?.stops.find((stop) => stop.status === "PENDING")?.estimatedArrival || null;
+
+      if (startLat !== null && startLng !== null) {
+        const updatedEta = await recalculateFirstPendingEtaFromPoint(route.id, { latitude: startLat, longitude: startLng });
+        if (updatedEta.estimatedArrival) {
+          firstEta = updatedEta.estimatedArrival;
+        }
+      }
+
+      if (isEtaDueForFirstNotification(firstEta)) {
+        await sendFirstOutForDeliveryNotification(route.id);
+      }
+
       return redirect(`/driver/routes/${token}`);
     }
 
@@ -63,8 +93,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
       const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
       const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
-      const podLatValue = Number(String(formData.get("podLat") || ""));
-      const podLngValue = Number(String(formData.get("podLng") || ""));
+      const podLatValue = numberFromFormValue(formData.get("podLat"));
+      const podLngValue = numberFromFormValue(formData.get("podLng"));
 
       for (const proofPhotoFile of proofPhotoFiles) {
         proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
@@ -81,8 +111,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         podImage: String(formData.get("podImage") || "").trim(),
         podName: String(formData.get("podName") || "").trim(),
         podTicked: String(formData.get("podTicked") || "") === "true",
-        podLat: Number.isFinite(podLatValue) ? podLatValue : null,
-        podLng: Number.isFinite(podLngValue) ? podLngValue : null,
+        podLat: podLatValue,
+        podLng: podLngValue,
       });
 
       return redirect(`/driver/routes/${token}#next-stop`);
@@ -116,15 +146,9 @@ function formatDate(value: string | Date) {
 }
 
 function formatStart(value: string | Date) {
-  if (typeof value === "string" && /^\d{2}:\d{2}$/.test(value)) {
-    return value;
-  }
-
+  if (typeof value === "string" && /^\d{2}:\d{2}$/.test(value)) return value;
   const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return String(value || "Time pending");
-  }
+  if (Number.isNaN(date.getTime())) return String(value || "Time pending");
 
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "short",
@@ -136,13 +160,9 @@ function formatStart(value: string | Date) {
 }
 
 function formatSlot(estimatedArrival: string | Date | null) {
-  if (!estimatedArrival) {
-    return "Target arrival pending";
-  }
-
+  if (!estimatedArrival) return "Target arrival pending";
   const start = new Date(estimatedArrival);
   const end = new Date(start.getTime() + 60 * 60 * 1000);
-
   return formatEtaSlot(start, end);
 }
 
@@ -151,10 +171,7 @@ function statusLabel(status: string) {
 }
 
 function splitLineItems(summary?: string | null) {
-  return (summary || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return (summary || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function removeUkTrunkZero(digits: string) {
@@ -163,29 +180,12 @@ function removeUkTrunkZero(digits: string) {
 
 function tidyPhone(phone?: string | null) {
   const compact = (phone || "").trim().replace(/[^\d+]/g, "");
-
-  if (!compact) {
-    return "";
-  }
-
-  if (compact.startsWith("+")) {
-    return `+${removeUkTrunkZero(compact.slice(1).replace(/\D/g, ""))}`;
-  }
-
+  if (!compact) return "";
+  if (compact.startsWith("+")) return `+${removeUkTrunkZero(compact.slice(1).replace(/\D/g, ""))}`;
   const digits = compact.replace(/\D/g, "");
-
-  if (digits.startsWith("00")) {
-    return `+${removeUkTrunkZero(digits.slice(2))}`;
-  }
-
-  if (digits.startsWith("44")) {
-    return `+${removeUkTrunkZero(digits)}`;
-  }
-
-  if (digits.startsWith("0")) {
-    return `+44${digits.slice(1)}`;
-  }
-
+  if (digits.startsWith("00")) return `+${removeUkTrunkZero(digits.slice(2))}`;
+  if (digits.startsWith("44")) return `+${removeUkTrunkZero(digits)}`;
+  if (digits.startsWith("0")) return `+44${digits.slice(1)}`;
   return digits;
 }
 
@@ -213,6 +213,47 @@ function buttonStyle(background: string, color = "#ffffff") {
 
 function secondaryButtonStyle() {
   return { border: "1px solid #d0d5dd", borderRadius: 16, padding: "14px 12px", background: "#ffffff", color: "#323841", fontSize: 15, fontWeight: 900, textAlign: "center" as const, textDecoration: "none" };
+}
+
+function StartRouteForm({ canStart, routeDate }: { canStart: boolean; routeDate: string | Date }) {
+  const submit = useSubmit();
+  const [starting, setStarting] = useState(false);
+
+  function submitForm(form: HTMLFormElement) {
+    submit(form, { method: "post" });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+
+    if (!canStart || starting) return;
+    setStarting(true);
+
+    const latInput = form.elements.namedItem("startLat") as HTMLInputElement | null;
+    const lngInput = form.elements.namedItem("startLng") as HTMLInputElement | null;
+
+    if (!("geolocation" in navigator)) {
+      submitForm(form);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition((position) => {
+      if (latInput) latInput.value = String(position.coords.latitude);
+      if (lngInput) lngInput.value = String(position.coords.longitude);
+      submitForm(form);
+    }, () => submitForm(form), { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 });
+  }
+
+  return (
+    <Form method="post" onSubmit={handleSubmit}>
+      <input type="hidden" name="intent" value="startRoute" />
+      <input type="hidden" name="startLat" value="" />
+      <input type="hidden" name="startLng" value="" />
+      <button type="submit" disabled={!canStart || starting} style={{ width: "100%", ...buttonStyle(canStart && !starting ? "#16a34a" : "#d0d5dd", canStart && !starting ? "#ffffff" : "#667085"), fontSize: 22, padding: "18px 16px" }}>{starting ? "Starting route..." : "Start route"}</button>
+      <p style={{ margin: "10px 0 0", color: "#667085", fontWeight: 800 }}>{canStart ? "We will check your current location once to improve the first drop ETA." : `This route can only be started on ${formatDate(routeDate)}.`}</p>
+    </Form>
+  );
 }
 
 function SignatureModal({ customerName, disabled, onSave, onClose }: { customerName: string; disabled: boolean; onSave: (image: string) => void; onClose: () => void }) {
@@ -334,7 +375,14 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
 
       {deliveryMode === "customer" || deliveryMode === "safe" ? (
         <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 12, border: "1px solid #e5e7eb", borderRadius: 18, padding: 12, background: "#f8fafc" }}>
-          <input type="hidden" name="intent" value="completeStop" /><input type="hidden" name="stopId" value={stopId} /><input type="hidden" name="leftInSafePlace" value={deliveryMode === "safe" ? "true" : "false"} /><input type="hidden" name="podName" value={customerName} /><input type="hidden" name="podImage" value={podImage} /><input type="hidden" name="podTicked" value={deliveryMode === "customer" && podImage ? "true" : "false"} /><input type="hidden" name="podLat" value={podLat} /><input type="hidden" name="podLng" value={podLng} />
+          <input type="hidden" name="intent" value="completeStop" />
+          <input type="hidden" name="stopId" value={stopId} />
+          <input type="hidden" name="leftInSafePlace" value={deliveryMode === "safe" ? "true" : "false"} />
+          <input type="hidden" name="podName" value={customerName} />
+          <input type="hidden" name="podImage" value={podImage} />
+          <input type="hidden" name="podTicked" value={deliveryMode === "customer" && podImage ? "true" : "false"} />
+          <input type="hidden" name="podLat" value={podLat} />
+          <input type="hidden" name="podLng" value={podLng} />
           <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Add proof photo<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple={false} disabled={!proofPhotoStorageEnabled} onChange={handleProofPhotoChange} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff" }} /></label>
           {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14 }} /> : null}
           {proofPreviewUrl ? <img src={proofPreviewUrl} alt="Proof preview" style={{ width: 120, height: 120, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd" }} /> : null}
@@ -372,13 +420,54 @@ export default function DriverRoutePage() {
     <main style={{ minHeight: "100vh", background: "#eef4fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
       <section style={{ maxWidth: 720, margin: "0 auto", padding: "14px 12px 32px" }}>
         <header style={{ background: "#ffffff", borderRadius: 24, padding: 18, boxShadow: "0 10px 28px rgba(50,56,65,0.12)", marginBottom: 14 }}>
-          <p style={{ margin: 0, color: "#509AE6", fontWeight: 900, fontSize: 14 }}>Bathroom Panels Direct</p><h1 style={{ margin: "8px 0 0", fontSize: 30, lineHeight: 1.05 }}>{route.driver?.name || "Driver"}</h1><p style={{ margin: "10px 0 0", fontSize: 20, fontWeight: 900 }}>{route.name}</p>
-          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><div style={{ background: "#eff6ff", borderRadius: 16, padding: 12 }}><p style={{ margin: 0, color: "#667085", fontWeight: 800, fontSize: 12 }}>Planned start</p><p style={{ margin: "4px 0 0", color: "#2563eb", fontWeight: 900 }}>{formatStart(plannedStart)}</p></div><div style={{ background: routeStarted ? "#ecfdf3" : "#fff7ed", borderRadius: 16, padding: 12 }}><p style={{ margin: 0, color: "#667085", fontWeight: 800, fontSize: 12 }}>Route status</p><p style={{ margin: "4px 0 0", color: routeStarted ? "#16a34a" : "#f97316", fontWeight: 900 }}>{statusLabel(route.status)}</p></div></div>
+          <p style={{ margin: 0, color: "#509AE6", fontWeight: 900, fontSize: 14 }}>Bathroom Panels Direct</p>
+          <h1 style={{ margin: "8px 0 0", fontSize: 30, lineHeight: 1.05 }}>{route.driver?.name || "Driver"}</h1>
+          <p style={{ margin: "10px 0 0", fontSize: 20, fontWeight: 900 }}>{route.name}</p>
+          <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div style={{ background: "#eff6ff", borderRadius: 16, padding: 12 }}><p style={{ margin: 0, color: "#667085", fontWeight: 800, fontSize: 12 }}>Planned start</p><p style={{ margin: "4px 0 0", color: "#2563eb", fontWeight: 900 }}>{formatStart(plannedStart)}</p></div>
+            <div style={{ background: routeStarted ? "#ecfdf3" : "#fff7ed", borderRadius: 16, padding: 12 }}><p style={{ margin: 0, color: "#667085", fontWeight: 800, fontSize: 12 }}>Route status</p><p style={{ margin: "4px 0 0", color: routeStarted ? "#16a34a" : "#f97316", fontWeight: 900 }}>{statusLabel(route.status)}</p></div>
+          </div>
           <p style={{ margin: "12px 0 0", fontWeight: 900 }}>{route.stops.length} drops · {completedStops} done · {failedStops} missed</p>
         </header>
+
         <section style={{ background: "#ffffff", borderRadius: 22, padding: 10, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 14 }}><RouteMap title="Driver route" badge={`${mapPoints.length} pins`} points={mapPoints} height={315} /></section>
-        <section style={{ background: "#ffffff", borderRadius: 22, padding: 14, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 14 }}>{actionData && "error" in actionData ? <p style={{ margin: "0 0 10px", color: "#b42318", fontWeight: 900 }}>{actionData.error}</p> : null}{routeStarted ? <p style={{ margin: 0, fontWeight: 900, color: "#16a34a", fontSize: 18 }}>Route started. Next active drop is highlighted below.</p> : <Form method="post"><input type="hidden" name="intent" value="startRoute" /><button type="submit" disabled={!canStart} style={{ width: "100%", ...buttonStyle(canStart ? "#16a34a" : "#d0d5dd", canStart ? "#ffffff" : "#667085"), fontSize: 22, padding: "18px 16px" }}>Start route</button>{!canStart ? <p style={{ margin: "10px 0 0", color: "#667085", fontWeight: 800 }}>This route can only be started on {formatDate(route.date)}.</p> : null}</Form>}</section>
-        <section style={{ display: "grid", gap: 14 }}>{route.stops.map((stop) => { const group = stop.deliveryGroup; const customerName = group?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing"; const orders = group?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders"; const lineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || []; const phone = group?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || ""; const cleanPhone = tidyPhone(phone); const address = cleanDeliveryAddress(group?.formattedAddress || group?.address || "No address"); const wazeUrl = buildWazeUrl(group); const isDelivered = stop.status === "DELIVERED"; const isFailed = stop.status === "FAILED"; const isNextStop = nextStop?.id === stop.id; const proofPhotos = group?.proofPhotos || []; const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop; return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)" }}><div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}><div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div><div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div></div><div style={{ padding: 16, display: "grid", gap: 12 }}><div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div><div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div><div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items to deliver</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>No item details stored for this order.</p>}</div><ProofCard proofPhotos={proofPhotos} />{isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>✓ Delivery complete</p> : null}{isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>Delivery marked missed</p> : null}{!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} /> : null}</div></article>; })}</section>
+
+        <section style={{ background: "#ffffff", borderRadius: 22, padding: 14, boxShadow: "0 8px 24px rgba(50,56,65,0.08)", marginBottom: 14 }}>
+          {actionData && "error" in actionData ? <p style={{ margin: "0 0 10px", color: "#b42318", fontWeight: 900 }}>{actionData.error}</p> : null}
+          {routeStarted ? <p style={{ margin: 0, fontWeight: 900, color: "#16a34a", fontSize: 18 }}>Route started. Next active drop is highlighted below.</p> : <StartRouteForm canStart={canStart} routeDate={route.date} />}
+        </section>
+
+        <section style={{ display: "grid", gap: 14 }}>{route.stops.map((stop) => {
+          const group = stop.deliveryGroup;
+          const customerName = group?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
+          const orders = group?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
+          const lineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
+          const phone = group?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || "";
+          const cleanPhone = tidyPhone(phone);
+          const address = cleanDeliveryAddress(group?.formattedAddress || group?.address || "No address");
+          const wazeUrl = buildWazeUrl(group);
+          const isDelivered = stop.status === "DELIVERED";
+          const isFailed = stop.status === "FAILED";
+          const isNextStop = nextStop?.id === stop.id;
+          const proofPhotos = group?.proofPhotos || [];
+          const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
+
+          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)" }}>
+            <div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
+              <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div>
+            </div>
+            <div style={{ padding: 16, display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items to deliver</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>No item details stored for this order.</p>}</div>
+              <ProofCard proofPhotos={proofPhotos} />
+              {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>✓ Delivery complete</p> : null}
+              {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>Delivery marked missed</p> : null}
+              {!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} /> : null}
+            </div>
+          </article>;
+        })}</section>
       </section>
     </main>
   );
