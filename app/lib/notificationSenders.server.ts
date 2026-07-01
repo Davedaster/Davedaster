@@ -35,6 +35,10 @@ function requireCredential(value: string, name: string) {
   return value;
 }
 
+function removeUkTrunkZero(digits: string) {
+  return digits.startsWith("440") ? `44${digits.slice(3)}` : digits;
+}
+
 function normaliseSmsNumber(value: string) {
   const trimmed = (value || "").trim();
 
@@ -45,17 +49,17 @@ function normaliseSmsNumber(value: string) {
   const compact = trimmed.replace(/[^\d+]/g, "");
 
   if (compact.startsWith("+")) {
-    return `+${compact.slice(1).replace(/\D/g, "")}`;
+    return `+${removeUkTrunkZero(compact.slice(1).replace(/\D/g, ""))}`;
   }
 
   const digits = compact.replace(/\D/g, "");
 
   if (digits.startsWith("00")) {
-    return `+${digits.slice(2)}`;
+    return `+${removeUkTrunkZero(digits.slice(2))}`;
   }
 
   if (digits.startsWith("44")) {
-    return `+${digits}`;
+    return `+${removeUkTrunkZero(digits)}`;
   }
 
   if (digits.startsWith("0")) {
