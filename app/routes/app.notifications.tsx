@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import {
   isResendEnabled,
   isTwilioEnabled,
+  sendSmsWithTwilio,
 } from "../lib/notificationSenders.server";
 import {
   availableNotificationVariables,
@@ -63,6 +64,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(formData.get("intent") || "");
   const templateId = String(formData.get("templateId") || "");
 
+  if (intent === "sendTestSms") {
+    const testPhone = String(formData.get("testPhone") || "").trim();
+
+    if (!testPhone) {
+      return json({ ok: false, error: "Enter a phone number to send the test SMS." }, { status: 400 });
+    }
+
+    try {
+      const result = await sendSmsWithTwilio({
+        to: testPhone,
+        message: {
+          body: "Bathroom Panels Direct SMS test. Your delivery SMS setup is working.",
+        },
+      });
+
+      return json({ ok: true, savedSection: result.id ? `Test SMS sent, ${result.id}` : "Test SMS sent" });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Test SMS failed." }, { status: 400 });
+    }
+  }
+
   if (intent === "resetTemplate") {
     await resetNotificationTemplate(templateId);
     return json({ ok: true, savedSection: "Template reset" });
@@ -86,6 +108,43 @@ function MessagePreview({ body }: { body: string }) {
     <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit", fontSize: 13 }}>
       {body}
     </pre>
+  );
+}
+
+function TestSmsCard({ twilioEnabled, sent }: { twilioEnabled: boolean; sent: boolean }) {
+  const [testPhone, setTestPhone] = useState("");
+
+  return (
+    <LegacyCard title="SMS setup test" sectioned>
+      <Form method="post">
+        <input type="hidden" name="intent" value="sendTestSms" />
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center" gap="300">
+            <BlockStack gap="100">
+              <Text as="p" variant="bodyMd">
+                Send one test SMS before using route messages with customers.
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Add your Twilio details in Settings, Notifications first. UK numbers can be typed as 07 or +44.
+              </Text>
+            </BlockStack>
+            {sent ? <Badge tone="success">Test sent</Badge> : null}
+          </InlineStack>
+          <TextField
+            label="Test phone number"
+            name="testPhone"
+            value={testPhone}
+            onChange={setTestPhone}
+            placeholder="07123 456789"
+            autoComplete="off"
+            helpText="The app converts UK 07 numbers to +44 before sending to Twilio."
+          />
+          <Button submit variant="primary" disabled={!twilioEnabled || !testPhone.trim()}>
+            Send test SMS
+          </Button>
+        </BlockStack>
+      </Form>
+    </LegacyCard>
   );
 }
 
@@ -219,6 +278,8 @@ export default function Notifications() {
               {actionData && "error" in actionData ? <Text as="p" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
+
+          <TestSmsCard twilioEnabled={twilioEnabled} sent={Boolean(actionData?.ok && actionData.savedSection?.startsWith("Test SMS sent"))} />
 
           <LegacyCard title="Variables" sectioned>
             <BlockStack gap="200">
