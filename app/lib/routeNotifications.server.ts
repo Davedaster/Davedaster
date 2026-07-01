@@ -37,6 +37,10 @@ function notificationAction(templateId: ManualRouteNotificationTemplateId) {
   return `${manualNotificationLabel(templateId)} sent`;
 }
 
+function shouldSendCustomerEmail(templateId: ManualRouteNotificationTemplateId) {
+  return templateId !== "delayUpdate";
+}
+
 function notificationMarkerDetails(marker?: NotificationMarker) {
   const parts: string[] = [];
 
@@ -221,6 +225,7 @@ export async function sendManualRouteNotification({
     isTwilioEnabled(),
     isResendEnabled(),
   ]);
+  const sendCustomerEmail = shouldSendCustomerEmail(templateId);
 
   if (!route) {
     throw new Error("Route not found.");
@@ -230,8 +235,12 @@ export async function sendManualRouteNotification({
     throw new Error("Publish this route before sending this customer update.");
   }
 
+  if (!canSendSms && (!canSendEmail || !sendCustomerEmail)) {
+    throw new Error("Twilio SMS is not set up yet. Add it in Settings, Notifications before sending this update.");
+  }
+
   if (!canSendSms && !canSendEmail) {
-    throw new Error("Twilio and Resend are not set up yet. Add them in Settings, API Credentials before sending messages.");
+    throw new Error("Twilio and Resend are not set up yet. Add them in Settings, Notifications before sending messages.");
   }
 
   if (templateId === "nextDropTracking" && !stopId) {
@@ -286,7 +295,7 @@ export async function sendManualRouteNotification({
         }
       }
 
-      if (canSendEmail && order.customerEmail) {
+      if (sendCustomerEmail && canSendEmail && order.customerEmail) {
         attemptedAnything = true;
         try {
           await sendEmailWithResend({
