@@ -5,8 +5,14 @@ function normaliseSearchTerm(value: string) {
   return value.trim().replace(/^#/, "");
 }
 
+function phoneDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
 export async function searchProofOfDelivery(term: string) {
   const query = normaliseSearchTerm(term);
+  const digitsOnly = phoneDigits(query);
+  const phoneQueries = Array.from(new Set([query, digitsOnly].filter((value) => value.length >= 3)));
 
   if (!query) {
     return [];
@@ -48,16 +54,16 @@ export async function searchProofOfDelivery(term: string) {
             },
           },
         },
-        {
+        ...phoneQueries.map((phoneQuery) => ({
           orders: {
             some: {
               customerPhone: {
-                contains: query,
-                mode: "insensitive",
+                contains: phoneQuery,
+                mode: "insensitive" as const,
               },
             },
           },
-        },
+        })),
       ],
     },
     include: {
