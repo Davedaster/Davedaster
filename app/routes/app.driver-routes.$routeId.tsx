@@ -36,16 +36,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  let route = await getDriverRoute(routeId);
-
-  if (!route) {
-    throw new Response("Route not found", { status: 404 });
-  }
-
-  if (route.status === "OUT_FOR_DELIVERY") {
-    await sendAutomaticDelayNotifications(routeId);
-    route = await getDriverRoute(routeId);
-  }
+  const route = await getDriverRoute(routeId);
 
   if (!route) {
     throw new Response("Route not found", { status: 404 });
