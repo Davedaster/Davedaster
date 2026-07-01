@@ -611,6 +611,7 @@ function DeliveryMap({
   orders,
   selectedIds,
   routeStopIds,
+  tomtomApiKey,
   startAddress,
   finishAddress,
   startLatitude,
@@ -624,6 +625,7 @@ function DeliveryMap({
   orders: DeliveryOrder[];
   selectedIds: Set<string>;
   routeStopIds: string[];
+  tomtomApiKey: string;
   startAddress: string;
   finishAddress: string;
   startLatitude: number | null;
@@ -675,6 +677,7 @@ function DeliveryMap({
       <RouteMap
         title="Live planning map"
         badge={`${routeStopIds.length} selected`}
+        apiKey={tomtomApiKey}
         points={[...routePoints, ...unselectedPoints]}
         showRouteLine={routePoints.length > 0}
         routeStart={{ address: startAddress, label: "START", latitude: startLatitude, longitude: startLongitude, status: "START" }}
@@ -791,7 +794,7 @@ function CollapsibleAddressEditor({
 }
 
 export default function OrdersMap() {
-  const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults } = useLoaderData<typeof loader>();
+  const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults, tomtomApiKey } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const optimisationFetcher = useFetcher<PlanningOptimisationResult>();
   const [stops, setStops] = useState<Stop[]>([]);
@@ -1031,6 +1034,7 @@ export default function OrdersMap() {
                   returnToBase={returnToBase}
                   fulfilmentWindowDays={fulfilmentWindowDays}
                   onToggleOrder={toggleOrder}
+                   tomtomApiKey={tomtomApiKey}
                 />
               )}
             </Box>
