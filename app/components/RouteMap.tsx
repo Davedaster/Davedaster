@@ -49,6 +49,10 @@ const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v3";
 const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
 const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
+const LONG_PRESS_DELAY_MS = 520;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 24;
+const LONG_PRESS_HIT_BOX_PX = 28;
+const LONG_PRESS_CLICK_GUARD_MS = 450;
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -123,7 +127,20 @@ function styles() {
     .bpd-tomtom-map .mapboxgl-canvas { overscroll-behavior: contain; touch-action: none; }
     .bpd-tomtom-map .mapboxgl-ctrl-group button { width: 36px; height: 36px; }
     .bpd-tomtom-map .mapboxgl-canvas { outline: none; }
-    .bpd-tomtom-popup .mapboxgl-popup-content { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
+    .bpd-tomtom-popup .mapboxgl-popup-content {
+      background: rgba(255,255,255,0.98);
+      color: #323841;
+      border: 1px solid #d0d5dd;
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+      min-width: 210px;
+      max-width: min(300px, calc(100vw - 36px));
+      max-height: 42vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+    }
     .bpd-tomtom-popup .mapboxgl-popup-tip { display: none; }
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
     .bpd-tooltip-line { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.35; color: #475467; }
@@ -444,6 +461,8 @@ export function RouteMap({
   const touchHoldShownRef = useRef(false);
   const ignoreNextPinClickRef = useRef(false);
   const lastTouchTimeRef = useRef(0);
+  const activePointerIdRef = useRef<number | null>(null);
+  const longPressFeatureRef = useRef<any | null>(null);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
@@ -787,6 +806,8 @@ export function RouteMap({
       }
 
       touchStartPointRef.current = null;
+      activePointerIdRef.current = null;
+      longPressFeatureRef.current = null;
     };
 
     const hidePopup = (force = false) => {
@@ -810,7 +831,7 @@ export function RouteMap({
         ignoreNextPinClickRef.current = true;
         window.setTimeout(() => {
           ignoreNextPinClickRef.current = false;
-        }, 450);
+        }, LONG_PRESS_CLICK_GUARD_MS);
       }
     };
 
@@ -870,8 +891,31 @@ export function RouteMap({
       await showPopupForFeature(event.features?.[0]);
     };
 
-    const handlePinTouchStart = (event: any) => {
-      const feature = event.features?.[0];
+    const pointerPointForEvent = (event: PointerEvent) => {
+      const rect = map.getCanvas().getBoundingClientRect();
+
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+    };
+
+    const pinFeatureAtPoint = (point: { x: number; y: number }) => {
+      const hitBox = [
+        [point.x - LONG_PRESS_HIT_BOX_PX, point.y - LONG_PRESS_HIT_BOX_PX],
+        [point.x + LONG_PRESS_HIT_BOX_PX, point.y + LONG_PRESS_HIT_BOX_PX],
+      ];
+
+      return map.queryRenderedFeatures(hitBox, { layers: [pinsLayerId, pinLabelLayerId] })[0];
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.pointerType === "mouse" && event.button !== 0) {
+        return;
+      }
+
+      const point = pointerPointForEvent(event);
+      const feature = pinFeatureAtPoint(point);
 
       if (!feature) {
         return;
@@ -879,65 +923,73 @@ export function RouteMap({
 
       clearTouchHold();
       touchHoldShownRef.current = false;
-      touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
-      touchHoldTimerRef.current = setTimeout(() => {
-  touchHoldShownRef.current = true;
-  ignoreNextPinClickRef.current = true;
-  map.getCanvas().style.cursor = "pointer";
-  void showPopupForFeature(feature);
+      ignoreNextPinClickRef.current = false;
+      activePointerIdRef.current = event.pointerId;
+      longPressFeatureRef.current = feature;
+      touchStartPointRef.current = point;
 
-  window.setTimeout(() => {
-    if (touchHoldShownRef.current) {
-      touchHoldShownRef.current = false;
-      touchStartPointRef.current = null;
-      map.getCanvas().style.cursor = "";
-      popupRef.current?.remove();
-    }
-  }, 6000);
-}, 520);
+      touchHoldTimerRef.current = window.setTimeout(() => {
+        if (activePointerIdRef.current !== event.pointerId || longPressFeatureRef.current !== feature) {
+          return;
+        }
+
+        touchHoldShownRef.current = true;
+        ignoreNextPinClickRef.current = true;
+        map.getCanvas().style.cursor = "pointer";
+        void showPopupForFeature(feature);
+      }, LONG_PRESS_DELAY_MS);
     };
 
-    const handlePinTouchMove = (event: any) => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (activePointerIdRef.current !== event.pointerId) {
+        return;
+      }
+
       if (touchHoldShownRef.current) {
         return;
       }
 
-      if (!touchStartPointRef.current || !event.point) {
+      if (!touchStartPointRef.current) {
         return;
       }
 
-      const movedX = Math.abs(event.point.x - touchStartPointRef.current.x);
-      const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
+      const point = pointerPointForEvent(event);
+      const movedX = Math.abs(point.x - touchStartPointRef.current.x);
+      const movedY = Math.abs(point.y - touchStartPointRef.current.y);
 
-      if (movedX > 12 || movedY > 12) {
+      if (movedX > LONG_PRESS_MOVE_TOLERANCE_PX || movedY > LONG_PRESS_MOVE_TOLERANCE_PX) {
         clearTouchHold();
       }
     };
 
-    const handlePinTouchEnd = () => {
-      finishLongPress();
-    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (activePointerIdRef.current !== event.pointerId) {
+        return;
+      }
 
-    const handleBrowserTouchMove = (_event: TouchEvent) => {
-      // Let TomTom handle the map drag while the order card is open.
-    };
+      const wasLongPress = touchHoldShownRef.current;
 
-    const handleBrowserTouchEnd = (event: TouchEvent) => {
-      if (touchHoldShownRef.current && event.cancelable) {
+      if (wasLongPress && event.cancelable) {
         event.preventDefault();
       }
 
       finishLongPress();
     };
 
-    const handleMapMovement = () => {
-  if (touchStartPointRef.current || touchHoldShownRef.current) {
-    return;
-  }
+    const handleContextMenu = (event: Event) => {
+      if (touchStartPointRef.current || touchHoldShownRef.current) {
+        event.preventDefault();
+      }
+    };
 
-  clearTouchHold();
-  hidePopup();
-};
+    const handleMapMovement = () => {
+      if (touchStartPointRef.current || touchHoldShownRef.current) {
+        return;
+      }
+
+      clearTouchHold();
+      hidePopup();
+    };
 
     const handleClusterEnter = () => {
       map.getCanvas().style.cursor = "pointer";
@@ -957,15 +1009,13 @@ export function RouteMap({
     map.on("mouseleave", pinsLayerId, hidePopup);
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
-    map.on("touchstart", pinsLayerId, handlePinTouchStart);
-    map.on("touchmove", handlePinTouchMove);
-    map.on("touchend", handlePinTouchEnd);
-    map.on("touchcancel", handlePinTouchEnd);
     map.on("dragstart", handleMapMovement);
     map.on("movestart", handleMapMovement);
-    mapElement?.addEventListener("touchmove", handleBrowserTouchMove, { passive: false });
-    mapElement?.addEventListener("touchend", handleBrowserTouchEnd, { passive: false });
-    mapElement?.addEventListener("touchcancel", handleBrowserTouchEnd, { passive: false });
+    mapElement?.addEventListener("pointerdown", handlePointerDown, { passive: false });
+    mapElement?.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerEnd, { passive: false });
+    window.addEventListener("pointercancel", handlePointerEnd, { passive: false });
 
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
@@ -992,15 +1042,13 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
-      map.off("touchstart", pinsLayerId, handlePinTouchStart);
-      map.off("touchmove", handlePinTouchMove);
-      map.off("touchend", handlePinTouchEnd);
-      map.off("touchcancel", handlePinTouchEnd);
       map.off("dragstart", handleMapMovement);
       map.off("movestart", handleMapMovement);
-      mapElement?.removeEventListener("touchmove", handleBrowserTouchMove);
-      mapElement?.removeEventListener("touchend", handleBrowserTouchEnd);
-      mapElement?.removeEventListener("touchcancel", handleBrowserTouchEnd);
+      mapElement?.removeEventListener("pointerdown", handlePointerDown);
+      mapElement?.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
