@@ -154,6 +154,79 @@ async function calculateLeg(
   };
 }
 
+export async function recalculateFirstPendingEtaFromPoint(routeId: string, driverPoint: RoutePoint): Promise<TrafficEtaResult> {
+  try {
+    if (!hasCoordinates(driverPoint)) {
+      return { ok: false, reason: "Driver location was not available." };
+    }
+
+    const route = await prisma.route.findUnique({
+      where: { id: routeId },
+      include: {
+        stops: {
+          include: {
+            deliveryGroup: {
+              include: {
+                orders: true,
+              },
+            },
+          },
+          orderBy: {
+            orderIndex: "asc",
+          },
+        },
+      },
+    });
+
+    if (!route) {
+      return { ok: false, reason: "Route not found." };
+    }
+
+    const firstPendingStop = route.stops.find((stop) => stop.status === "PENDING");
+
+    if (!firstPendingStop) {
+      return { ok: true, reason: "No pending stop." };
+    }
+
+    const firstStopPoint = pointForStop(firstPendingStop);
+    const leg = await calculateLeg(driverPoint, firstStopPoint, route.timePerDropMinutes);
+    const estimatedArrival = addMinutes(new Date(), leg.travelMinutes);
+
+    await prisma.$transaction([
+      prisma.stop.update({
+        where: { id: firstPendingStop.id },
+        data: { estimatedArrival },
+      }),
+      prisma.route.update({
+        where: { id: route.id },
+        data: {
+          history: {
+            create: {
+              action: "First stop ETA updated",
+              details: `Driver start location used for drop ${firstPendingStop.orderIndex}. ${leg.usedTraffic ? "TomTom live traffic" : "Fallback route timing"} gave ${leg.travelMinutes} min travel time.`,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      ok: true,
+      nextStopId: firstPendingStop.id,
+      estimatedArrival,
+      travelMinutes: leg.travelMinutes,
+      trafficDelayMinutes: leg.trafficDelayMinutes,
+      recalculatedStops: 1,
+      trafficLegs: leg.usedTraffic ? 1 : 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : "First stop ETA recalculation failed.",
+    };
+  }
+}
+
 export async function recalculateTrafficEtaAfterStop(stopId: string): Promise<TrafficEtaResult> {
   try {
     const completedAt = new Date();
