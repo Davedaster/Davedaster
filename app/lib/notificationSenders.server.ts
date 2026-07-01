@@ -27,6 +27,8 @@ type ResendResponse = {
   message?: string;
 };
 
+const SMS_HELP_TEXT = "Need help? Call 01803 222784";
+
 function requireCredential(value: string, name: string) {
   if (!value) {
     throw new Error(`${name} is missing from Settings, API Credentials.`);
@@ -73,6 +75,20 @@ function buildTwilioAuthHeader(accountSid: string, authToken: string) {
   return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
 }
 
+function withSmsHelpText(messageBody: string) {
+  const cleanBody = (messageBody || "").trim();
+
+  if (!cleanBody) {
+    return SMS_HELP_TEXT;
+  }
+
+  if (cleanBody.toLowerCase().includes(SMS_HELP_TEXT.toLowerCase())) {
+    return cleanBody;
+  }
+
+  return `${cleanBody}\n\n${SMS_HELP_TEXT}`;
+}
+
 export async function isTwilioEnabled() {
   const credentials = await getAppCredentials();
 
@@ -99,7 +115,7 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
   const body = new URLSearchParams();
   body.set("To", toNumber);
   body.set("From", fromNumber);
-  body.set("Body", input.message.body);
+  body.set("Body", withSmsHelpText(input.message.body));
 
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",
