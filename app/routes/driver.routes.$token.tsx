@@ -116,13 +116,23 @@ function formatDate(value: string | Date) {
 }
 
 function formatStart(value: string | Date) {
+  if (typeof value === "string" && /^\d{2}:\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value || "Time pending");
+  }
+
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "short",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatSlot(estimatedArrival: string | Date | null) {
