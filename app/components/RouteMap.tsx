@@ -874,7 +874,7 @@ export function RouteMap({
         ignoreNextPinClickRef.current = true;
         map.getCanvas().style.cursor = "pointer";
         void showPopupForFeature(feature);
-      }, 300);
+      }, 520);
     };
 
     const handlePinTouchMove = (event: any) => {
