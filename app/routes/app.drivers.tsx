@@ -78,6 +78,8 @@ const emptyDriverForm: DriverFormValues = {
   isActive: "true",
 };
 
+const DRIVER_PHONE_HELP = "For UK mobiles, 07123 456789 is fine. The app converts it to +44 before sending SMS.";
+
 const DRIVER_IMAGE_FILES_QUERY = `#graphql
   query DriverImageFiles {
     files(first: 50, sortKey: CREATED_AT, reverse: true) {
@@ -303,7 +305,7 @@ export default function Drivers() {
                               </InlineStack>
                               <FormLayout>
                                 <TextField label="Driver name" name="name" value={editForm.name} onChange={updateEditField("name")} autoComplete="off" />
-                                <TextField label="Phone number" name="phoneNumber" value={editForm.phoneNumber} onChange={updateEditField("phoneNumber")} type="tel" autoComplete="off" />
+                                <TextField label="Phone number" name="phoneNumber" value={editForm.phoneNumber} onChange={updateEditField("phoneNumber")} type="tel" autoComplete="off" helpText={DRIVER_PHONE_HELP} />
                                 <TextField label="Email address" name="email" value={editForm.email} onChange={updateEditField("email")} type="email" autoComplete="off" />
                                 <Select
                                   label="Driver photo from Shopify files"
@@ -390,7 +392,7 @@ export default function Drivers() {
               <BlockStack gap="300">
                 <FormLayout>
                   <TextField label="Driver name" name="name" value={createForm.name} onChange={updateCreateField("name")} autoComplete="off" />
-                  <TextField label="Phone number" name="phoneNumber" value={createForm.phoneNumber} onChange={updateCreateField("phoneNumber")} type="tel" autoComplete="off" />
+                  <TextField label="Phone number" name="phoneNumber" value={createForm.phoneNumber} onChange={updateCreateField("phoneNumber")} type="tel" autoComplete="off" helpText={DRIVER_PHONE_HELP} />
                   <TextField label="Email address" name="email" value={createForm.email} onChange={updateCreateField("email")} type="email" autoComplete="off" />
                   <Select
                     label="Driver photo from Shopify files"
