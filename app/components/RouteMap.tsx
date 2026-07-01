@@ -922,13 +922,13 @@ export function RouteMap({
     };
 
     const handleMapMovement = () => {
-      if (touchHoldShownRef.current) {
-        return;
-      }
+  if (touchStartPointRef.current || touchHoldShownRef.current) {
+    return;
+  }
 
-      clearTouchHold();
-      hidePopup();
-    };
+  clearTouchHold();
+  hidePopup();
+};
 
     const handleClusterEnter = () => {
       map.getCanvas().style.cursor = "pointer";
