@@ -303,9 +303,14 @@ export async function sendDriverRouteLink(input: {
   let smsSent = false;
   let emailSent = false;
 
-  if (driver.phone && canSendSms) {
+  if (driver.phoneNumber && canSendSms) {
     try {
-      await sendSmsWithTwilio(driver.phone, smsBody);
+      await sendSmsWithTwilio({
+        to: driver.phoneNumber,
+        message: {
+          body: smsBody,
+        },
+      });
       smsSent = true;
     } catch (error) {
       errors.push(`Driver SMS failed: ${error instanceof Error ? error.message : "Unknown error"}`);
@@ -314,7 +319,13 @@ export async function sendDriverRouteLink(input: {
 
   if (driver.email && canSendEmail) {
     try {
-      await sendEmailWithResend(driver.email, emailSubject, emailBody);
+      await sendEmailWithResend({
+        to: driver.email,
+        message: {
+          subject: emailSubject,
+          body: emailBody,
+        },
+      });
       emailSent = true;
     } catch (error) {
       errors.push(`Driver email failed: ${error instanceof Error ? error.message : "Unknown error"}`);
