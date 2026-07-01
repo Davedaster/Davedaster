@@ -60,12 +60,47 @@ function splitLineItems(summary?: string | null) {
     .filter(Boolean);
 }
 
-function normaliseItemLabel(item: string) {
-  return item.replace(/\s+/g, " ").trim();
+function parseItem(item: string) {
+  const normalised = item.replace(/\s+/g, " ").trim();
+  const trailingQty = normalised.match(/^(.*?)(?:\s+[x×]\s*)(\d+)$/i);
+
+  if (trailingQty) {
+    return {
+      label: trailingQty[1].trim(),
+      quantity: Number(trailingQty[2]),
+      original: normalised,
+    };
+  }
+
+  const leadingQty = normalised.match(/^(\d+)(?:\s*[x×]\s+)(.*)$/i);
+
+  if (leadingQty) {
+    return {
+      label: leadingQty[2].trim(),
+      quantity: Number(leadingQty[1]),
+      original: normalised,
+    };
+  }
+
+  return {
+    label: normalised,
+    quantity: 1,
+    original: normalised,
+  };
 }
 
 function itemKey(item: string) {
-  return normaliseItemLabel(item).toLowerCase();
+  return parseItem(item).label.toLowerCase();
+}
+
+function chunkStops<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 function checkbox() {
@@ -74,22 +109,23 @@ function checkbox() {
 
 export default function WarehousePackingList() {
   const { route, generatedAt } = useLoaderData<typeof loader>();
-  const itemMap = new Map<string, { label: string; totalLines: number; stops: number[]; orders: string[] }>();
+  const itemMap = new Map<string, { label: string; quantity: number; stops: number[]; orders: string[] }>();
 
   for (const stop of route.stops) {
     for (const order of stop.deliveryGroup?.orders || []) {
       for (const item of splitLineItems(order.lineItemSummary)) {
+        const parsed = parseItem(item);
         const key = itemKey(item);
         const existing = itemMap.get(key);
 
         if (existing) {
-          existing.totalLines += 1;
+          existing.quantity += Number.isFinite(parsed.quantity) ? parsed.quantity : 1;
           existing.stops.push(stop.orderIndex);
           existing.orders.push(order.shopifyOrderNumber);
         } else {
           itemMap.set(key, {
-            label: normaliseItemLabel(item),
-            totalLines: 1,
+            label: parsed.label,
+            quantity: Number.isFinite(parsed.quantity) ? parsed.quantity : 1,
             stops: [stop.orderIndex],
             orders: [order.shopifyOrderNumber],
           });
@@ -100,6 +136,7 @@ export default function WarehousePackingList() {
 
   const items = Array.from(itemMap.values()).sort((a, b) => a.label.localeCompare(b.label));
   const loadOrder = [...route.stops].sort((a, b) => b.orderIndex - a.orderIndex);
+  const stopPages = chunkStops(route.stops, 3);
   const driver = route.driver;
   const vehicleName = driver?.vehicleName || "Vehicle not set";
   const registration = driver?.vehicleRegistration || "Registration not set";
@@ -108,48 +145,57 @@ export default function WarehousePackingList() {
     <main>
       <style>{`
         * { box-sizing: border-box; }
-        body { margin: 0; background: #f3f4f6; color: #111827; font-family: Arial, sans-serif; }
-        main { padding: 24px; }
-        h1, h2, h3, p { margin-top: 0; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th, td { border: 1px solid #111827; padding: 8px; text-align: left; vertical-align: top; }
-        th { background: #e5e7eb; }
-        .no-print { margin-bottom: 20px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-        .print-button { border: 0; border-radius: 10px; padding: 12px 16px; background: #509AE6; color: #ffffff; font-weight: 700; cursor: pointer; }
-        .page { background: #ffffff; border: 1px solid #d1d5db; border-radius: 14px; padding: 20px; margin: 0 auto 18px; max-width: 1100px; }
+        body { margin: 0; background: #f2f2f2; color: #000; font-family: Arial, Helvetica, sans-serif; }
+        main { padding: 20px; }
+        h1, h2, h3, h4, p { margin-top: 0; }
+        p { margin-bottom: 5px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border: 1px solid #000; padding: 5px 6px; text-align: left; vertical-align: top; }
+        th { background: #eee; color: #000; font-weight: 800; }
+        .no-print { margin: 0 auto 18px; max-width: 1000px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+        .print-button { border: 2px solid #000; border-radius: 4px; padding: 10px 14px; background: #fff; color: #000; font-weight: 800; cursor: pointer; }
+        .page { background: #fff; border: 1px solid #000; padding: 14mm; margin: 0 auto 18px; max-width: 1000px; min-height: 277mm; }
         .page-break { break-after: page; page-break-after: always; }
-        .brand { color: #509AE6; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; }
-        .hero { display: grid; grid-template-columns: 1fr 280px; gap: 16px; align-items: start; border: 3px solid #111827; border-radius: 16px; padding: 18px; }
-        .van-card { border: 3px solid #111827; border-radius: 14px; padding: 14px; text-align: center; }
-        .van-label { font-size: 12px; color: #4b5563; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-        .reg { font-size: 34px; font-weight: 900; letter-spacing: 0.04em; margin: 0; }
-        .meta-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-        .meta { border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; }
-        .meta strong { display: block; font-size: 12px; color: #4b5563; margin-bottom: 4px; }
-        .section-title { font-size: 20px; margin-bottom: 10px; }
-        .tick-box { display: inline-block; width: 20px; height: 20px; border: 2px solid #111827; vertical-align: middle; }
-        .stop-card { border: 2px solid #111827; border-radius: 14px; padding: 16px; margin-bottom: 14px; break-inside: avoid; page-break-inside: avoid; }
-        .stop-head { display: grid; grid-template-columns: 90px 1fr 190px; gap: 14px; align-items: start; }
-        .stop-number { font-size: 48px; font-weight: 900; line-height: 1; }
-        .note-box { border: 2px solid #f59e0b; background: #fffbeb; border-radius: 10px; padding: 10px; margin-top: 10px; }
-        .check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .check-line { border: 1px solid #111827; border-radius: 10px; padding: 12px; font-weight: 700; }
-        .signature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
-        .signature { border-bottom: 2px solid #111827; height: 44px; }
-        .footer { margin-top: 16px; color: #4b5563; font-size: 12px; }
+        .brand { color: #777; font-size: 13px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+        .hero { display: grid; grid-template-columns: 1fr 230px; gap: 14px; align-items: stretch; border: 2px solid #000; padding: 12px; }
+        .van-card { border: 2px solid #000; padding: 10px; text-align: center; }
+        .van-label { font-size: 11px; text-transform: uppercase; font-weight: 800; margin-bottom: 4px; }
+        .reg { font-size: 30px; font-weight: 900; letter-spacing: 0.03em; margin: 0; }
+        .meta-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+        .meta { border: 1px solid #000; padding: 6px; font-size: 12px; min-height: 42px; }
+        .meta strong { display: block; font-size: 10px; text-transform: uppercase; margin-bottom: 3px; }
+        .section-title { font-size: 18px; margin: 14px 0 7px; }
+        .tick-box { display: inline-block; width: 15px; height: 15px; border: 2px solid #000; vertical-align: middle; }
+        .check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+        .check-line { border: 1px solid #000; padding: 7px; font-size: 12px; font-weight: 800; }
+        .signature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; font-size: 12px; }
+        .signature { border-bottom: 2px solid #000; height: 34px; }
+        .drop-card { border: 2px solid #000; padding: 8px; margin-bottom: 8px; min-height: 82mm; break-inside: avoid; page-break-inside: avoid; }
+        .drop-head { display: grid; grid-template-columns: 78px 1fr 155px; gap: 8px; border-bottom: 1px solid #000; padding-bottom: 6px; margin-bottom: 6px; }
+        .drop-label { font-size: 10px; text-transform: uppercase; font-weight: 900; margin-bottom: 2px; }
+        .drop-number { font-size: 40px; font-weight: 900; line-height: 1; }
+        .drop-name { font-size: 17px; font-weight: 900; margin-bottom: 4px; }
+        .drop-meta { font-size: 12px; }
+        .item-list { margin: 0; padding-left: 18px; columns: 2; column-gap: 24px; font-size: 12px; }
+        .item-list li { break-inside: avoid; margin-bottom: 3px; }
+        .notes { border: 1px solid #000; padding: 5px; margin-top: 6px; font-size: 12px; min-height: 22px; }
+        .loaded-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #000; padding-top: 6px; margin-top: 6px; font-size: 12px; font-weight: 900; }
+        .footer { margin-top: 8px; font-size: 10px; color: #555; }
+        @page { size: A4 portrait; margin: 8mm; }
         @media print {
-          body { background: #ffffff; }
+          body { background: #fff; }
           main { padding: 0; }
           .no-print { display: none !important; }
-          .page { border: 0; border-radius: 0; max-width: none; margin: 0; padding: 12mm; }
-          .stop-card, tr, .check-line { break-inside: avoid; page-break-inside: avoid; }
+          .page { border: 0; max-width: none; margin: 0; padding: 0; min-height: auto; }
+          .page-break { break-after: page; page-break-after: always; }
+          .drop-card, tr, .check-line { break-inside: avoid; page-break-inside: avoid; }
         }
       `}</style>
 
       <div className="no-print">
         <div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Warehouse packing list</h1>
-          <p style={{ margin: "6px 0 0", color: "#4b5563" }}>Print this page or save it as a PDF. It includes the warehouse pick list, van loading order and every stop sheet.</p>
+          <p style={{ margin: "6px 0 0" }}>Black and white print pack with one warehouse summary and three compact drops per page.</p>
         </div>
         <button className="print-button" onClick={() => window.print()}>Print or save PDF</button>
       </div>
@@ -158,14 +204,14 @@ export default function WarehousePackingList() {
         <div className="hero">
           <div>
             <p className="brand">Bathroom Panels Direct</p>
-            <h1 style={{ fontSize: 34, marginBottom: 8 }}>Warehouse Packing List</h1>
-            <h2 style={{ fontSize: 24, marginBottom: 10 }}>{route.name}</h2>
-            <p style={{ fontSize: 16, marginBottom: 0 }}>{formatDate(route.date)}</p>
+            <h1 style={{ fontSize: 30, marginBottom: 6 }}>Warehouse Packing List</h1>
+            <h2 style={{ fontSize: 21, marginBottom: 8 }}>{route.name}</h2>
+            <p style={{ fontSize: 15, marginBottom: 0 }}>{formatDate(route.date)}</p>
           </div>
           <div className="van-card">
-            <div className="van-label">Van</div>
+            <div className="van-label">Van registration</div>
             <p className="reg">{registration}</p>
-            <p style={{ margin: "8px 0 0", fontWeight: 700 }}>{vehicleName}</p>
+            <p style={{ margin: "7px 0 0", fontWeight: 800 }}>{vehicleName}</p>
           </div>
         </div>
 
@@ -177,19 +223,18 @@ export default function WarehousePackingList() {
           <div className="meta"><strong>Start</strong>{route.startAddress || "Bathroom Panels Direct"}</div>
           <div className="meta"><strong>Finish</strong>{route.finishAddress || "Bathroom Panels Direct"}</div>
           <div className="meta"><strong>Start time</strong>{route.plannedStartTime || "05:00"}</div>
-          <div className="meta"><strong>Route status</strong>{route.status}</div>
+          <div className="meta"><strong>Status</strong>{route.status}</div>
         </div>
 
-        <h2 className="section-title" style={{ marginTop: 24 }}>Warehouse pick summary</h2>
+        <h2 className="section-title">Warehouse pick summary</h2>
         {items.length ? (
           <table>
             <thead>
               <tr>
-                <th style={{ width: 55 }}>Pick</th>
+                <th style={{ width: 42 }}>Pick</th>
                 <th>Item</th>
-                <th style={{ width: 90 }}>Qty lines</th>
-                <th>Stops</th>
-                <th>Orders</th>
+                <th style={{ width: 70 }}>Qty</th>
+                <th style={{ width: 120 }}>Drops</th>
               </tr>
             </thead>
             <tbody>
@@ -197,9 +242,8 @@ export default function WarehousePackingList() {
                 <tr key={item.label}>
                   <td>{checkbox()}</td>
                   <td><strong>{item.label}</strong></td>
-                  <td>{item.totalLines}</td>
+                  <td>{item.quantity}</td>
                   <td>{Array.from(new Set(item.stops)).sort((a, b) => a - b).join(", ")}</td>
-                  <td>{Array.from(new Set(item.orders)).join(", ")}</td>
                 </tr>
               ))}
             </tbody>
@@ -208,16 +252,16 @@ export default function WarehousePackingList() {
           <p>No item details are stored against this route yet.</p>
         )}
 
-        <h2 className="section-title" style={{ marginTop: 24 }}>Load van in this order</h2>
-        <p style={{ marginBottom: 10 }}>Load the last drop first. Keep Drop 1 nearest the rear doors.</p>
+        <h2 className="section-title">Load van in this order</h2>
+        <p style={{ marginBottom: 6 }}>Load the last drop first. Keep Drop 1 nearest the rear doors.</p>
         <table>
           <thead>
             <tr>
-              <th style={{ width: 80 }}>Loaded</th>
-              <th style={{ width: 90 }}>Drop</th>
+              <th style={{ width: 42 }}>Load</th>
+              <th style={{ width: 55 }}>Drop</th>
               <th>Orders</th>
               <th>Customer</th>
-              <th>Postcode</th>
+              <th style={{ width: 95 }}>Postcode</th>
             </tr>
           </thead>
           <tbody>
@@ -236,14 +280,14 @@ export default function WarehousePackingList() {
           </tbody>
         </table>
 
-        <h2 className="section-title" style={{ marginTop: 24 }}>Final warehouse checks</h2>
+        <h2 className="section-title">Final warehouse checks</h2>
         <div className="check-grid">
-          <div className="check-line">{checkbox()} All panels loaded</div>
-          <div className="check-line">{checkbox()} All trims loaded</div>
+          <div className="check-line">{checkbox()} Panels loaded</div>
+          <div className="check-line">{checkbox()} Trims loaded</div>
           <div className="check-line">{checkbox()} Adhesives loaded</div>
           <div className="check-line">{checkbox()} Silicone loaded</div>
-          <div className="check-line">{checkbox()} Route checked against orders</div>
-          <div className="check-line">{checkbox()} Driver paperwork issued</div>
+          <div className="check-line">{checkbox()} Route checked</div>
+          <div className="check-line">{checkbox()} Paperwork issued</div>
         </div>
         <div className="signature-grid">
           <div><div className="signature" /><p>Loaded by</p></div>
@@ -253,67 +297,60 @@ export default function WarehousePackingList() {
         <p className="footer">Route: {route.name} · Van: {registration}</p>
       </section>
 
-      <section className="page">
-        <h2 className="section-title">Stop by stop packing sheets</h2>
-        {route.stops.map((stop) => {
-          const group = stop.deliveryGroup;
-          const orders = group?.orders || [];
-          const customerNames = orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
-          const orderNumbers = orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
-          const phone = orders.map((order) => order.customerPhone).filter(Boolean)[0] || "No phone";
-          const address = group?.formattedAddress || group?.address || "No address";
-          const lineItems = orders.flatMap((order) => splitLineItems(order.lineItemSummary));
-          const notes = [group?.deliveryNote, group?.safePlaceNote].filter(Boolean).join(" · ");
+      {stopPages.map((stopPage, pageIndex) => (
+        <section key={`stop-page-${pageIndex}`} className={`page ${pageIndex < stopPages.length - 1 ? "page-break" : ""}`}>
+          <h2 className="section-title" style={{ marginTop: 0 }}>Drop packing sheets</h2>
+          {stopPage.map((stop) => {
+            const group = stop.deliveryGroup;
+            const orders = group?.orders || [];
+            const customerNames = orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
+            const orderNumbers = orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
+            const address = group?.formattedAddress || group?.address || "No address";
+            const lineItems = orders.flatMap((order) => splitLineItems(order.lineItemSummary));
+            const notes = [group?.deliveryNote, group?.safePlaceNote].filter(Boolean).join(" · ");
 
-          return (
-            <article key={stop.id} className="stop-card">
-              <div className="stop-head">
-                <div>
-                  <p style={{ marginBottom: 4, color: "#4b5563", fontWeight: 700 }}>Drop</p>
-                  <div className="stop-number">{stop.orderIndex}</div>
+            return (
+              <article key={stop.id} className="drop-card">
+                <div className="drop-head">
+                  <div>
+                    <p className="drop-label">Drop</p>
+                    <div className="drop-number">{stop.orderIndex}</div>
+                  </div>
+                  <div className="drop-meta">
+                    <div className="drop-name">{customerNames}</div>
+                    <p><strong>Order:</strong> {orderNumbers}</p>
+                    <p><strong>Address:</strong> {address}</p>
+                    <p><strong>Postcode:</strong> {group?.postcode || "No postcode"}</p>
+                  </div>
+                  <div className="drop-meta">
+                    <p><strong>ETA:</strong> {formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60)}</p>
+                    <p><strong>Status:</strong> {stop.status}</p>
+                    <p><strong>Van:</strong> {registration}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 style={{ fontSize: 22, marginBottom: 8 }}>{customerNames}</h3>
-                  <p><strong>Order:</strong> {orderNumbers}</p>
-                  <p><strong>Address:</strong> {address}</p>
-                  <p><strong>Postcode:</strong> {group?.postcode || "No postcode"}</p>
-                  <p><strong>Phone:</strong> {phone}</p>
-                </div>
-                <div>
-                  <p><strong>ETA:</strong> {formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60)}</p>
-                  <p><strong>Status:</strong> {stop.status}</p>
-                  <p><strong>Van:</strong> {registration}</p>
-                </div>
-              </div>
 
-              {notes ? <div className="note-box"><strong>Important notes:</strong> {notes}</div> : null}
-
-              <h4 style={{ margin: "14px 0 8px", fontSize: 16 }}>Items to load for this drop</h4>
-              {lineItems.length ? (
-                <table>
-                  <thead>
-                    <tr>
-                      <th style={{ width: 55 }}>Load</th>
-                      <th>Item</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <h4 style={{ margin: "0 0 5px", fontSize: 13 }}>Items for this drop</h4>
+                {lineItems.length ? (
+                  <ul className="item-list">
                     {lineItems.map((item, index) => (
-                      <tr key={`${stop.id}-${item}-${index}`}>
-                        <td>{checkbox()}</td>
-                        <td><strong>{item}</strong></td>
-                      </tr>
+                      <li key={`${stop.id}-${item}-${index}`}><strong>{parseItem(item).original}</strong></li>
                     ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p>No item details stored for this stop.</p>
-              )}
-            </article>
-          );
-        })}
-        <p className="footer">Route: {route.name} · Van: {registration}</p>
-      </section>
+                  </ul>
+                ) : (
+                  <p>No item details stored for this stop.</p>
+                )}
+
+                <div className="notes"><strong>Notes:</strong> {notes || ""}</div>
+                <div className="loaded-line">
+                  <span>{checkbox()} Loaded</span>
+                  <span>Checked by: ____________________</span>
+                </div>
+              </article>
+            );
+          })}
+          <p className="footer">Route: {route.name} · Page {pageIndex + 2} · Van: {registration}</p>
+        </section>
+      ))}
     </main>
   );
 }
