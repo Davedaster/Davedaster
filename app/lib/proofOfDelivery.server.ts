@@ -94,6 +94,7 @@ export async function saveProofOfDelivery(input: {
   const podName = input.podName?.trim() || "";
   const podLocationNote = formatPodLocationNote(input.podLat, input.podLng);
   const leftInSafePlace = Boolean(input.leftInSafePlace);
+  const signaturePhotoUrl = !leftInSafePlace && isValidPodImage(podImage) ? podImage : null;
   const noteParts = [input.deliveryNote?.trim(), podName ? `Receiver: ${podName}` : null, podLocationNote]
     .filter(Boolean)
     .join("\n");
@@ -156,6 +157,7 @@ export async function saveProofOfDelivery(input: {
   const notificationResult = await sendDeliveryCompleteNotifications({
     routeName: stop.route.name,
     proofPhotoUrl: primaryProofPhotoUrl,
+    signaturePhotoUrl,
     orders: stop.deliveryGroup.orders,
   });
   const notificationErrorDetails = notificationResult.errors.length
