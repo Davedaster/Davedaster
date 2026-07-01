@@ -13,6 +13,7 @@ import {
   availableNotificationVariables,
   buildNotificationTemplatePreview,
   listNotificationTemplates,
+  notificationTemplateSupportsEmail,
   resetNotificationTemplate,
   saveNotificationTemplate,
   type EditableNotificationTemplate,
@@ -43,11 +44,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     isResendEnabled(),
     listNotificationTemplates(),
   ]);
-  const previews = templates.map((template) => ({
-    id: template.id,
-    sms: buildNotificationTemplatePreview(previewInput, template, "sms"),
-    email: buildNotificationTemplatePreview(previewInput, template, "email"),
-  }));
+  const previews = templates.map((template) => {
+    const supportsEmail = notificationTemplateSupportsEmail(template.id);
+    return {
+      id: template.id,
+      supportsEmail,
+      sms: buildNotificationTemplatePreview(previewInput, template, "sms"),
+      email: supportsEmail ? buildNotificationTemplatePreview(previewInput, template, "email") : null,
+    };
+  });
 
   return json({
     twilioEnabled,
@@ -156,8 +161,9 @@ function TemplateEditor({
 }: {
   template: EditableNotificationTemplate;
   preview: {
+    supportsEmail: boolean;
     sms: { body: string };
-    email: { subject?: string; body: string; html?: string };
+    email: { subject?: string; body: string; html?: string } | null;
   };
   isOpen: boolean;
   onToggle: () => void;
@@ -165,6 +171,7 @@ function TemplateEditor({
   const [emailSubject, setEmailSubject] = useState(template.emailSubject);
   const [emailHtml, setEmailHtml] = useState(template.emailHtml);
   const [smsBody, setSmsBody] = useState(template.smsBody);
+  const supportsEmail = preview.supportsEmail;
 
   useEffect(() => {
     setEmailSubject(template.emailSubject);
@@ -180,6 +187,7 @@ function TemplateEditor({
             <InlineStack gap="200" blockAlign="center">
               <Text as="h3" variant="headingMd">{template.label}</Text>
               <Badge tone={isOpen ? "info" : "attention"}>{isOpen ? "Editing" : "Saved"}</Badge>
+              {!supportsEmail ? <Badge tone="info">SMS only</Badge> : null}
             </InlineStack>
             <Text as="p" variant="bodySm" tone="subdued">{template.description}</Text>
           </BlockStack>
@@ -197,7 +205,7 @@ function TemplateEditor({
           <Box background="bg-surface-secondary" padding="300" borderRadius="300">
             <BlockStack gap="100">
               <Text as="p" variant="bodySm" fontWeight="bold">Saved preview</Text>
-              <Text as="p" variant="bodySm" tone="subdued">{preview.email.subject || "No email subject set"}</Text>
+              {supportsEmail ? <Text as="p" variant="bodySm" tone="subdued">{preview.email?.subject || "No email subject set"}</Text> : <Text as="p" variant="bodySm" tone="subdued">SMS only. No customer email is edited or sent for this update.</Text>}
               <MessagePreview body={preview.sms.body} />
             </BlockStack>
           </Box>
@@ -209,16 +217,29 @@ function TemplateEditor({
               <input type="hidden" name="intent" value="saveTemplate" />
               <input type="hidden" name="templateId" value={template.id} />
               <BlockStack gap="300">
-                <TextField label="Email subject" name="emailSubject" value={emailSubject} onChange={setEmailSubject} autoComplete="off" />
-                <TextField
-                  label="Email HTML template"
-                  name="emailHtml"
-                  value={emailHtml}
-                  onChange={setEmailHtml}
-                  autoComplete="off"
-                  multiline={14}
-                  helpText="Use variables such as {{ customer.name }}. The editor supports simple {% if driver.name %}...{% endif %} sections."
-                />
+                {supportsEmail ? (
+                  <>
+                    <TextField label="Email subject" name="emailSubject" value={emailSubject} onChange={setEmailSubject} autoComplete="off" />
+                    <TextField
+                      label="Email HTML template"
+                      name="emailHtml"
+                      value={emailHtml}
+                      onChange={setEmailHtml}
+                      autoComplete="off"
+                      multiline={14}
+                      helpText="Use variables such as {{ customer.name }}. The editor supports simple {% if driver.name %}...{% endif %} sections."
+                    />
+                  </>
+                ) : (
+                  <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                    <BlockStack gap="100">
+                      <Text as="p" variant="bodySm" fontWeight="bold">SMS only</Text>
+                      <Text as="p" variant="bodySm" tone="subdued">Late delivery updates do not have an email subject, email HTML editor or customer email send action.</Text>
+                    </BlockStack>
+                    <input type="hidden" name="emailSubject" value="" />
+                    <input type="hidden" name="emailHtml" value="" />
+                  </Box>
+                )}
                 <TextField label="SMS template" name="smsBody" value={smsBody} onChange={setSmsBody} autoComplete="off" multiline={4} />
                 <InlineStack align="space-between" blockAlign="center" gap="300">
                   <Text as="p" variant="bodySm" tone="subdued">The preview refreshes after you save.</Text>
@@ -236,16 +257,20 @@ function TemplateEditor({
               <Box background="bg-surface-secondary" padding="300" borderRadius="300">
                 <MessagePreview body={preview.sms.body} />
               </Box>
-              <Badge tone="success">Email</Badge>
-              {preview.email.subject ? <Text as="p" variant="bodyMd" fontWeight="bold">Subject: {preview.email.subject}</Text> : null}
-              <div style={{ border: "1px solid #d0d5dd", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}>
-                <iframe
-                  title={`${template.label} email preview`}
-                  srcDoc={preview.email.html || preview.email.body}
-                  sandbox=""
-                  style={{ width: "100%", minHeight: 380, border: 0, display: "block", background: "#ffffff" }}
-                />
-              </div>
+              {supportsEmail ? (
+                <>
+                  <Badge tone="success">Email</Badge>
+                  {preview.email?.subject ? <Text as="p" variant="bodyMd" fontWeight="bold">Subject: {preview.email.subject}</Text> : null}
+                  <div style={{ border: "1px solid #d0d5dd", borderRadius: 12, overflow: "hidden", background: "#ffffff" }}>
+                    <iframe
+                      title={`${template.label} email preview`}
+                      srcDoc={preview.email?.html || preview.email?.body || ""}
+                      sandbox=""
+                      style={{ width: "100%", minHeight: 380, border: 0, display: "block", background: "#ffffff" }}
+                    />
+                  </div>
+                </>
+              ) : null}
             </BlockStack>
           </BlockStack>
         ) : null}
@@ -268,7 +293,7 @@ export default function Notifications() {
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Customer notification templates</Text>
               <Text as="p" variant="bodyMd" tone="subdued">
-                Edit the SMS text, email subject and HTML email used for delivery updates. Only one template opens at a time, so this page stays easier to work through.
+                Edit the SMS text, email subject and HTML email used for delivery updates. Late delivery updates are SMS only, so the email editor is removed for that template.
               </Text>
               <InlineStack gap="200">
                 <Badge tone={twilioEnabled ? "success" : "warning"}>{`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}</Badge>
