@@ -25,9 +25,11 @@ type TwilioResponse = {
 type ResendResponse = {
   id?: string;
   message?: string;
+  error?: string;
 };
 
 const SMS_HELP_TEXT = "Need help? Call 01803 222784";
+const PROVIDER_TIMEOUT_MS = 15000;
 
 function requireCredential(value: string, name: string) {
   if (!value) {
@@ -89,6 +91,48 @@ function withSmsHelpText(messageBody: string) {
   return `${cleanBody}\n\n${SMS_HELP_TEXT}`;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, providerName: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${providerName} timed out after ${Math.round(PROVIDER_TIMEOUT_MS / 1000)} seconds.`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readProviderPayload<T extends { message?: string; error?: string }>(response: Response): Promise<T & { rawText?: string }> {
+  const text = await response.text();
+
+  if (!text) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (_error) {
+    return { rawText: text } as T & { rawText: string };
+  }
+}
+
+function providerErrorMessage(providerName: string, response: Response, payload: { message?: string; error?: string; rawText?: string }) {
+  const detail = payload.message || payload.error || payload.rawText;
+
+  return detail
+    ? `${providerName} failed with status ${response.status}. ${detail}`.trim()
+    : `${providerName} failed with status ${response.status}.`;
+}
+
 export async function isTwilioEnabled() {
   const credentials = await getAppCredentials();
 
@@ -117,19 +161,19 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
   body.set("From", fromNumber);
   body.set("Body", withSmsHelpText(input.message.body));
 
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+  const response = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",
     headers: {
       Authorization: buildTwilioAuthHeader(accountSid, authToken),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body,
-  });
+  }, "Twilio");
 
-  const payload = await response.json() as TwilioResponse;
+  const payload = await readProviderPayload<TwilioResponse>(response);
 
   if (!response.ok) {
-    throw new Error(payload.message || `Twilio failed with status ${response.status}.`);
+    throw new Error(providerErrorMessage("Twilio", response, payload));
   }
 
   return {
@@ -144,7 +188,7 @@ export async function sendEmailWithResend(input: SendEmailInput): Promise<SendRe
   const apiKey = requireCredential(credentials.resendApiKey, "Resend API Key");
   const fromEmail = requireCredential(credentials.resendFromEmail, "Resend From Email");
 
-  const response = await fetch("https://api.resend.com/emails", {
+  const response = await fetchWithTimeout("https://api.resend.com/emails", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -157,12 +201,12 @@ export async function sendEmailWithResend(input: SendEmailInput): Promise<SendRe
       text: input.message.body,
       html: input.message.html || undefined,
     }),
-  });
+  }, "Resend");
 
-  const payload = await response.json() as ResendResponse;
+  const payload = await readProviderPayload<ResendResponse>(response);
 
   if (!response.ok) {
-    throw new Error(payload.message || `Resend failed with status ${response.status}.`);
+    throw new Error(providerErrorMessage("Resend", response, payload));
   }
 
   return {
