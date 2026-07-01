@@ -171,7 +171,6 @@ export function hasProofPhotoStorageCredentials(credentials: AppCredentials) {
     credentials.proofPhotoStorageRegion &&
     credentials.proofPhotoStorageBucket &&
     credentials.proofPhotoStorageAccessKeyId &&
-    credentials.proofPhotoStorageSecretAccessKey &&
-    credentials.proofPhotoPublicBaseUrl,
+    credentials.proofPhotoStorageSecretAccessKey,
   );
 }
