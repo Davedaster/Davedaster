@@ -155,6 +155,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   tomtomApiKey: credentials.tomtomApiKey,
   defaults: mergedDefaults,
 });
+};
 
 function parseManualOrders(value: FormDataEntryValue | null): ManualPlanningOrder[] {
   if (typeof value !== "string" || !value.trim()) {
