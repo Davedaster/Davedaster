@@ -1,10 +1,28 @@
 import prisma from "../db.server";
+import { createSignedProofPhotoUrls } from "./proofPhotoStorage.server";
 import { sendFirstOutForDeliveryNotification } from "./routeNotifications.server";
 
 const DRIVER_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
 
+async function withSignedProofPhotos<T extends { stops: Array<{ deliveryGroup?: { proofPhotos?: Array<{ url: string }> } | null }> }>(route: T | null) {
+  if (!route) {
+    return route;
+  }
+
+  return {
+    ...route,
+    stops: await Promise.all(route.stops.map(async (stop) => ({
+      ...stop,
+      deliveryGroup: stop.deliveryGroup ? {
+        ...stop.deliveryGroup,
+        proofPhotos: await createSignedProofPhotoUrls(stop.deliveryGroup.proofPhotos || []),
+      } : stop.deliveryGroup,
+    }))),
+  };
+}
+
 export async function listDriverRoutes() {
-  return prisma.route.findMany({
+  const routes = await prisma.route.findMany({
     where: {
       status: {
         in: DRIVER_ROUTE_STATUSES,
@@ -35,10 +53,12 @@ export async function listDriverRoutes() {
       },
     },
   });
+
+  return Promise.all(routes.map((route) => withSignedProofPhotos(route)));
 }
 
 export async function getDriverRoute(routeId: string) {
-  return prisma.route.findFirst({
+  const route = await prisma.route.findFirst({
     where: {
       id: routeId,
       status: {
@@ -66,6 +86,8 @@ export async function getDriverRoute(routeId: string) {
       },
     },
   });
+
+  return withSignedProofPhotos(route);
 }
 
 export async function startDriverRoute(routeId: string) {
