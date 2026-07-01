@@ -49,9 +49,6 @@ const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v3";
 const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
 const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
-const LONG_PRESS_DELAY_MS = 520;
-const LONG_PRESS_CANCEL_DISTANCE_PX = 36;
-const LONG_PRESS_CLICK_GUARD_MS = 650;
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -126,7 +123,17 @@ function styles() {
     .bpd-tomtom-map .mapboxgl-canvas { overscroll-behavior: contain; touch-action: none; }
     .bpd-tomtom-map .mapboxgl-ctrl-group button { width: 36px; height: 36px; }
     .bpd-tomtom-map .mapboxgl-canvas { outline: none; }
-    .bpd-tomtom-popup .mapboxgl-popup-content { background: rgba(255,255,255,0.98); color: #323841; border: 1px solid #d0d5dd; border-radius: 14px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.22); min-width: 210px; }
+    .bpd-tomtom-popup .mapboxgl-popup-content {
+      background: rgba(255,255,255,0.98);
+      color: #323841;
+      border: 1px solid #d0d5dd;
+      border-radius: 14px;
+      padding: 10px 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+      min-width: 210px;
+      max-width: min(320px, calc(100vw - 36px));
+      overflow: visible;
+    }
     .bpd-tomtom-popup .mapboxgl-popup-tip { display: none; }
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
     .bpd-tooltip-line { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.35; color: #475467; }
@@ -442,11 +449,6 @@ export function RouteMap({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<TomTomMapRef | null>(null);
   const popupRef = useRef<TomTomPopupRef | null>(null);
-  const touchHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const touchStartPointRef = useRef<{ x: number; y: number } | null>(null);
-  const touchHoldShownRef = useRef(false);
-  const ignoreNextPinClickRef = useRef(false);
-  const lastTouchTimeRef = useRef(0);
   const hasInitialFitRef = useRef(false);
   const sourceIdRef = useRef(`orders-${Math.random().toString(36).slice(2)}`);
   const routeSourceIdRef = useRef(`route-${Math.random().toString(36).slice(2)}`);
@@ -783,38 +785,9 @@ export function RouteMap({
       });
     }
 
-    const clearTouchHold = () => {
-      if (touchHoldTimerRef.current) {
-        clearTimeout(touchHoldTimerRef.current);
-        touchHoldTimerRef.current = null;
-      }
-
-      touchStartPointRef.current = null;
-    };
-
-    const hidePopup = (force = false) => {
-      if (touchHoldShownRef.current && !force) {
-        return;
-      }
-
+    const hidePopup = () => {
       map.getCanvas().style.cursor = "";
       popupRef.current?.remove();
-    };
-
-    const finishLongPress = () => {
-      const wasLongPress = touchHoldShownRef.current;
-
-      clearTouchHold();
-      touchHoldShownRef.current = false;
-      lastTouchTimeRef.current = Date.now();
-
-      if (wasLongPress) {
-        hidePopup(true);
-        ignoreNextPinClickRef.current = true;
-        window.setTimeout(() => {
-          ignoreNextPinClickRef.current = false;
-        }, LONG_PRESS_CLICK_GUARD_MS);
-      }
     };
 
     const handleClusterClick = (event: any) => {
@@ -837,11 +810,6 @@ export function RouteMap({
     };
 
     const handlePinClick = (event: any) => {
-      if (ignoreNextPinClickRef.current) {
-        ignoreNextPinClickRef.current = false;
-        return;
-      }
-
       const feature = event.features?.[0];
       const id = feature?.properties?.id;
       const point = mappablePoints.find((mapPoint) => mapPoint.id === id);
@@ -865,74 +833,13 @@ export function RouteMap({
     };
 
     const showPopup = async (event: any) => {
-      if (Date.now() - lastTouchTimeRef.current < 700) {
-        return;
-      }
-
       map.getCanvas().style.cursor = "pointer";
       await showPopupForFeature(event.features?.[0]);
     };
 
-    const handlePinTouchStart = (event: any) => {
-      const feature = event.features?.[0];
-
-      if (!feature) {
-        return;
-      }
-
-      clearTouchHold();
-      touchHoldShownRef.current = false;
-      touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
-      touchHoldTimerRef.current = setTimeout(() => {
-        touchHoldTimerRef.current = null;
-        touchHoldShownRef.current = true;
-        ignoreNextPinClickRef.current = true;
-        map.getCanvas().style.cursor = "pointer";
-        void showPopupForFeature(feature);
-      }, LONG_PRESS_DELAY_MS);
-    };
-
-    const handlePinTouchMove = (event: any) => {
-      if (touchHoldShownRef.current) {
-        return;
-      }
-
-      if (!touchStartPointRef.current || !event.point) {
-        return;
-      }
-
-      const movedX = Math.abs(event.point.x - touchStartPointRef.current.x);
-      const movedY = Math.abs(event.point.y - touchStartPointRef.current.y);
-
-      if (movedX > LONG_PRESS_CANCEL_DISTANCE_PX || movedY > LONG_PRESS_CANCEL_DISTANCE_PX) {
-        clearTouchHold();
-      }
-    };
-
-    const handlePinTouchEnd = () => {
-      finishLongPress();
-    };
-
-    const handleBrowserTouchMove = (_event: TouchEvent) => {
-      // Let TomTom handle the map drag while the order card is open.
-    };
-
-    const handleBrowserTouchEnd = (event: TouchEvent) => {
-      if (touchHoldShownRef.current && event.cancelable) {
-        event.preventDefault();
-      }
-
-      finishLongPress();
-    };
-
     const handleMapMovement = () => {
-  if (touchStartPointRef.current || touchHoldShownRef.current) {
-    return;
-  }
-
-  clearTouchHold();
-  hidePopup();
-};
+      hidePopup();
+    };
 
     const handleClusterEnter = () => {
       map.getCanvas().style.cursor = "pointer";
@@ -942,8 +849,6 @@ export function RouteMap({
       map.getCanvas().style.cursor = "";
     };
 
-    const mapElement = mapElementRef.current;
-
     map.on("click", clustersLayerId, handleClusterClick);
     map.on("click", pinsLayerId, handlePinClick);
     map.on("mouseenter", clustersLayerId, handleClusterEnter);
@@ -952,16 +857,8 @@ export function RouteMap({
     map.on("mouseleave", pinsLayerId, hidePopup);
     map.on("mouseenter", endpointPinsLayerId, showPopup);
     map.on("mouseleave", endpointPinsLayerId, hidePopup);
-    map.on("touchstart", pinsLayerId, handlePinTouchStart);
-    map.on("touchstart", pinLabelLayerId, handlePinTouchStart);
-    map.on("touchmove", handlePinTouchMove);
-    map.on("touchend", handlePinTouchEnd);
-    map.on("touchcancel", handlePinTouchEnd);
     map.on("dragstart", handleMapMovement);
     map.on("movestart", handleMapMovement);
-    mapElement?.addEventListener("touchmove", handleBrowserTouchMove, { passive: false });
-    mapElement?.addEventListener("touchend", handleBrowserTouchEnd, { passive: false });
-    mapElement?.addEventListener("touchcancel", handleBrowserTouchEnd, { passive: false });
 
     if (!hasInitialFitRef.current) {
       const fittingCoordinates = routeCoordinates.length > 1 ? routeCoordinates : [
@@ -979,7 +876,6 @@ export function RouteMap({
     }
 
     return () => {
-      clearTouchHold();
       map.off("click", clustersLayerId, handleClusterClick);
       map.off("click", pinsLayerId, handlePinClick);
       map.off("mouseenter", clustersLayerId, handleClusterEnter);
@@ -988,16 +884,8 @@ export function RouteMap({
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
       map.off("mouseleave", endpointPinsLayerId, hidePopup);
-      map.off("touchstart", pinsLayerId, handlePinTouchStart);
-      map.off("touchstart", pinLabelLayerId, handlePinTouchStart);
-      map.off("touchmove", handlePinTouchMove);
-      map.off("touchend", handlePinTouchEnd);
-      map.off("touchcancel", handlePinTouchEnd);
       map.off("dragstart", handleMapMovement);
       map.off("movestart", handleMapMovement);
-      mapElement?.removeEventListener("touchmove", handleBrowserTouchMove);
-      mapElement?.removeEventListener("touchend", handleBrowserTouchEnd);
-      mapElement?.removeEventListener("touchcancel", handleBrowserTouchEnd);
       popupRef.current?.remove();
     };
   }, [mapReady, mappablePoints, onSelectPoint, roadRouteCoordinates, routeEndpoints, routePathPoints, selectedPoints.length, showRouteLine]);
