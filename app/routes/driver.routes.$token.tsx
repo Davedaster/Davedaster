@@ -157,8 +157,36 @@ function splitLineItems(summary?: string | null) {
     .filter(Boolean);
 }
 
+function removeUkTrunkZero(digits: string) {
+  return digits.startsWith("440") ? `44${digits.slice(3)}` : digits;
+}
+
 function tidyPhone(phone?: string | null) {
-  return phone ? phone.replace(/[^+\d]/g, "") : "";
+  const compact = (phone || "").trim().replace(/[^\d+]/g, "");
+
+  if (!compact) {
+    return "";
+  }
+
+  if (compact.startsWith("+")) {
+    return `+${removeUkTrunkZero(compact.slice(1).replace(/\D/g, ""))}`;
+  }
+
+  const digits = compact.replace(/\D/g, "");
+
+  if (digits.startsWith("00")) {
+    return `+${removeUkTrunkZero(digits.slice(2))}`;
+  }
+
+  if (digits.startsWith("44")) {
+    return `+${removeUkTrunkZero(digits)}`;
+  }
+
+  if (digits.startsWith("0")) {
+    return `+44${digits.slice(1)}`;
+  }
+
+  return digits;
 }
 
 function cleanDeliveryAddress(value: string) {
