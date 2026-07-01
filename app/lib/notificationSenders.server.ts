@@ -35,6 +35,36 @@ function requireCredential(value: string, name: string) {
   return value;
 }
 
+function normaliseSmsNumber(value: string) {
+  const trimmed = (value || "").trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const compact = trimmed.replace(/[^\d+]/g, "");
+
+  if (compact.startsWith("+")) {
+    return `+${compact.slice(1).replace(/\D/g, "")}`;
+  }
+
+  const digits = compact.replace(/\D/g, "");
+
+  if (digits.startsWith("00")) {
+    return `+${digits.slice(2)}`;
+  }
+
+  if (digits.startsWith("44")) {
+    return `+${digits}`;
+  }
+
+  if (digits.startsWith("0")) {
+    return `+44${digits.slice(1)}`;
+  }
+
+  return digits;
+}
+
 function buildTwilioAuthHeader(accountSid: string, authToken: string) {
   return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
 }
@@ -56,9 +86,14 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
   const accountSid = requireCredential(credentials.twilioAccountSid, "Twilio Account SID");
   const authToken = requireCredential(credentials.twilioAuthToken, "Twilio Auth Token");
   const fromNumber = requireCredential(credentials.twilioFromNumber, "Twilio From Number");
+  const toNumber = normaliseSmsNumber(input.to);
+
+  if (!toNumber) {
+    throw new Error("Customer phone number is missing.");
+  }
 
   const body = new URLSearchParams();
-  body.set("To", input.to);
+  body.set("To", toNumber);
   body.set("From", fromNumber);
   body.set("Body", input.message.body);
 
