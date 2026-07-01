@@ -13,7 +13,6 @@ import {
   Box,
   Divider,
   TextField,
-  Checkbox,
   ProgressBar,
 } from "@shopify/polaris";
 import { useEffect, useRef, useState } from "react";
@@ -290,21 +289,23 @@ function buildSmsUrl(phone: string | null, message: string) {
 function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
-  const [leftInSafePlace, setLeftInSafePlace] = useState(false);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
   const [proofPhotoCount, setProofPhotoCount] = useState(0);
   const [deliveryNote, setDeliveryNote] = useState("");
-  const [safePlaceNote, setSafePlaceNote] = useState("");
   const [failedReason, setFailedReason] = useState("");
   const [failedNote, setFailedNote] = useState("");
   const [podName, setPodName] = useState("");
   const [podImage, setPodImage] = useState("");
-  const [podTicked, setPodTicked] = useState(false);
   const [podLat, setPodLat] = useState("");
   const [podLng, setPodLng] = useState("");
+  const [isSignatureOpen, setIsSignatureOpen] = useState(false);
   const updatesDisabled = isDisabled || !routeStarted;
   const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
-  const canMarkDelivered = !updatesDisabled && hasProofPhoto && podName.trim().length > 0 && podImage.length > 0 && podTicked;
+  const trimmedPodName = podName.trim();
+  const customerConfirmation = trimmedPodName
+    ? `${trimmedPodName} confirms they have received everything and nothing is damaged.`
+    : "Enter the receiver name before asking for a signature.";
+  const canMarkDelivered = !updatesDisabled && hasProofPhoto && trimmedPodName.length > 0 && podImage.length > 0;
 
   useEffect(() => {
     if (!routeStarted || !("geolocation" in navigator)) {
@@ -320,6 +321,50 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
       { enableHighAccuracy: true, timeout: 5000 },
     );
   }, [routeStarted]);
+
+  useEffect(() => {
+    if (!isSignatureOpen) {
+      return;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isSignatureOpen]);
+
+  async function openSignatureScreen() {
+    if (updatesDisabled || !trimmedPodName) {
+      return;
+    }
+
+    setIsSignatureOpen(true);
+
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      }
+
+      await screen.orientation?.lock?.("landscape");
+    } catch (_error) {
+      // Some mobile browsers block forced rotation. The full screen panel still uses a wide landscape layout.
+    }
+  }
+
+  async function closeSignatureScreen() {
+    setIsSignatureOpen(false);
+
+    try {
+      await screen.orientation?.unlock?.();
+      if (document.fullscreenElement) {
+        await document.exitFullscreen?.();
+      }
+    } catch (_error) {
+      // Ignore browsers that do not support orientation unlock or fullscreen exit.
+    }
+  }
 
   function getCanvasPoint(event: PointerEvent<HTMLCanvasElement>) {
     const canvas = event.currentTarget;
@@ -389,6 +434,19 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
     setPodImage("");
   }
 
+  const signatureCanvas = (
+    <canvas
+      ref={canvasRef}
+      width={1100}
+      height={420}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      style={{ width: "100%", height: "100%", minHeight: 260, border: "2px solid #c9cccf", borderRadius: 14, background: "#ffffff", touchAction: "none" }}
+    />
+  );
+
   return (
     <BlockStack gap="300">
       <Divider />
@@ -400,9 +458,9 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
       <Form method="post" encType="multipart/form-data">
         <input type="hidden" name="intent" value="completeStop" />
         <input type="hidden" name="stopId" value={stopId} />
-        <input type="hidden" name="leftInSafePlace" value={leftInSafePlace ? "true" : "false"} />
+        <input type="hidden" name="leftInSafePlace" value="false" />
         <input type="hidden" name="podImage" value={podImage} />
-        <input type="hidden" name="podTicked" value={podTicked ? "true" : "false"} />
+        <input type="hidden" name="podTicked" value="true" />
         <input type="hidden" name="podLat" value={podLat} />
         <input type="hidden" name="podLng" value={podLng} />
         <BlockStack gap="200">
@@ -414,32 +472,44 @@ function DriverStopActions({ stopId, isDisabled, routeStarted, proofPhotoStorage
             </label>
           ) : null}
           <TextField label={proofPhotoStorageEnabled ? "Proof photo link fallback" : "Proof photo link"} name="proofPhotoUrl" type="url" value={proofPhotoUrl} onChange={setProofPhotoUrl} autoComplete="off" disabled={updatesDisabled} helpText={proofPhotoStorageEnabled ? "Upload one or more photos above, or paste a hosted link if needed." : "Required before marking delivered."} />
-          <TextField label="Receiver" name="podName" value={podName} onChange={setPodName} autoComplete="off" disabled={updatesDisabled} />
-          <Box>
-            <BlockStack gap="100">
-              <Text as="p" variant="bodyMd" fontWeight="medium">Draw mark</Text>
-              <canvas
-                ref={canvasRef}
-                width={700}
-                height={220}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                style={{ width: "100%", maxWidth: 700, height: 220, border: "1px solid #c9cccf", borderRadius: 10, background: "#ffffff", touchAction: "none" }}
-              />
-              <InlineStack gap="200" blockAlign="center">
-                <Button onClick={clearPodImage} disabled={updatesDisabled || !podImage}>Clear mark</Button>
-                {podImage ? <Text as="p" variant="bodySm" tone="success">Mark added</Text> : <Text as="p" variant="bodySm" tone="subdued">Use a finger or stylus.</Text>}
+          <TextField label="Receiver name" name="podName" value={podName} onChange={setPodName} autoComplete="off" disabled={updatesDisabled} helpText="Enter the customer name before opening the signature screen." />
+          <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+            <BlockStack gap="200">
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="050">
+                  <Text as="p" variant="bodyMd" fontWeight="bold">Customer signature</Text>
+                  <Text as="p" variant="bodySm" tone={trimmedPodName ? "subdued" : "critical"}>{customerConfirmation}</Text>
+                </BlockStack>
+                <Button onClick={openSignatureScreen} disabled={updatesDisabled || !trimmedPodName}>Open signature screen</Button>
               </InlineStack>
+              {podImage ? <Text as="p" variant="bodySm" tone="success">Signature added</Text> : <Text as="p" variant="bodySm" tone="subdued">The customer signs on a full screen landscape panel.</Text>}
             </BlockStack>
           </Box>
-          <Checkbox label="Checked" checked={podTicked} onChange={setPodTicked} disabled={updatesDisabled} />
           <TextField label="Delivery note" name="deliveryNote" value={deliveryNote} onChange={setDeliveryNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
-          <Checkbox label="Left in safe place" checked={leftInSafePlace} onChange={setLeftInSafePlace} disabled={updatesDisabled} />
-          <TextField label="Safe place note" name="safePlaceNote" value={safePlaceNote} onChange={setSafePlaceNote} autoComplete="off" multiline={2} disabled={updatesDisabled} />
-          <Button submit variant="primary" disabled={!canMarkDelivered}>Mark delivered</Button>
+          <Button submit variant="primary" disabled={!canMarkDelivered}>Submit delivery</Button>
         </BlockStack>
+
+        {isSignatureOpen ? (
+          <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#f6f6f7", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div>
+                <Text as="p" variant="headingMd">Customer signature</Text>
+                <Text as="p" variant="bodySm" tone="subdued">Turn the phone sideways if it has not rotated automatically.</Text>
+              </div>
+              <Button onClick={closeSignatureScreen}>Back</Button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {signatureCanvas}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <Text as="p" variant="bodyMd" fontWeight="medium">{customerConfirmation}</Text>
+              <InlineStack gap="200">
+                <Button onClick={clearPodImage} disabled={updatesDisabled || !podImage}>Clear signature</Button>
+                <Button submit variant="primary" disabled={!canMarkDelivered}>Submit delivery</Button>
+              </InlineStack>
+            </div>
+          </div>
+        ) : null}
       </Form>
 
       <Form method="post">
