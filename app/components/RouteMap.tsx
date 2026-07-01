@@ -881,11 +881,20 @@ export function RouteMap({
       touchHoldShownRef.current = false;
       touchStartPointRef.current = event.point ? { x: event.point.x, y: event.point.y } : null;
       touchHoldTimerRef.current = setTimeout(() => {
-        touchHoldShownRef.current = true;
-        ignoreNextPinClickRef.current = true;
-        map.getCanvas().style.cursor = "pointer";
-        void showPopupForFeature(feature);
-      }, 520);
+  touchHoldShownRef.current = true;
+  ignoreNextPinClickRef.current = true;
+  map.getCanvas().style.cursor = "pointer";
+  void showPopupForFeature(feature);
+
+  window.setTimeout(() => {
+    if (touchHoldShownRef.current) {
+      touchHoldShownRef.current = false;
+      touchStartPointRef.current = null;
+      map.getCanvas().style.cursor = "";
+      popupRef.current?.remove();
+    }
+  }, 6000);
+}, 520);
     };
 
     const handlePinTouchMove = (event: any) => {
