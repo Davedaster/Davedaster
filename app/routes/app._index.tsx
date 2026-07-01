@@ -148,13 +148,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   );
 
   return json({
-    orders: ordersWithFulfilByDates,
-    drivers,
-    addressLookupEnabled: hasGetAddressCredentials(credentials),
-    routexlEnabled: hasRouteXLCredentials(credentials),
-    defaults: mergedDefaults,
-  });
-};
+  orders: ordersWithFulfilByDates,
+  drivers,
+  addressLookupEnabled: hasGetAddressCredentials(credentials),
+  routexlEnabled: hasRouteXLCredentials(credentials),
+  tomtomApiKey: credentials.tomtomApiKey,
+  defaults: mergedDefaults,
+});
 
 function parseManualOrders(value: FormDataEntryValue | null): ManualPlanningOrder[] {
   if (typeof value !== "string" || !value.trim()) {
