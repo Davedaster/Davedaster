@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 import { Badge, BlockStack, Box, Button, Divider, FormLayout, InlineStack, Layout, LegacyCard, Page, Text, TextField } from "@shopify/polaris";
+import { useEffect, useState } from "react";
 
 import { ProofPhotoGallery } from "../components/ProofPhotoGallery";
 import { searchProofOfDelivery } from "../lib/proofOfDeliverySearch.server";
@@ -44,6 +45,11 @@ function formatDate(value?: string | Date | null) {
 
 export default function PodSearchPage() {
   const { query, results } = useLoaderData<typeof loader>();
+  const [searchValue, setSearchValue] = useState(query);
+
+  useEffect(() => {
+    setSearchValue(query);
+  }, [query]);
 
   return (
     <Page title="Proof of Delivery Search">
@@ -52,16 +58,17 @@ export default function PodSearchPage() {
           <LegacyCard sectioned>
             <BlockStack gap="300">
               <Text as="p" variant="bodyMd" tone="subdued">
-                Search delivered proof photos and signatures by order number or customer name.
+                Search delivered proof photos and signatures by order number, customer name, email address or phone number.
               </Text>
               <Form method="get">
                 <FormLayout>
                   <TextField
-                    label="Order number or customer name"
+                    label="Order number, customer name, email or phone"
                     name="q"
-                    defaultValue={query}
+                    value={searchValue}
+                    onChange={setSearchValue}
                     autoComplete="off"
-                    placeholder="4462 or John Smith"
+                    placeholder="4462, John Smith, john@email.com or 07700 900123"
                   />
                   <Button submit variant="primary">Search POD</Button>
                 </FormLayout>
