@@ -115,6 +115,10 @@ function throwUserErrors(userErrors?: ShopifyUserError[]) {
   }
 }
 
+function isShopifyOrderId(value: string) {
+  return value.startsWith("gid://shopify/Order/");
+}
+
 export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const response = await admin.graphql(TAGS_ADD_MUTATION, {
     variables: {
@@ -129,6 +133,13 @@ export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: str
 }
 
 export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: string) {
+  if (!isShopifyOrderId(shopifyOrderId)) {
+    return {
+      fulfilled: false,
+      reason: "Manual route entry, no Shopify order to fulfil",
+    };
+  }
+
   const response = await admin.graphql(GET_FULFILLMENT_ORDERS, {
     variables: {
       id: shopifyOrderId,
@@ -144,9 +155,11 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   ));
 
   if (!openFulfillmentOrders.length) {
+    const seenStatuses = fulfillmentOrders.map((fulfillmentOrder) => fulfillmentOrder.status).filter(Boolean).join(", ");
+
     return {
       fulfilled: false,
-      reason: "No open fulfilment orders found",
+      reason: seenStatuses ? `No open fulfilment orders found. Shopify statuses: ${seenStatuses}` : "No fulfilment orders found on Shopify",
     };
   }
 
@@ -190,7 +203,10 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
 
 export async function markShopifyOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const fulfilmentResult = await fulfilShopifyOrder(admin, shopifyOrderId);
-  await tagOrderDelivered(admin, shopifyOrderId);
+
+  if (isShopifyOrderId(shopifyOrderId)) {
+    await tagOrderDelivered(admin, shopifyOrderId);
+  }
 
   return fulfilmentResult;
 }
@@ -230,6 +246,7 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
           fulfilled += 1;
         } else {
           skipped += 1;
+          errors.push(`${order.shopifyOrderNumber}: ${result.reason || "Shopify order was skipped"}`);
         }
       } catch (error) {
         errors.push(`${order.shopifyOrderNumber}: ${error instanceof Error ? error.message : "Unknown fulfilment error"}`);
