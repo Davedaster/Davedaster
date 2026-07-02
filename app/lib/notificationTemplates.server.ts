@@ -126,7 +126,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent after a stop has been completed.",
     emailSubject: "Your panel order has been delivered, {{ order.number }}",
     emailHtml: shell("Your panels have been delivered", "Your panel order has been delivered. Thank you for your order.", "Completed today", proofImagesHtml),
-    smsBody: "Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order.{% if proof.photo_url %} Proof photo: {{ proof.photo_url }}{% endif %}",
+    smsBody: "Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order. View delivery details here: {{ tracking.url }}{% if proof.photo_url %} Proof photo: {{ proof.photo_url }}{% endif %}",
   },
 };
 
