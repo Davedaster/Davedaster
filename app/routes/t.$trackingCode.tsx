@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { useEffect, useState } from "react";
 
+import { ProfileCard } from "../components/ProfileCard";
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
 import { formatEtaSlot } from "../lib/etaSlots";
 import { createSignedProofPhotoUrls } from "../lib/proofPhotoStorage.server";
@@ -75,8 +76,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     stopNumber: stop.orderIndex,
     etaSlot: formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60),
     driverName: route.driver?.name || "your driver",
-    vehicleName: route.driver?.vehicleName || "",
-    vehicleRegistration: route.driver?.vehicleRegistration || "",
+    driverPhotoUrl: route.driver?.photoUrl || "",
     proofPhotos,
     deliveryPhotos,
     signaturePhotos,
@@ -215,6 +215,8 @@ export default function CustomerTrackingPage() {
           </div>
         </div>
 
+        <ProfileCard name={data.driverName} imageUrl={data.driverPhotoUrl} />
+
         {complete || missed ? (
           data.proofPhotos.length ? (
             <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div>
@@ -225,11 +227,6 @@ export default function CustomerTrackingPage() {
 
         <ProofImages photos={data.deliveryPhotos} title="Delivery photo" onOpen={setSelectedProofPhoto} />
         <ProofImages photos={data.signaturePhotos} title="Customer signature" onOpen={setSelectedProofPhoto} />
-
-        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
-          <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Driver</p>
-          <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.driverName}{data.vehicleName ? `, ${data.vehicleName}` : ""}{data.vehicleRegistration ? `, ${data.vehicleRegistration}` : ""}</p>
-        </div>
 
         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Delivery address</p>
