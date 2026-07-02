@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 
-export const activeRouteStatuses = ["DRAFT", "PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
+export const activeRouteStatuses = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
 
 export type RouteAllocation = {
   orderId: string;
@@ -101,5 +101,5 @@ export async function assertOrdersAvailableForRoute(orderIds: string[], currentR
     .map((allocation) => `${allocation.orderNumber} is already in ${allocation.routeName}`)
     .join(", ");
 
-  throw new Error(`Some orders are already allocated to active routes. ${details}. Remove them from the existing draft route first.`);
+  throw new Error(`Some orders are already allocated to active routes. ${details}. Remove them from the existing live route first.`);
 }
