@@ -140,6 +140,7 @@ export default function WarehousePackingList() {
   const driver = route.driver;
   const vehicleName = driver?.vehicleName || "Vehicle not set";
   const registration = driver?.vehicleRegistration || "Registration not set";
+  const totalOrders = route.stops.reduce((count, stop) => count + (stop.deliveryGroup?.orders.length || 0), 0);
 
   return (
     <main>
@@ -151,23 +152,26 @@ export default function WarehousePackingList() {
         p { margin-bottom: 5px; }
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th, td { border: 1px solid #000; padding: 5px 6px; text-align: left; vertical-align: top; }
-        th { background: #eee; color: #000; font-weight: 800; }
+        th { background: #e8e8e8; color: #000; font-weight: 900; }
         .no-print { margin: 0 auto 18px; max-width: 1000px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-        .print-button { border: 2px solid #000; border-radius: 4px; padding: 10px 14px; background: #fff; color: #000; font-weight: 800; cursor: pointer; }
+        .print-button { border: 2px solid #000; border-radius: 4px; padding: 10px 14px; background: #fff; color: #000; font-weight: 900; cursor: pointer; }
         .page { background: #fff; border: 1px solid #000; padding: 14mm; margin: 0 auto 18px; max-width: 1000px; min-height: 277mm; }
         .page-break { break-after: page; page-break-after: always; }
-        .brand { color: #777; font-size: 13px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
-        .hero { display: grid; grid-template-columns: 1fr 230px; gap: 14px; align-items: stretch; border: 2px solid #000; padding: 12px; }
-        .van-card { border: 2px solid #000; padding: 10px; text-align: center; }
-        .van-label { font-size: 11px; text-transform: uppercase; font-weight: 800; margin-bottom: 4px; }
-        .reg { font-size: 30px; font-weight: 900; letter-spacing: 0.03em; margin: 0; }
+        .brand-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .brand-mark { border: 2px solid #000; color: #000; font-size: 17px; font-weight: 900; line-height: 1; padding: 7px 9px; letter-spacing: .04em; }
+        .brand { color: #333; font-size: 13px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+        .route-note { display: inline-block; margin-top: 7px; border: 1px solid #000; padding: 4px 7px; font-size: 11px; font-weight: 900; text-transform: uppercase; }
+        .hero { display: grid; grid-template-columns: 1fr 250px; gap: 14px; align-items: stretch; border: 2px solid #000; padding: 12px; background: #f7f7f7; }
+        .van-card { border: 3px solid #000; background: #fff; padding: 10px; text-align: center; }
+        .van-label { font-size: 11px; text-transform: uppercase; font-weight: 900; margin-bottom: 4px; }
+        .reg { font-size: 34px; font-weight: 900; letter-spacing: 0.04em; margin: 0; }
         .meta-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
         .meta { border: 1px solid #000; padding: 6px; font-size: 12px; min-height: 42px; }
         .meta strong { display: block; font-size: 10px; text-transform: uppercase; margin-bottom: 3px; }
         .section-title { font-size: 18px; margin: 14px 0 7px; }
         .tick-box { display: inline-block; width: 15px; height: 15px; border: 2px solid #000; vertical-align: middle; }
         .check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
-        .check-line { border: 1px solid #000; padding: 7px; font-size: 12px; font-weight: 800; }
+        .check-line { border: 1px solid #000; padding: 7px; font-size: 12px; font-weight: 900; }
         .signature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; font-size: 12px; }
         .signature { border-bottom: 2px solid #000; height: 34px; }
         .drop-card { border: 2px solid #000; padding: 8px; margin-bottom: 8px; min-height: 82mm; break-inside: avoid; page-break-inside: avoid; }
@@ -176,11 +180,11 @@ export default function WarehousePackingList() {
         .drop-number { font-size: 40px; font-weight: 900; line-height: 1; }
         .drop-name { font-size: 17px; font-weight: 900; margin-bottom: 4px; }
         .drop-meta { font-size: 12px; }
-        .item-list { margin: 0; padding-left: 18px; columns: 2; column-gap: 24px; font-size: 12px; }
-        .item-list li { break-inside: avoid; margin-bottom: 3px; }
+        .item-list { margin: 0; padding-left: 19px; columns: 1; font-size: 12px; }
+        .item-list li { break-inside: avoid; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dotted #999; }
         .notes { border: 1px solid #000; padding: 5px; margin-top: 6px; font-size: 12px; min-height: 22px; }
         .loaded-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #000; padding-top: 6px; margin-top: 6px; font-size: 12px; font-weight: 900; }
-        .footer { margin-top: 8px; font-size: 10px; color: #555; }
+        .footer { margin-top: 8px; font-size: 10px; color: #333; }
         @page { size: A4 portrait; margin: 8mm; }
         @media print {
           body { background: #fff; }
@@ -195,7 +199,7 @@ export default function WarehousePackingList() {
       <div className="no-print">
         <div>
           <h1 style={{ margin: 0, fontSize: 24 }}>Warehouse packing list</h1>
-          <p style={{ margin: "6px 0 0" }}>Black and white print pack with one warehouse summary and three compact drops per page.</p>
+          <p style={{ margin: "6px 0 0" }}>Black and white print pack with one warehouse summary and vertical product lists for each drop.</p>
         </div>
         <button className="print-button" onClick={() => window.print()}>Print or save PDF</button>
       </div>
@@ -203,15 +207,19 @@ export default function WarehousePackingList() {
       <section className="page page-break">
         <div className="hero">
           <div>
-            <p className="brand">Bathroom Panels Direct</p>
+            <div className="brand-row">
+              <div className="brand-mark">BPD</div>
+              <p className="brand">Bathroom Panels Direct</p>
+            </div>
             <h1 style={{ fontSize: 30, marginBottom: 6 }}>Warehouse Packing List</h1>
             <h2 style={{ fontSize: 21, marginBottom: 8 }}>{route.name}</h2>
             <p style={{ fontSize: 15, marginBottom: 0 }}>{formatDate(route.date)}</p>
+            <span className="route-note">{route.status === "DRAFT" ? "Draft route, check before loading" : `${route.status} route`}</span>
           </div>
           <div className="van-card">
             <div className="van-label">Van registration</div>
             <p className="reg">{registration}</p>
-            <p style={{ margin: "7px 0 0", fontWeight: 800 }}>{vehicleName}</p>
+            <p style={{ margin: "7px 0 0", fontWeight: 900 }}>{vehicleName}</p>
           </div>
         </div>
 
@@ -219,11 +227,11 @@ export default function WarehousePackingList() {
           <div className="meta"><strong>Driver</strong>{driver?.name || "No driver assigned"}</div>
           <div className="meta"><strong>Driver phone</strong>{driver?.phoneNumber || "Not set"}</div>
           <div className="meta"><strong>Total drops</strong>{route.stops.length}</div>
+          <div className="meta"><strong>Total orders</strong>{totalOrders}</div>
           <div className="meta"><strong>Generated</strong>{formatDateTime(generatedAt)}</div>
           <div className="meta"><strong>Start</strong>{route.startAddress || "Bathroom Panels Direct"}</div>
           <div className="meta"><strong>Finish</strong>{route.finishAddress || "Bathroom Panels Direct"}</div>
           <div className="meta"><strong>Start time</strong>{route.plannedStartTime || "05:00"}</div>
-          <div className="meta"><strong>Status</strong>{route.status}</div>
         </div>
 
         <h2 className="section-title">Warehouse pick summary</h2>
@@ -242,7 +250,7 @@ export default function WarehousePackingList() {
                 <tr key={item.label}>
                   <td>{checkbox()}</td>
                   <td><strong>{item.label}</strong></td>
-                  <td>{item.quantity}</td>
+                  <td><strong>{item.quantity}</strong></td>
                   <td>{Array.from(new Set(item.stops)).sort((a, b) => a - b).join(", ")}</td>
                 </tr>
               ))}
@@ -294,7 +302,7 @@ export default function WarehousePackingList() {
           <div><div className="signature" /><p>Checked by</p></div>
           <div><div className="signature" /><p>Time</p></div>
         </div>
-        <p className="footer">Route: {route.name} · Van: {registration}</p>
+        <p className="footer">Route: {route.name} · Van: {registration} · Orders: {totalOrders}</p>
       </section>
 
       {stopPages.map((stopPage, pageIndex) => (
