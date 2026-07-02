@@ -119,7 +119,7 @@ function itemText(items: PackedItem[]) {
 export default function PackingListPrintPage() {
   const { routeName, routeDate, driverName, drops, totals } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
-  const shouldPrint = searchParams.get("print") === "1";
+  const shouldPrint = searchParams.get("print") !== "0";
 
   useEffect(() => {
     if (!shouldPrint) return;
