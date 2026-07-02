@@ -34,6 +34,14 @@ function numberFromFormValue(value: FormDataEntryValue | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+async function tryGetOfflineShopifyAdmin() {
+  try {
+    return await getOfflineShopifyAdmin();
+  } catch {
+    return null;
+  }
+}
+
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const token = params.token;
 
@@ -88,14 +96,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       throw new Error("Stop is missing.");
     }
 
-    const admin = await getOfflineShopifyAdmin();
-
     if (intent === "completeStop") {
       const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
       const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
       const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
       const podLatValue = numberFromFormValue(formData.get("podLat"));
       const podLngValue = numberFromFormValue(formData.get("podLng"));
+      const admin = await tryGetOfflineShopifyAdmin();
 
       for (const proofPhotoFile of proofPhotoFiles) {
         proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
@@ -120,6 +127,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (intent === "missedStop") {
+      const admin = await getOfflineShopifyAdmin();
       await markDriverStopMissedFromToken({
         token,
         stopId,
@@ -209,11 +217,11 @@ function highlightItemText(item: string) {
 }
 
 function buttonStyle(background: string, color = "#ffffff") {
-  return { border: 0, borderRadius: 16, padding: "15px 14px", background, color, fontSize: 16, fontWeight: 900, textAlign: "center" as const, textDecoration: "none", boxShadow: "0 6px 16px rgba(0,0,0,0.14)" };
+  return { border: 0, borderRadius: 16, padding: "15px 14px", background, color, fontSize: 16, fontWeight: 900, textAlign: "center" as const, textDecoration: "none", boxShadow: "0 6px 16px rgba(0,0,0,0.14)", maxWidth: "100%", boxSizing: "border-box" as const };
 }
 
 function secondaryButtonStyle() {
-  return { border: "1px solid #d0d5dd", borderRadius: 16, padding: "14px 12px", background: "#ffffff", color: "#323841", fontSize: 15, fontWeight: 900, textAlign: "center" as const, textDecoration: "none" };
+  return { border: "1px solid #d0d5dd", borderRadius: 16, padding: "14px 12px", background: "#ffffff", color: "#323841", fontSize: 15, fontWeight: 900, textAlign: "center" as const, textDecoration: "none", maxWidth: "100%", boxSizing: "border-box" as const };
 }
 
 function StartRouteForm({ canStart, routeDate }: { canStart: boolean; routeDate: string | Date }) {
@@ -313,13 +321,13 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.92)", zIndex: 9999, padding: "max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom))", display: "grid", alignItems: "start", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-      <div style={{ background: "#ffffff", borderRadius: 22, padding: 12, display: "grid", gap: 8, maxWidth: 900, margin: "0 auto", width: "100%", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ background: "#ffffff", borderRadius: 22, padding: 12, display: "grid", gap: 8, maxWidth: 900, margin: "0 auto", width: "100%", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", WebkitOverflowScrolling: "touch", boxSizing: "border-box" }}>
         <div>
           <h2 style={{ margin: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>Customer signature</h2>
           <p style={{ margin: "4px 0 0", color: "#667085", fontWeight: 700, fontSize: "clamp(13px, 3.8vw, 17px)", lineHeight: 1.25 }}>Ask the customer to sign in the white box.</p>
         </div>
         <p style={{ margin: 0, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, fontWeight: 800, lineHeight: 1.3, fontSize: "clamp(13px, 3.8vw, 18px)" }}>By signing, I, {customerName || "the customer"}, confirm that the items received today match my order and have been received in good condition.</p>
-        <canvas ref={canvasRef} width={900} height={360} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ width: "100%", height: "clamp(170px, 34dvh, 300px)", border: "2px solid #111827", borderRadius: 16, background: "#ffffff", touchAction: "none" }} />
+        <canvas ref={canvasRef} width={900} height={360} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ width: "100%", height: "clamp(170px, 34dvh, 300px)", border: "2px solid #111827", borderRadius: 16, background: "#ffffff", touchAction: "none", boxSizing: "border-box" }} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, position: "sticky", bottom: 0, background: "#ffffff", paddingTop: 8 }}>
           <button type="button" onClick={clearSignature} style={secondaryButtonStyle()}>Clear</button>
           <button type="button" onClick={submitSignature} disabled={!hasSignature} style={buttonStyle(hasSignature ? "#16a34a" : "#d0d5dd", hasSignature ? "#ffffff" : "#667085")}>Submit signature</button>
@@ -372,15 +380,15 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
   if (updatesDisabled) return <p style={{ margin: "12px 0 0", color: "#667085", fontWeight: 800 }}>Only the next active stop can be updated.</p>;
 
   return (
-    <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+    <div style={{ marginTop: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0 }}>
         <button type="button" onClick={() => setDeliveryMode("customer")} style={buttonStyle(deliveryMode === "customer" ? "#16a34a" : "#eff6ff", deliveryMode === "customer" ? "#ffffff" : "#2563eb")}>Customer received</button>
         <button type="button" onClick={() => setDeliveryMode("safe")} style={buttonStyle(deliveryMode === "safe" ? "#f97316" : "#fff7ed", deliveryMode === "safe" ? "#ffffff" : "#c2410c")}>Left safe</button>
       </div>
       <button type="button" onClick={() => setDeliveryMode("missed")} style={buttonStyle(deliveryMode === "missed" ? "#b42318" : "#fef3f2", deliveryMode === "missed" ? "#ffffff" : "#b42318")}>Could not deliver</button>
 
       {deliveryMode === "customer" || deliveryMode === "safe" ? (
-        <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 12, border: "1px solid #e5e7eb", borderRadius: 18, padding: 12, background: "#f8fafc" }}>
+        <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 12, border: "1px solid #e5e7eb", borderRadius: 18, padding: 12, background: "#f8fafc", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
           <input type="hidden" name="intent" value="completeStop" />
           <input type="hidden" name="stopId" value={stopId} />
           <input type="hidden" name="leftInSafePlace" value={deliveryMode === "safe" ? "true" : "false"} />
@@ -389,18 +397,18 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
           <input type="hidden" name="podTicked" value={deliveryMode === "customer" && podImage ? "true" : "false"} />
           <input type="hidden" name="podLat" value={podLat} />
           <input type="hidden" name="podLng" value={podLng} />
-          <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Add proof photo<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple={false} disabled={!proofPhotoStorageEnabled} onChange={handleProofPhotoChange} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff" }} /></label>
-          {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14 }} /> : null}
-          {proofPreviewUrl ? <img src={proofPreviewUrl} alt="Proof preview" style={{ width: 120, height: 120, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd" }} /> : null}
-          {deliveryMode === "customer" ? <div style={{ display: "grid", gap: 8 }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(podImage ? "#16a34a" : "#323841")}>{podImage ? "Signature added" : "Get customer signature"}</button>{podImage ? <img src={podImage} alt="Customer signature" style={{ width: "100%", maxHeight: 120, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd" }} /> : null}{signatureOpen ? <SignatureModal customerName={customerName} disabled={updatesDisabled} onSave={setPodImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
-          {deliveryMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Safe place note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Behind side gate, under covered porch" style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14 }} /></label> : null}
-          <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Driver note optional<textarea name="deliveryNote" rows={2} value={deliveryNote} onChange={(event) => setDeliveryNote(event.currentTarget.value)} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14 }} /></label>
-          <button type="submit" disabled={deliveryMode === "customer" ? !canCompleteCustomer : !canCompleteSafePlace} style={buttonStyle((deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#16a34a" : "#d0d5dd", (deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#ffffff" : "#667085")}>Complete delivery</button>
+          <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>Add proof photo<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple={false} disabled={!proofPhotoStorageEnabled} onChange={handleProofPhotoChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
+          {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /> : null}
+          {proofPreviewUrl ? <img src={proofPreviewUrl} alt="Proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
+          {deliveryMode === "customer" ? <div style={{ display: "grid", gap: 8, maxWidth: "100%", overflow: "hidden" }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(podImage ? "#16a34a" : "#323841")}>{podImage ? "Signature added" : "Get customer signature"}</button>{podImage ? <img src={podImage} alt="Customer signature" style={{ width: "100%", maxWidth: "100%", maxHeight: 110, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd", boxSizing: "border-box" }} /> : null}{signatureOpen ? <SignatureModal customerName={customerName} disabled={updatesDisabled} onSave={setPodImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
+          {deliveryMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Safe place note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Behind side gate, under covered porch" style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label> : null}
+          <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Driver note optional<textarea name="deliveryNote" rows={2} value={deliveryNote} onChange={(event) => setDeliveryNote(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label>
+          <button type="submit" disabled={deliveryMode === "customer" ? !canCompleteCustomer : !canCompleteSafePlace} style={{ width: "100%", ...buttonStyle((deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#16a34a" : "#d0d5dd", (deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#ffffff" : "#667085") }}>Complete delivery</button>
           <p style={{ margin: 0, color: "#667085", fontWeight: 700, fontSize: 13 }}>{deliveryMode === "customer" ? "Needs photo and customer signature." : "Needs photo and safe place note."}</p>
         </Form>
       ) : null}
 
-      {deliveryMode === "missed" ? <Form method="post" style={{ display: "grid", gap: 12, border: "1px solid #fecdca", borderRadius: 18, padding: 12, background: "#fff7f5" }}><input type="hidden" name="intent" value="missedStop" /><input type="hidden" name="stopId" value={stopId} /><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Reason<select name="failedReason" value={failedReason} onChange={(event) => setFailedReason(event.currentTarget.value)} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff" }}><option>No answer</option><option>Access issue</option><option>Customer unavailable</option><option>Wrong address</option><option>Customer refused</option><option>Other</option></select></label><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Note optional<textarea name="failedNote" rows={2} value={failedNote} onChange={(event) => setFailedNote(event.currentTarget.value)} style={{ fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14 }} /></label><button type="submit" style={buttonStyle("#b42318")}>Mark missed</button></Form> : null}
+      {deliveryMode === "missed" ? <Form method="post" style={{ display: "grid", gap: 12, border: "1px solid #fecdca", borderRadius: 18, padding: 12, background: "#fff7f5", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}><input type="hidden" name="intent" value="missedStop" /><input type="hidden" name="stopId" value={stopId} /><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Reason<select name="failedReason" value={failedReason} onChange={(event) => setFailedReason(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }}><option>No answer</option><option>Access issue</option><option>Customer unavailable</option><option>Wrong address</option><option>Customer refused</option><option>Other</option></select></label><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Note optional<textarea name="failedNote" rows={2} value={failedNote} onChange={(event) => setFailedNote(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label><button type="submit" style={{ width: "100%", ...buttonStyle("#b42318") }}>Mark missed</button></Form> : null}
     </div>
   );
 }
@@ -447,8 +455,8 @@ export default function DriverRoutePage() {
   }, [routeStarted, revalidator]);
 
   return (
-    <main style={{ minHeight: "100vh", background: "#eef4fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
-      <section style={{ maxWidth: 720, margin: "0 auto", padding: "14px 12px 32px" }}>
+    <main style={{ minHeight: "100vh", background: "#eef4fb", fontFamily: "Arial, sans-serif", color: "#323841", overflowX: "hidden" }}>
+      <section style={{ maxWidth: 720, margin: "0 auto", padding: "14px 12px 32px", overflowX: "hidden", boxSizing: "border-box" }}>
         <header style={{ background: "#ffffff", borderRadius: 24, padding: 18, boxShadow: "0 10px 28px rgba(50,56,65,0.12)", marginBottom: 14 }}>
           <p style={{ margin: 0, color: "#509AE6", fontWeight: 900, fontSize: 14 }}>Bathroom Panels Direct</p>
           <h1 style={{ margin: "8px 0 0", fontSize: 30, lineHeight: 1.05 }}>{route.driver?.name || "Driver"}</h1>
@@ -483,12 +491,12 @@ export default function DriverRoutePage() {
           const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
           const customerSafePlaceNote = group?.safePlaceNote || "";
 
-          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)" }}>
+          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)", maxWidth: "100%", boxSizing: "border-box" }}>
             <div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
               <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
               <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div>
             </div>
-            <div style={{ padding: 16, display: "grid", gap: 12 }}>
+            <div style={{ padding: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
               <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
               <SafePlaceRequestCard note={customerSafePlaceNote} />
               <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
