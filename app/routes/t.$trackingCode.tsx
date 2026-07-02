@@ -1,0 +1,145 @@
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useLoaderData } from "@remix-run/react";
+
+import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
+import { formatEtaSlot } from "../lib/etaSlots";
+
+function formatDate(value: string | Date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/London",
+  }).format(new Date(value));
+}
+
+function formatSlot(estimatedArrival: string | Date | null | undefined, slotMinutes = 60) {
+  if (!estimatedArrival) {
+    return "Time to be confirmed";
+  }
+
+  const start = new Date(estimatedArrival);
+  const end = new Date(start.getTime() + Math.max(15, slotMinutes) * 60 * 1000);
+
+  return formatEtaSlot(start, end);
+}
+
+function cleanStatus(value: string) {
+  return value.replaceAll("_", " ").toLowerCase();
+}
+
+export const loader = async ({ params, request }: LoaderFunctionArgs) => {
+  const trackingCode = params.trackingCode || "";
+  const url = new URL(request.url);
+
+  if (!trackingCode) {
+    throw new Response("Tracking details not found", { status: 404 });
+  }
+
+  const tracking = await getCustomerTrackingByCode(trackingCode);
+  const stop = tracking?.deliveryGroup?.stops?.[0];
+  const route = stop?.route;
+
+  if (!tracking || !stop || !route) {
+    throw new Response("Tracking details not found", { status: 404 });
+  }
+
+  return json({
+    trackingCode,
+    saved: url.searchParams.get("instructions") === "saved",
+    missing: url.searchParams.get("instructions") === "missing",
+    closed: url.searchParams.get("instructions") === "closed",
+    orderNumber: tracking.shopifyOrderNumber,
+    customerName: tracking.customerName || "Customer",
+    itemsSummary: tracking.lineItemSummary || "",
+    postcode: tracking.postcode || tracking.deliveryGroup?.postcode || "",
+    address: tracking.deliveryGroup?.formattedAddress || tracking.deliveryGroup?.manualAddress || tracking.deliveryGroup?.address || "",
+    safePlaceNote: tracking.deliveryGroup?.safePlaceNote || "",
+    routeDate: route.date,
+    routeStatus: route.status,
+    stopStatus: stop.status,
+    stopNumber: stop.orderIndex,
+    etaSlot: formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60),
+    driverName: route.driver?.name || "your driver",
+    vehicleName: route.driver?.vehicleName || "",
+    vehicleRegistration: route.driver?.vehicleRegistration || "",
+  });
+};
+
+export default function CustomerTrackingPage() {
+  const data = useLoaderData<typeof loader>();
+  const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
+  const complete = data.stopStatus === "DELIVERED";
+  const missed = data.stopStatus === "FAILED";
+
+  return (
+    <main style={{ minHeight: "100vh", background: "#f3f6fb", padding: "24px 14px", fontFamily: "Arial, sans-serif", color: "#1f2937" }}>
+      <section style={{ maxWidth: 720, margin: "0 auto", background: "#ffffff", borderRadius: 20, padding: 24, boxShadow: "0 10px 30px rgba(15,23,42,0.10)" }}>
+        <p style={{ margin: 0, color: "#509AE6", fontWeight: 900 }}>Bathroom Panels Direct</p>
+        <h1 style={{ margin: "8px 0 10px", fontSize: 30, lineHeight: 1.1 }}>Your delivery booking</h1>
+        <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>Order {data.orderNumber}</p>
+
+        {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Safe place instructions saved.</div> : null}
+        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please choose or enter a safe place instruction.</div> : null}
+        {data.closed ? <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>This delivery is already closed, so instructions cannot be changed.</div> : null}
+
+        <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
+          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}>
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Delivery date</p>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{formatDate(data.routeDate)}</p>
+          </div>
+          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}>
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Booked slot</p>
+            <p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{data.etaSlot}</p>
+          </div>
+          <div style={{ background: "#f8fafc", borderRadius: 16, padding: 16 }}>
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Status</p>
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{complete ? "Delivered" : missed ? "Delivery missed" : routeStarted ? "Out for delivery" : "Booked"}</p>
+            <p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>Stop {data.stopNumber}, {cleanStatus(data.stopStatus)}</p>
+          </div>
+        </div>
+
+        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
+          <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Driver</p>
+          <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.driverName}{data.vehicleName ? `, ${data.vehicleName}` : ""}{data.vehicleRegistration ? `, ${data.vehicleRegistration}` : ""}</p>
+        </div>
+
+        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
+          <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Delivery address</p>
+          <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.address || data.postcode || "Address held on your order"}</p>
+        </div>
+
+        {data.itemsSummary ? (
+          <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
+            <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items</p>
+            <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.itemsSummary}</p>
+          </div>
+        ) : null}
+
+        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+          <h2 style={{ margin: "0 0 10px", fontSize: 20 }}>Safe place instructions</h2>
+          {data.safePlaceNote ? <p style={{ margin: "0 0 12px", color: "#166534", fontWeight: 800 }}>Current instruction: {data.safePlaceNote}</p> : null}
+          <form method="post" action={`/t/${encodeURIComponent(data.trackingCode)}/safe-place`}>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 8 }}>
+              Choose a safe place
+              <select name="safePlaceOption" defaultValue="porch" style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>
+                <option value="porch">Leave in porch</option>
+                <option value="side_gate">Leave behind side gate</option>
+                <option value="shed">Leave in shed or outbuilding</option>
+                <option value="neighbour">Leave with neighbour</option>
+                <option value="other">Other safe place</option>
+              </select>
+            </label>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>
+              Extra details, optional
+              <textarea name="safePlaceDetails" rows={3} placeholder="Example, behind the black side gate" style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />
+            </label>
+            <button type="submit" disabled={complete || missed} style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px 16px", background: complete || missed ? "#d0d5dd" : "#509AE6", color: "#ffffff", fontSize: 16, fontWeight: 900 }}>Save instructions</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  );
+}
