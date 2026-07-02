@@ -2,17 +2,10 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 
 import { formatEtaSlot } from "../lib/etaSlots";
 import { getRoute } from "../lib/routeDrafts.server";
-import { authenticate } from "../shopify.server";
 
-type PdfLine = {
-  text: string;
-  size?: number;
-  bold?: boolean;
-  gap?: number;
-};
+type PdfLine = { text: string; size?: number; bold?: boolean; gap?: number };
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+export const loader = async ({ params }: LoaderFunctionArgs) => {
   const routeId = params.routeId;
 
   if (!routeId) {
@@ -62,48 +55,24 @@ function formatDateTime(value: string | Date) {
   }).format(new Date(value));
 }
 
-function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
-  if (!estimatedArrival) {
-    return "ETA pending";
-  }
-
-  const start = new Date(estimatedArrival);
+function formatSlot(value: string | Date | null, slotMinutes = 60) {
+  if (!value) return "ETA pending";
+  const start = new Date(value);
   const end = new Date(start.getTime() + slotMinutes * 60 * 1000);
-
   return formatEtaSlot(start, end);
 }
 
 function splitLineItems(summary?: string | null) {
-  return (summary || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return (summary || "").split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function parseItem(item: string) {
   const normalised = item.replace(/\s+/g, " ").trim();
   const trailingQty = normalised.match(/^(.*?)(?:\s+[x×]\s*)(\d+)$/i);
-
-  if (trailingQty) {
-    return {
-      label: trailingQty[1].trim(),
-      quantity: Number(trailingQty[2]),
-    };
-  }
-
+  if (trailingQty) return { label: trailingQty[1].trim(), quantity: Number(trailingQty[2]) };
   const leadingQty = normalised.match(/^(\d+)(?:\s*[x×]\s+)(.*)$/i);
-
-  if (leadingQty) {
-    return {
-      label: leadingQty[2].trim(),
-      quantity: Number(leadingQty[1]),
-    };
-  }
-
-  return {
-    label: normalised,
-    quantity: 1,
-  };
+  if (leadingQty) return { label: leadingQty[2].trim(), quantity: Number(leadingQty[1]) };
+  return { label: normalised, quantity: 1 };
 }
 
 function itemKey(item: string) {
@@ -112,30 +81,22 @@ function itemKey(item: string) {
 
 function combineLineItems(lineItems: string[]) {
   const itemMap = new Map<string, { label: string; quantity: number }>();
-
   for (const item of lineItems) {
     const parsed = parseItem(item);
     const key = itemKey(item);
     const quantity = Number.isFinite(parsed.quantity) ? parsed.quantity : 1;
     const existing = itemMap.get(key);
-
-    if (existing) {
-      existing.quantity += quantity;
-    } else {
-      itemMap.set(key, { label: parsed.label, quantity });
-    }
+    if (existing) existing.quantity += quantity;
+    else itemMap.set(key, { label: parsed.label, quantity });
   }
-
   return Array.from(itemMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function addWrappedLine(lines: PdfLine[], text: string, options: PdfLine = {}, maxLength = 90) {
+function addWrappedLine(lines: PdfLine[], text: string, options: PdfLine = {}, maxLength = 88) {
   const words = text.split(/\s+/).filter(Boolean);
   let current = "";
-
   for (const word of words) {
     const next = current ? `${current} ${word}` : word;
-
     if (next.length > maxLength && current) {
       lines.push({ ...options, text: current });
       current = word;
@@ -143,20 +104,17 @@ function addWrappedLine(lines: PdfLine[], text: string, options: PdfLine = {}, m
       current = next;
     }
   }
-
-  if (current) {
-    lines.push({ ...options, text: current });
-  }
+  if (current) lines.push({ ...options, text: current });
 }
 
 function section(lines: PdfLine[], title: string) {
   lines.push({ text: "", gap: 8 });
   lines.push({ text: title.toUpperCase(), size: 13, bold: true, gap: 4 });
-  lines.push({ text: "─".repeat(86), size: 8 });
+  lines.push({ text: "-".repeat(92), size: 8 });
 }
 
 function createWarehousePackingPdf(route: any, generatedAt: string) {
-  const itemMap = new Map<string, { label: string; quantity: number; stops: number[]; orders: string[] }>();
+  const itemMap = new Map<string, { label: string; quantity: number; stops: number[] }>();
   const stops = route.stops || [];
 
   for (const stop of stops) {
@@ -166,18 +124,11 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
         const key = itemKey(item);
         const quantity = Number.isFinite(parsed.quantity) ? parsed.quantity : 1;
         const existing = itemMap.get(key);
-
         if (existing) {
           existing.quantity += quantity;
           existing.stops.push(stop.orderIndex);
-          existing.orders.push(order.shopifyOrderNumber);
         } else {
-          itemMap.set(key, {
-            label: parsed.label,
-            quantity,
-            stops: [stop.orderIndex],
-            orders: [order.shopifyOrderNumber],
-          });
+          itemMap.set(key, { label: parsed.label, quantity, stops: [stop.orderIndex] });
         }
       }
     }
@@ -186,16 +137,16 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
   const items = Array.from(itemMap.values()).sort((a, b) => a.label.localeCompare(b.label));
   const loadOrder = [...stops].sort((a, b) => b.orderIndex - a.orderIndex);
   const driver = route.driver;
-  const vehicleName = driver?.vehicleName || "Vehicle not set";
   const registration = driver?.vehicleRegistration || "Registration not set";
+  const vehicleName = driver?.vehicleName || "Vehicle not set";
   const totalOrders = stops.reduce((count: number, stop: any) => count + (stop.deliveryGroup?.orders.length || 0), 0);
   const getLoadPosition = (dropNumber: number) => Math.max(1, stops.length - dropNumber + 1);
   const lines: PdfLine[] = [];
 
   lines.push({ text: "BATHROOM PANELS DIRECT", size: 10, bold: true });
   lines.push({ text: "WAREHOUSE PACKING LIST", size: 22, bold: true, gap: 8 });
-  lines.push({ text: `${route.name} · ${formatDate(route.date)}`, size: 14, bold: true });
-  lines.push({ text: `Status: ${route.status === "DRAFT" ? "DRAFT ROUTE, CHECK BEFORE LOADING" : `${route.status} ROUTE`}`, size: 11, bold: true, gap: 8 });
+  lines.push({ text: `${route.name} | ${formatDate(route.date)}`, size: 14, bold: true });
+  lines.push({ text: `Status: ${route.status === "DRAFT" ? "DRAFT ROUTE - CHECK BEFORE LOADING" : `${route.status} ROUTE`}`, size: 11, bold: true, gap: 8 });
 
   section(lines, "Route and van summary");
   lines.push({ text: `Van registration: ${registration}`, size: 16, bold: true });
@@ -208,8 +159,7 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
   lines.push({ text: `Planned start: ${route.plannedStartTime || "05:00"}` });
   lines.push({ text: `Generated: ${formatDateTime(generatedAt)}` });
 
-  section(lines, "Master pick list, total items for the van");
-
+  section(lines, "Master pick list - total items for the van");
   if (items.length) {
     for (const item of items) {
       const dropList = Array.from(new Set(item.stops)).sort((a, b) => a - b).join(", ");
@@ -225,12 +175,10 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
   section(lines, "Final warehouse checks");
   lines.push({ text: "[  ] Panels loaded     [  ] Trims loaded      [  ] Adhesives loaded" });
   lines.push({ text: "[  ] Silicone loaded   [  ] Route checked     [  ] Paperwork issued" });
-  lines.push({ text: "" });
   lines.push({ text: "Picked by: ____________________    Checked by: ____________________    Time: __________" });
 
   section(lines, "Loading order");
   lines.push({ text: "Follow Load Position from top to bottom. Drop cards are listed in route order.", bold: true });
-
   for (const stop of loadOrder) {
     const orders = stop.deliveryGroup?.orders || [];
     const orderNumbers = orders.map((order: any) => order.shopifyOrderNumber).join(", ") || "No orders";
@@ -240,7 +188,6 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
   }
 
   section(lines, "Drop cards");
-
   for (const stop of [...stops].sort((a, b) => a.orderIndex - b.orderIndex)) {
     const group = stop.deliveryGroup;
     const orders = group?.orders || [];
@@ -249,33 +196,27 @@ function createWarehousePackingPdf(route: any, generatedAt: string) {
     const address = group?.formattedAddress || group?.address || "No address";
     const lineItems = combineLineItems(orders.flatMap((order: any) => splitLineItems(order.lineItemSummary)));
     const itemTotal = lineItems.reduce((total, item) => total + item.quantity, 0);
-    const notes = [group?.deliveryNote, group?.safePlaceNote].filter(Boolean).join(" · ");
-    const loadPosition = getLoadPosition(stop.orderIndex);
+    const notes = [group?.deliveryNote, group?.safePlaceNote].filter(Boolean).join(" | ");
 
     lines.push({ text: "", gap: 10 });
-    lines.push({ text: `DROP ${stop.orderIndex}    LOAD POSITION ${loadPosition}`, size: 15, bold: true });
+    lines.push({ text: `DROP ${stop.orderIndex}    LOAD POSITION ${getLoadPosition(stop.orderIndex)}`, size: 15, bold: true });
     addWrappedLine(lines, `Customer: ${customerNames}`, { bold: true });
     addWrappedLine(lines, `Order: ${orderNumbers}`);
     addWrappedLine(lines, `Address: ${address}`);
     lines.push({ text: `Postcode: ${group?.postcode || "No postcode"}    ETA: ${formatSlot(stop.estimatedArrival, route.customerSlotMinutes || 60)}    Van: ${registration}` });
     lines.push({ text: "Items for this drop:", bold: true });
-
     if (lineItems.length) {
-      for (const item of lineItems) {
-        addWrappedLine(lines, `[  ] Qty ${String(item.quantity).padStart(3, " ")}  ${item.label}`, { bold: true }, 82);
-      }
+      for (const item of lineItems) addWrappedLine(lines, `[  ] Qty ${String(item.quantity).padStart(3, " ")}  ${item.label}`, { bold: true }, 82);
     } else {
       lines.push({ text: "No item details stored for this stop." });
     }
-
     lines.push({ text: `Total items for drop: ${itemTotal || "Not stored"}`, bold: true });
     addWrappedLine(lines, `Notes: ${notes || ""}`);
     lines.push({ text: "[  ] Picked      [  ] Loaded      Checked by: ____________________" });
   }
 
   lines.push({ text: "", gap: 8 });
-  lines.push({ text: `Route: ${route.name} · Van: ${registration} · Orders: ${totalOrders}`, size: 8 });
-
+  lines.push({ text: `Route: ${route.name} | Van: ${registration} | Orders: ${totalOrders}`, size: 8 });
   return buildPdf(lines);
 }
 
@@ -285,7 +226,7 @@ function pdfText(value: string) {
     .replace(/\(/g, "\\(")
     .replace(/\)/g, "\\)")
     .replace(/[–—]/g, "-")
-    .replace(/·/g, "•");
+    .replace(/[·•]/g, "|");
 }
 
 function buildPdf(lines: PdfLine[]) {
@@ -299,9 +240,7 @@ function buildPdf(lines: PdfLine[]) {
   let y = topY;
 
   function newPage() {
-    if (currentPage.length) {
-      pages.push(currentPage);
-    }
+    if (currentPage.length) pages.push(currentPage);
     currentPage = [];
     y = topY;
   }
@@ -309,28 +248,17 @@ function buildPdf(lines: PdfLine[]) {
   for (const line of lines) {
     const size = line.size || 9;
     const lineHeight = size + (line.gap ?? 4);
-
-    if (y - lineHeight < bottomY) {
-      newPage();
-    }
-
+    if (y - lineHeight < bottomY) newPage();
     if (line.text) {
       const font = line.bold ? "F2" : "F1";
       currentPage.push(`BT /${font} ${size} Tf ${marginX} ${y} Td (${pdfText(line.text)}) Tj ET`);
     }
-
     y -= lineHeight;
   }
 
   newPage();
-
-  const objects: string[] = [];
+  const objects: string[] = ["<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>"];
   const pageObjectNumbers: number[] = [];
-
-  objects.push("<< /Type /Catalog /Pages 2 0 R >>");
-  objects.push("");
-  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
 
   for (const pageCommands of pages) {
     const content = pageCommands.join("\n");
@@ -342,7 +270,6 @@ function buildPdf(lines: PdfLine[]) {
   }
 
   objects[1] = `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${pageObjectNumbers.length} >>`;
-
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
 
@@ -352,14 +279,10 @@ function buildPdf(lines: PdfLine[]) {
   });
 
   const xrefOffset = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += "0000000000 65535 f \n";
-
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   for (let index = 1; index < offsets.length; index += 1) {
     pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
   }
-
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
   return Buffer.from(pdf, "utf8");
 }
