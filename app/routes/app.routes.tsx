@@ -16,6 +16,7 @@ import {
   Button,
 } from "@shopify/polaris";
 
+import { AdminToastStack, type AdminToastMessage } from "../components/AdminToastStack";
 import { deleteDraftRoute, deleteTestRoute, getRouteActionSummary } from "../lib/draftRouteActions.server";
 import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
 import { listActiveDrivers } from "../lib/drivers.server";
@@ -30,14 +31,32 @@ type RouteListItem = Awaited<ReturnType<typeof listRoutes>>[number];
 type StopListItem = RouteListItem["stops"][number];
 type DriverListItem = Awaited<ReturnType<typeof listActiveDrivers>>[number];
 
+type RouteActionData = {
+  ok: boolean;
+  message?: string;
+  error?: string;
+  errors?: string[];
+  toasts?: AdminToastMessage[];
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
+  const url = new URL(request.url);
   const [routes, drivers] = await Promise.all([
     listRoutes(),
     listActiveDrivers(),
   ]);
+  const initialToasts: AdminToastMessage[] = [];
 
-  return json({ routes, drivers });
+  if (url.searchParams.get("toast") === "draft_saved") {
+    initialToasts.push({
+      title: "Draft route saved",
+      detail: url.searchParams.get("route") || "The route has been saved and is ready to publish.",
+      tone: "success",
+    });
+  }
+
+  return json({ routes, drivers, initialToasts });
 };
 
 function tick(value: boolean) {
@@ -76,6 +95,14 @@ function fulfilmentMessage(result: Awaited<ReturnType<typeof fulfilRouteOrders>>
   ].join(" · ");
 }
 
+function actionToast(title: string, detail?: string, tone: AdminToastMessage["tone"] = "success"): AdminToastMessage {
+  return {
+    title,
+    detail,
+    tone,
+  };
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
@@ -83,60 +110,76 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const routeId = String(formData.get("routeId") || "").trim();
 
   if (!routeId) {
-    return json({ ok: false, error: "Route could not be found." }, { status: 400 });
+    return json<RouteActionData>({ ok: false, error: "Route could not be found.", toasts: [actionToast("Action failed", "Route could not be found.", "critical")] }, { status: 400 });
   }
 
   if (intent === "assignDriver") {
     try {
       const driverId = String(formData.get("driverId") || "").trim();
+      const drivers = await listActiveDrivers();
+      const driverName = drivers.find((driver) => driver.id === driverId)?.name || "No driver";
       await assignDriverToRoute(routeId, driverId || null);
-      return json({ ok: true, message: "Driver saved on route." });
+      return json<RouteActionData>({ ok: true, message: "Driver saved on route.", toasts: [actionToast("Driver saved", driverName)] });
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Driver could not be saved." }, { status: 400 });
+      const message = error instanceof Error ? error.message : "Driver could not be saved.";
+      return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Driver could not be saved", message, "critical")] }, { status: 400 });
     }
   }
 
   if (intent === "deleteDraft") {
     try {
       await deleteDraftRoute(routeId);
-      return json({ ok: true, message: "Draft route deleted." });
+      return json<RouteActionData>({ ok: true, message: "Draft route deleted.", toasts: [actionToast("Draft route deleted")] });
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Draft route could not be deleted." }, { status: 400 });
+      const message = error instanceof Error ? error.message : "Draft route could not be deleted.";
+      return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Draft route could not be deleted", message, "critical")] }, { status: 400 });
     }
   }
 
   if (intent === "deleteTest") {
     try {
       await deleteTestRoute(routeId);
-      return json({ ok: true, message: "Route deleted for testing." });
+      return json<RouteActionData>({ ok: true, message: "Route deleted for testing.", toasts: [actionToast("Route deleted for testing")] });
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be deleted." }, { status: 400 });
+      const message = error instanceof Error ? error.message : "Route could not be deleted.";
+      return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Route could not be deleted", message, "critical")] }, { status: 400 });
     }
   }
 
   if (intent === "fulfilRoute") {
     try {
       const result = await fulfilRouteOrders(admin, routeId);
-      return json({ ok: true, message: fulfilmentMessage(result), errors: result.errors });
+      return json<RouteActionData>({
+        ok: true,
+        message: fulfilmentMessage(result),
+        errors: result.errors,
+        toasts: [
+          actionToast("Shopify fulfilment checked", `${result.fulfilled} fulfilled, ${result.skipped} skipped`, result.errors.length ? "info" : "success"),
+          ...result.errors.map((error) => actionToast("Fulfilment detail", error, "info")),
+        ],
+      });
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Shopify fulfilment could not be checked." }, { status: 400 });
+      const message = error instanceof Error ? error.message : "Shopify fulfilment could not be checked.";
+      return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Shopify fulfilment failed", message, "critical")] }, { status: 400 });
     }
   }
 
   if (intent === "publish") {
     try {
       const route = await getRouteActionSummary(routeId);
+      const drivers = await listActiveDrivers();
+      const driverName = route?.driverId ? drivers.find((driver) => driver.id === route.driverId)?.name || "Driver" : "Driver";
 
       if (!route) {
-        return json({ ok: false, error: "Route could not be found." }, { status: 404 });
+        return json<RouteActionData>({ ok: false, error: "Route could not be found.", toasts: [actionToast("Publish failed", "Route could not be found.", "critical")] }, { status: 404 });
       }
 
       if (route.status !== "DRAFT") {
-        return json({ ok: false, error: "Only draft routes can be published from this card." }, { status: 400 });
+        return json<RouteActionData>({ ok: false, error: "Only draft routes can be published from this card.", toasts: [actionToast("Publish failed", "Only draft routes can be published from this card.", "critical")] }, { status: 400 });
       }
 
       if (!route.driverId) {
-        return json({ ok: false, error: "Assign a driver before publishing this route." }, { status: 400 });
+        return json<RouteActionData>({ ok: false, error: "Assign a driver before publishing this route.", toasts: [actionToast("Publish failed", "Assign a driver before publishing this route.", "critical")] }, { status: 400 });
       }
 
       await publishRoute(routeId);
@@ -150,8 +193,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const driverResult = await sendDriverRouteLink({ routeId, request });
       const customerResult = await sendBookedSlotNotifications(routeId);
       const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
+      const toasts: AdminToastMessage[] = [
+        actionToast("Route published", route.name),
+        actionToast(driverResult.smsSent ? "Driver SMS sent" : "Driver SMS not sent", `${route.name} sent to ${driverName}`, driverResult.smsSent ? "success" : "info"),
+        actionToast(driverResult.emailSent ? "Driver email sent" : "Driver email not sent", `${route.name} sent to ${driverName}`, driverResult.emailSent ? "success" : "info"),
+        actionToast("Customer SMS update", `${customerResult.smsSent} sent, ${customerResult.skipped} skipped`, customerResult.smsSent ? "success" : "info"),
+        actionToast("Customer email update", `${customerResult.emailsSent} sent, ${customerResult.skipped} skipped`, customerResult.emailsSent ? "success" : "info"),
+        fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
+          ? actionToast("Shopify fulfilment on publish", `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success")
+          : actionToast("Shopify fulfilment", "Will run when each delivery is completed", "info"),
+        ...errors.map((error) => actionToast("Publish detail", error, "critical")),
+      ];
 
-      return json({
+      return json<RouteActionData>({
         ok: true,
         message: publishMessage({
           driverSms: driverResult.smsSent,
@@ -165,13 +219,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           errors,
         }),
         errors,
+        toasts,
       });
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be published." }, { status: 400 });
+      const message = error instanceof Error ? error.message : "Route could not be published.";
+      return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Route could not be published", message, "critical")] }, { status: 400 });
     }
   }
 
-  return json({ ok: false, error: "Route action was not recognised." }, { status: 400 });
+  return json<RouteActionData>({ ok: false, error: "Route action was not recognised.", toasts: [actionToast("Action failed", "Route action was not recognised.", "critical")] }, { status: 400 });
 };
 
 function formatDate(value: string | Date) {
@@ -482,12 +538,14 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
 }
 
 export default function Routes() {
-  const { routes, drivers } = useLoaderData<typeof loader>();
+  const { routes, drivers, initialToasts } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const liveRoutes = routes.filter(isRouteInProgress);
+  const actionToasts = actionData?.toasts || (actionData && "error" in actionData && actionData.error ? [actionToast("Action failed", actionData.error, "critical")] : []);
 
   return (
     <Page title="Routes">
+      <AdminToastStack messages={[...initialToasts, ...actionToasts]} />
       <Layout>
         <Layout.Section>
           <LegacyCard sectioned>
