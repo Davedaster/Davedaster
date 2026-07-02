@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -16,17 +16,136 @@ import {
   Button,
 } from "@shopify/polaris";
 
-import { listRoutes } from "../lib/routeDrafts.server";
+import { deleteDraftRoute, getRouteActionSummary } from "../lib/draftRouteActions.server";
+import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
+import { listActiveDrivers } from "../lib/drivers.server";
+import { assignDriverToRoute, listRoutes, publishRoute } from "../lib/routeDrafts.server";
+import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
+import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
+import { fulfilRouteOrders } from "../lib/shopifyFulfilment.server";
+import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
 type RouteListItem = Awaited<ReturnType<typeof listRoutes>>[number];
 type StopListItem = RouteListItem["stops"][number];
+type DriverListItem = Awaited<ReturnType<typeof listActiveDrivers>>[number];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  const routes = await listRoutes();
+  const [routes, drivers] = await Promise.all([
+    listRoutes(),
+    listActiveDrivers(),
+  ]);
 
-  return json({ routes });
+  return json({ routes, drivers });
+};
+
+function tick(value: boolean) {
+  return value ? "✓" : "✗";
+}
+
+function publishMessage(input: {
+  driverSms: boolean;
+  driverEmail: boolean;
+  customerSms: number;
+  customerEmail: number;
+  customerSkipped: number;
+  fulfilmentMode: string;
+  fulfilmentFulfilled: number;
+  fulfilmentSkipped: number;
+  errors: string[];
+}) {
+  return [
+    "Route published",
+    `Driver SMS ${tick(input.driverSms)}`,
+    `Driver email ${tick(input.driverEmail)}`,
+    `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
+    `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
+    input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
+    input.fulfilmentMode === "on_publish"
+      ? `Shopify fulfilment on publish: ${input.fulfilmentFulfilled} fulfilled, ${input.fulfilmentSkipped} skipped`
+      : "Shopify fulfilment will happen when each delivery is completed",
+    input.errors.length ? `Errors: ${input.errors.join(" | ")}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+  const routeId = String(formData.get("routeId") || "").trim();
+
+  if (!routeId) {
+    return json({ ok: false, error: "Route could not be found." }, { status: 400 });
+  }
+
+  if (intent === "assignDriver") {
+    try {
+      const driverId = String(formData.get("driverId") || "").trim();
+      await assignDriverToRoute(routeId, driverId || null);
+      return json({ ok: true, message: "Driver saved on route." });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Driver could not be saved." }, { status: 400 });
+    }
+  }
+
+  if (intent === "deleteDraft") {
+    try {
+      await deleteDraftRoute(routeId);
+      return json({ ok: true, message: "Draft route deleted." });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Draft route could not be deleted." }, { status: 400 });
+    }
+  }
+
+  if (intent === "publish") {
+    try {
+      const route = await getRouteActionSummary(routeId);
+
+      if (!route) {
+        return json({ ok: false, error: "Route could not be found." }, { status: 404 });
+      }
+
+      if (route.status !== "DRAFT") {
+        return json({ ok: false, error: "Only draft routes can be published from this card." }, { status: 400 });
+      }
+
+      if (!route.driverId) {
+        return json({ ok: false, error: "Assign a driver before publishing this route." }, { status: 400 });
+      }
+
+      await publishRoute(routeId);
+      await tagPublishedRouteOrders(admin, routeId);
+
+      const fulfilmentSettings = await getFulfilmentSettings();
+      const fulfilmentResult = fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
+        ? await fulfilRouteOrders(admin, routeId)
+        : { fulfilled: 0, skipped: 0, errors: [] };
+      const driverResult = await sendDriverRouteLink({ routeId, request });
+      const customerResult = await sendBookedSlotNotifications(routeId);
+      const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
+
+      return json({
+        ok: true,
+        message: publishMessage({
+          driverSms: driverResult.smsSent,
+          driverEmail: driverResult.emailSent,
+          customerSms: customerResult.smsSent,
+          customerEmail: customerResult.emailsSent,
+          customerSkipped: customerResult.skipped,
+          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
+          fulfilmentFulfilled: fulfilmentResult.fulfilled,
+          fulfilmentSkipped: fulfilmentResult.skipped,
+          errors,
+        }),
+        errors,
+      });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be published." }, { status: 400 });
+    }
+  }
+
+  return json({ ok: false, error: "Route action was not recognised." }, { status: 400 });
 };
 
 function formatDate(value: string | Date) {
@@ -35,23 +154,6 @@ function formatDate(value: string | Date) {
     month: "short",
     year: "numeric",
   }).format(new Date(value));
-}
-
-function formatTime(value: string | Date | null | undefined) {
-  if (!value) {
-    return "Pending";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Pending";
-  }
-
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function formatDateTime(value: string | Date | null | undefined) {
@@ -171,8 +273,31 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
-  const navigate = useNavigate();
+function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value="assignDriver" />
+      <input type="hidden" name="routeId" value={route.id} />
+      <InlineStack gap="200" blockAlign="center" wrap>
+        <label style={{ fontSize: 13, fontWeight: 600 }} htmlFor={`driver-${route.id}`}>Driver</label>
+        <select
+          id={`driver-${route.id}`}
+          name="driverId"
+          defaultValue={route.driverId || ""}
+          style={{ minWidth: 180, minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }}
+        >
+          <option value="">No driver</option>
+          {drivers.map((driver) => (
+            <option key={driver.id} value={driver.id}>{driver.name}</option>
+          ))}
+        </select>
+        <Button submit>Save driver</Button>
+      </InlineStack>
+    </Form>
+  );
+}
+
+function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const completedStops = orderedStops.filter(isStopDone);
   const deliveredStops = orderedStops.filter((stop) => stop.status === "DELIVERED");
@@ -194,7 +319,7 @@ function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
             <Text as="p" variant="bodyMd" tone="subdued">{route.name} · {formatDate(route.date)}</Text>
             <Text as="p" variant="bodySm" tone="subdued">Start {route.plannedStartTime || "05:00"} · {finishLocationLabel(route)}: {route.finishAddress || route.startAddress || "Base"}</Text>
           </BlockStack>
-          <Button onClick={() => navigate(`/app/routes/${route.id}`)}>Open route</Button>
+          <DriverSelect route={route} drivers={drivers} />
         </InlineStack>
 
         <BlockStack gap="150">
@@ -220,31 +345,67 @@ function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
               <Text as="p" variant="bodySm" tone="subdued">{stopEtaLabel(nextStop)}</Text>
             </BlockStack>
           </Box>
-        ) : (
-          <Box background="bg-surface-secondary" padding="300" borderRadius="300">
-            <Text as="p" variant="bodyMd" fontWeight="bold">No remaining drops.</Text>
-          </Box>
-        )}
-
-        {remainingStops.length ? (
-          <BlockStack gap="150">
-            <Text as="h4" variant="headingSm">Remaining ETAs</Text>
-            {remainingStops.map((stop) => (
-              <InlineStack key={stop.id} align="space-between" gap="300">
-                <Text as="span" variant="bodySm">Stop {stop.orderIndex} · {stopCustomerLabel(stop)}</Text>
-                <Text as="span" variant="bodySm" tone="subdued">{formatDateTime(stop.estimatedArrival)}</Text>
-              </InlineStack>
-            ))}
-          </BlockStack>
         ) : null}
       </BlockStack>
     </LegacyCard>
   );
 }
 
+function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
+  const isDraft = route.status === "DRAFT";
+
+  return (
+    <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`} onClick={() => {}}>
+      <BlockStack gap="300">
+        <InlineStack align="space-between" blockAlign="start" gap="300">
+          <BlockStack gap="100">
+            <Text as="h3" variant="bodyMd" fontWeight="bold">{route.name}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              {formatDate(route.date)} · Start {route.plannedStartTime || "05:00"} · {route.timePerDropMinutes || 10} min/drop · {route.stops.length} stops
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">Driver: {route.driver?.name || "No driver assigned"}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">Start: {route.startAddress || "Bathroom Panels Direct"}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">Finish: {route.finishAddress || "Bathroom Panels Direct"}</Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              {route.stops
+                .map((stop) => stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", "))
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          </BlockStack>
+          <Badge tone={statusTone(route.status)}>{route.status}</Badge>
+        </InlineStack>
+
+        <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+          <BlockStack gap="250">
+            <DriverSelect route={route} drivers={drivers} />
+
+            {isDraft ? (
+              <InlineStack gap="200" wrap>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="publish" />
+                  <input type="hidden" name="routeId" value={route.id} />
+                  <Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button>
+                </Form>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="deleteDraft" />
+                  <input type="hidden" name="routeId" value={route.id} />
+                  <Button submit tone="critical">Delete draft</Button>
+                </Form>
+              </InlineStack>
+            ) : (
+              <Text as="p" variant="bodySm" tone="subdued">This route is no longer a draft. Publishing and deleting are locked.</Text>
+            )}
+          </BlockStack>
+        </Box>
+      </BlockStack>
+    </ResourceItem>
+  );
+}
+
 export default function Routes() {
-  const navigate = useNavigate();
-  const { routes } = useLoaderData<typeof loader>();
+  const { routes, drivers } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const liveRoutes = routes.filter(isRouteInProgress);
 
   return (
@@ -262,12 +423,14 @@ export default function Routes() {
                 </BlockStack>
                 <Badge tone={liveRoutes.length ? "attention" : "success"}>{liveRoutes.length ? `${liveRoutes.length} active` : "No live routes"}</Badge>
               </InlineStack>
+              {actionData && "message" in actionData ? <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text> : null}
+              {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
 
           {liveRoutes.length ? (
             <BlockStack gap="300">
-              {liveRoutes.map((route) => <LiveRouteProgressCard key={route.id} route={route} />)}
+              {liveRoutes.map((route) => <LiveRouteProgressCard key={route.id} route={route} drivers={drivers} />)}
             </BlockStack>
           ) : (
             <LegacyCard sectioned>
@@ -287,43 +450,7 @@ export default function Routes() {
               <ResourceList
                 resourceName={{ singular: "route", plural: "routes" }}
                 items={routes}
-                renderItem={(route) => (
-                  <ResourceItem
-                    id={route.id}
-                    accessibilityLabel={`View ${route.name}`}
-                    onClick={() => navigate(`/app/routes/${route.id}`)}
-                  >
-                    <InlineStack align="space-between" blockAlign="center" gap="300">
-                      <BlockStack gap="100">
-                        <Text as="h3" variant="bodyMd" fontWeight="bold">
-                          {route.name}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {formatDate(route.date)} · Start {route.plannedStartTime || "05:00"} · {route.timePerDropMinutes || 10} min/drop · {route.stops.length} stops
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Driver: {route.driver?.name || "No driver assigned"}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Start: {route.startAddress || "Bathroom Panels Direct"}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          Finish: {route.finishAddress || "Bathroom Panels Direct"}
-                        </Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {route.stops
-                            .map((stop) => stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", "))
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </Text>
-                      </BlockStack>
-                      <InlineStack gap="200" blockAlign="center">
-                        <Badge tone={statusTone(route.status)}>{route.status}</Badge>
-                        <Button onClick={(event) => { event.stopPropagation(); navigate(`/app/routes/${route.id}`); }}>Open route</Button>
-                      </InlineStack>
-                    </InlineStack>
-                  </ResourceItem>
-                )}
+                renderItem={(route) => <RouteCard route={route} drivers={drivers} />}
               />
             )}
           </LegacyCard>
