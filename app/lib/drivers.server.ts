@@ -48,6 +48,11 @@ export async function listActiveDrivers() {
     where: {
       isActive: true,
     },
+    select: {
+      id: true,
+      name: true,
+      isActive: true,
+    },
     orderBy: {
       name: "asc",
     },
@@ -55,8 +60,19 @@ export async function listActiveDrivers() {
 
   return drivers.map((driver) => ({
     ...driver,
+    photoUrl: null,
+    phoneNumber: null,
+    email: null,
     vehicleName: null,
     vehicleRegistration: null,
+    vehicleType: null,
+    fuelCardNumber: null,
+    fuelCardProvider: null,
+    startAddress: null,
+    endAddress: null,
+    notes: null,
+    createdAt: null,
+    updatedAt: null,
   }));
 }
 
