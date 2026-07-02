@@ -32,14 +32,6 @@ function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) 
   return `${cleanBaseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
 }
 
-function cleanCustomerName(value?: string | null) {
-  return value?.trim() || "there";
-}
-
-function buildDeliveryCompleteSmsBody(input: { customerName?: string | null; orderNumber: string; trackingUrl: string }) {
-  return `Hi ${cleanCustomerName(input.customerName)}, your delivery for ${input.orderNumber} has been completed. Thank you for your order. View delivery details here: ${input.trackingUrl}`;
-}
-
 export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteInput): Promise<DeliveryCompleteResult> {
   const [canSendSms, canSendEmail, credentials] = await Promise.all([
     isTwilioEnabled(),
@@ -64,14 +56,13 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
   const errors: string[] = [];
 
   for (const order of input.orders) {
-    const trackingUrl = trackingUrlForRoute(credentials.shopPublicUrl, input.routeId, order.shopifyOrderId);
     const messageInput = {
       customerName: order.customerName,
       orderNumber: order.shopifyOrderNumber,
       routeName: input.routeName,
       proofPhotoUrl: input.proofPhotoUrl,
       signaturePhotoUrl: input.signaturePhotoUrl,
-      trackingUrl,
+      trackingUrl: trackingUrlForRoute(credentials.shopPublicUrl, input.routeId, order.shopifyOrderId),
     };
 
     let sentAnything = false;
@@ -80,16 +71,9 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
     if (canSendSms && order.customerPhone) {
       attemptedAnything = true;
       try {
-        const smsMessage = await buildDeliveryCompleteMessage(messageInput, "sms");
-        smsMessage.body = buildDeliveryCompleteSmsBody({
-          customerName: order.customerName,
-          orderNumber: order.shopifyOrderNumber,
-          trackingUrl,
-        });
-
         await sendSmsWithTwilio({
           to: order.customerPhone,
-          message: smsMessage,
+          message: await buildDeliveryCompleteMessage(messageInput, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
