@@ -11,7 +11,11 @@ import { authenticate } from "../shopify.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const url = new URL(request.url);
+
+  if (!url.pathname.endsWith("/packing-list")) {
+    await authenticate.admin(request);
+  }
 
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
