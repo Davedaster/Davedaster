@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { sendDeliveryCompleteNotifications } from "./deliveryCompleteNotifications.server";
 import { recordEtaLearningObservation } from "./etaLearning.server";
+import { getFulfilmentSettings } from "./fulfilmentSettings.server";
 import { createSignedProofPhotoUrl, isPrivateProofPhotoKey, uploadProofImageDataUrl } from "./proofPhotoStorage.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
 import { markShopifyOrderDelivered } from "./shopifyFulfilment.server";
@@ -111,23 +112,26 @@ export async function saveProofOfDelivery(input: {
     .filter(Boolean)
     .join("\n");
 
-  const stop = await prisma.stop.findUnique({
-    where: {
-      id: input.stopId,
-    },
-    include: {
-      route: {
-        include: {
-          stops: true,
+  const [stop, fulfilmentSettings] = await Promise.all([
+    prisma.stop.findUnique({
+      where: {
+        id: input.stopId,
+      },
+      include: {
+        route: {
+          include: {
+            stops: true,
+          },
+        },
+        deliveryGroup: {
+          include: {
+            orders: true,
+          },
         },
       },
-      deliveryGroup: {
-        include: {
-          orders: true,
-        },
-      },
-    },
-  });
+    }),
+    getFulfilmentSettings(),
+  ]);
 
   if (!stop || !stop.deliveryGroupId || !stop.deliveryGroup) {
     throw new Error("Stop not found.");
@@ -231,17 +235,21 @@ export async function saveProofOfDelivery(input: {
     });
   });
 
-  if (input.admin) {
-    for (const order of stop.deliveryGroup.orders) {
-      try {
-        const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
-        shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
-      } catch (error) {
-        shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
+  if (fulfilmentSettings.routePublishFulfilmentMode === "on_delivery_complete") {
+    if (input.admin) {
+      for (const order of stop.deliveryGroup.orders) {
+        try {
+          const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
+          shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
+        } catch (error) {
+          shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
+        }
       }
+    } else {
+      shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
     }
   } else {
-    shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
+    shopifyResults.push("Shopify fulfilment skipped on delivery completion because fulfilment is set to run when the route is published");
   }
 
   try {
