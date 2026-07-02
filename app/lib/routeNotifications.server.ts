@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { getAppCredentials } from "./appCredentials.server";
+import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { sendEmailWithResend, sendSmsWithTwilio, isResendEnabled, isTwilioEnabled } from "./notificationSenders.server";
 import { buildBookedSlotMessage, buildDelayMessage, buildNextDropTrackingMessage, buildOutForDeliveryMessage, type NotificationChannel, type NotificationMessage } from "./notificationTemplates.server";
 
@@ -15,17 +16,12 @@ export type ManualRouteNotificationTemplateId = "outForDelivery" | "nextDropTrac
 
 type RouteForNotifications = NonNullable<Awaited<ReturnType<typeof getRouteForNotifications>>>;
 type StopForNotifications = RouteForNotifications["stops"][number];
+type OrderForNotifications = NonNullable<StopForNotifications["deliveryGroup"]>["orders"][number];
 
 type NotificationMarker = {
   stopIds?: string[];
   autoDelay?: boolean;
 };
-
-function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) {
-  const cleanBaseUrl = (baseUrl || "https://www.bathroompanelsdirect.co.uk").replace(/\/+$/, "");
-
-  return `${cleanBaseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
-}
 
 function manualNotificationLabel(templateId: ManualRouteNotificationTemplateId) {
   if (templateId === "outForDelivery") return "Out for delivery";
@@ -100,7 +96,9 @@ async function buildManualNotificationMessage(templateId: ManualRouteNotificatio
   return buildDelayMessage(input, channel);
 }
 
-function buildMessageInput(route: RouteForNotifications, stop: StopForNotifications, order: StopForNotifications["deliveryGroup"]["orders"][number], credentials: Awaited<ReturnType<typeof getAppCredentials>>, delayMinutes?: number | null) {
+async function buildMessageInput(route: RouteForNotifications, stop: StopForNotifications, order: OrderForNotifications, credentials: Awaited<ReturnType<typeof getAppCredentials>>, delayMinutes?: number | null) {
+  const trackingCode = await ensureCustomerTrackingCode(order.id);
+
   return {
     customerName: order.customerName,
     orderNumber: order.shopifyOrderNumber,
@@ -113,7 +111,7 @@ function buildMessageInput(route: RouteForNotifications, stop: StopForNotificati
     deliveryDate: route.date,
     estimatedArrival: stop.estimatedArrival,
     slotMinutes: route.customerSlotMinutes,
-    trackingUrl: trackingUrlForRoute(credentials.shopPublicUrl, route.id, order.shopifyOrderId),
+    trackingUrl: buildShortCustomerTrackingUrl(getPublicAppBaseUrl(credentials.shopPublicUrl), trackingCode),
     delayMinutes,
   };
 }
@@ -160,7 +158,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
     const orders = stop.deliveryGroup?.orders || [];
 
     for (const order of orders) {
-      const messageInput = buildMessageInput(route, stop, order, credentials);
+      const messageInput = await buildMessageInput(route, stop, order, credentials);
       let sentAnything = false;
 
       if (canSendSms && order.customerPhone) {
@@ -276,7 +274,7 @@ export async function sendManualRouteNotification({
     const orders = stop.deliveryGroup?.orders || [];
 
     for (const order of orders) {
-      const messageInput = buildMessageInput(route, stop, order, credentials, safeDelayMinutes);
+      const messageInput = await buildMessageInput(route, stop, order, credentials, safeDelayMinutes);
       let sentAnything = false;
       let attemptedAnything = false;
 
