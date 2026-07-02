@@ -238,9 +238,9 @@ function valueAtPath(value: unknown, path: string): unknown {
 
 function renderLiquid(template: string, context: Record<string, unknown>, mode: "html" | "text") {
   let output = template;
-  const ifPattern = /\{%\s*if\s+([a-zA-Z0-9_.]+)\s*%\}([\s\S]*?)(?:\{%\s*else\s*%\}([\s\S]*?))?\{%\s*endif\s*%\}/g;
+  const ifPattern = /\{%\s*if\s+([a-zA-Z0-9_.]+)\s*%\}((?:(?!\{%\s*if\b|\{%\s*endif\s*%\})[\s\S])*?)(?:\{%\s*else\s*%\}((?:(?!\{%\s*if\b|\{%\s*endif\s*%\})[\s\S])*?))?\{%\s*endif\s*%\}/g;
 
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 20; index += 1) {
     const nextOutput = output.replace(ifPattern, (_match, path: string, truthyContent: string, falseyContent: string = "") => valueAtPath(context, path) ? truthyContent : falseyContent);
     if (nextOutput === output) break;
     output = nextOutput;
@@ -250,7 +250,7 @@ function renderLiquid(template: string, context: Record<string, unknown>, mode: 
     const value = valueAtPath(context, path);
     const stringValue = value === null || typeof value === "undefined" ? "" : String(value);
     return mode === "html" ? escapeHtml(stringValue) : stringValue;
-  }).replace(/\n{3,}/g, "\n\n").trim();
+  }).replace(/\{%\s*(?:if|else|endif)[^%]*%\}/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function companyContext(settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null) {
