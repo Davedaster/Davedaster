@@ -19,9 +19,10 @@ type DriverRouteNotificationResult = {
   errors: string[];
 };
 
-function getBaseUrl(request: Request) {
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
+const DEFAULT_APP_BASE_URL = "https://davedaster-production.up.railway.app";
+
+function getBaseUrl(_request: Request) {
+  return DEFAULT_APP_BASE_URL;
 }
 
 function formatDate(value: Date | string) {
