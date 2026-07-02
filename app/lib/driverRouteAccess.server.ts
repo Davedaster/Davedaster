@@ -1,8 +1,6 @@
 import crypto from "node:crypto";
 
 import prisma from "../db.server";
-import { getAppCredentials } from "./appCredentials.server";
-import { getPublicAppBaseUrl } from "./customerTracking.server";
 import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
@@ -21,13 +19,7 @@ type DriverRouteNotificationResult = {
   errors: string[];
 };
 
-function getBaseUrl(request: Request, publicBaseUrl?: string | null) {
-  const configuredBaseUrl = getPublicAppBaseUrl(publicBaseUrl);
-
-  if (configuredBaseUrl) {
-    return configuredBaseUrl.replace(/\/+$/, "");
-  }
-
+function getBaseUrl(request: Request) {
   const url = new URL(request.url);
   return `${url.protocol}//${url.host}`;
 }
@@ -77,8 +69,8 @@ function createToken() {
   return crypto.randomBytes(12).toString("hex");
 }
 
-export function buildDriverRouteUrl(request: Request, token: string, publicBaseUrl?: string | null) {
-  return `${getBaseUrl(request, publicBaseUrl)}/d/${encodeURIComponent(token)}`;
+export function buildDriverRouteUrl(request: Request, token: string) {
+  return `${getBaseUrl(request)}/driver/routes/${encodeURIComponent(token)}`;
 }
 
 export async function ensureDriverRouteAccessToken(routeId: string) {
@@ -278,7 +270,7 @@ export async function sendDriverRouteLink(input: {
   request: Request;
 }): Promise<DriverRouteNotificationResult> {
   const token = await ensureDriverRouteAccessToken(input.routeId);
-  const [route, credentials, canSendSms, canSendEmail] = await Promise.all([
+  const [route, canSendSms, canSendEmail] = await Promise.all([
     prisma.route.findUnique({
       where: {
         id: input.routeId,
@@ -287,7 +279,6 @@ export async function sendDriverRouteLink(input: {
         driver: true,
       },
     }),
-    getAppCredentials(),
     isTwilioEnabled(),
     isResendEnabled(),
   ]);
@@ -303,7 +294,7 @@ export async function sendDriverRouteLink(input: {
     throw new Error("Assign a driver before sending the route link.");
   }
 
-  const routeUrl = buildDriverRouteUrl(input.request, token, credentials.shopPublicUrl);
+  const routeUrl = buildDriverRouteUrl(input.request, token);
   const smsBody = `Bathroom Panels Direct route ${route.name} for ${formatDate(route.date)}. Start ${formatTime(route.plannedStartTime)}. Open: ${routeUrl}`;
   const emailSubject = `Bathroom Panels Direct route ${route.name}`;
   const emailBody = [
