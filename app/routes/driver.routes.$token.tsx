@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useSubmit } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useRevalidator, useSubmit } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, PointerEvent } from "react";
 
@@ -20,6 +20,7 @@ import { sendFirstOutForDeliveryNotification } from "../lib/routeNotifications.s
 import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
 
 const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
+const DRIVER_ROUTE_REFRESH_MS = 15000;
 
 function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
   if (!value) return true;
@@ -329,13 +330,13 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
   );
 }
 
-function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; customerName: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
+function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, proofPhotoStorageEnabled, customerSafePlaceNote }: { stopId: string; customerName: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean; customerSafePlaceNote?: string | null }) {
   const [deliveryMode, setDeliveryMode] = useState<"customer" | "safe" | "missed" | null>(null);
   const [proofPhotoCount, setProofPhotoCount] = useState(0);
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
   const [proofPreviewUrl, setProofPreviewUrl] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
-  const [safePlaceNote, setSafePlaceNote] = useState("");
+  const [safePlaceNote, setSafePlaceNote] = useState(customerSafePlaceNote || "");
   const [podImage, setPodImage] = useState("");
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [failedReason, setFailedReason] = useState("No answer");
@@ -346,6 +347,11 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
   const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
   const canCompleteCustomer = !updatesDisabled && deliveryMode === "customer" && hasProofPhoto && podImage.length > 0;
   const canCompleteSafePlace = !updatesDisabled && deliveryMode === "safe" && hasProofPhoto && safePlaceNote.trim().length > 0;
+
+  useEffect(() => {
+    if (!customerSafePlaceNote || safePlaceNote.trim()) return;
+    setSafePlaceNote(customerSafePlaceNote);
+  }, [customerSafePlaceNote, safePlaceNote]);
 
   useEffect(() => {
     if (!routeStarted || !("geolocation" in navigator)) return;
@@ -399,6 +405,17 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
   );
 }
 
+function SafePlaceRequestCard({ note }: { note?: string | null }) {
+  if (!note) return null;
+
+  return (
+    <div style={{ background: "#fff7ed", border: "2px solid #f97316", borderRadius: 18, padding: 12 }}>
+      <p style={{ margin: "0 0 6px", color: "#c2410c", fontWeight: 900 }}>Customer safe place request</p>
+      <p style={{ margin: 0, color: "#323841", fontSize: 17, lineHeight: 1.45, fontWeight: 900 }}>{note}</p>
+    </div>
+  );
+}
+
 function ProofCard({ proofPhotos }: { proofPhotos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!proofPhotos.length) return null;
   return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Delivery card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><img src={photo.url} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
@@ -407,6 +424,7 @@ function ProofCard({ proofPhotos }: { proofPhotos: Array<{ id: string; url: stri
 export default function DriverRoutePage() {
   const { route, canStart, proofPhotoStorageEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const revalidator = useRevalidator();
   const firstEta = route.stops.find((stop) => stop.estimatedArrival)?.estimatedArrival || route.date;
   const plannedStart = route.plannedStartTime || firstEta;
   const routeStarted = route.status === "OUT_FOR_DELIVERY" || route.status === "COMPLETED";
@@ -415,6 +433,18 @@ export default function DriverRoutePage() {
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
   const completedStops = deliveredStops + failedStops;
   const mapPoints = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number").map((stop) => ({ id: stop.id, label: String(stop.orderIndex), title: `Drop ${stop.orderIndex} · ${stop.deliveryGroup?.postcode || "No postcode"}`, latitude: stop.deliveryGroup?.latitude ?? null, longitude: stop.deliveryGroup?.longitude ?? null, selected: nextStop?.id === stop.id, status: stop.status }));
+
+  useEffect(() => {
+    if (!routeStarted) return;
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        revalidator.revalidate();
+      }
+    }, DRIVER_ROUTE_REFRESH_MS);
+
+    return () => window.clearInterval(interval);
+  }, [routeStarted, revalidator]);
 
   return (
     <main style={{ minHeight: "100vh", background: "#eef4fb", fontFamily: "Arial, sans-serif", color: "#323841" }}>
@@ -451,6 +481,7 @@ export default function DriverRoutePage() {
           const isNextStop = nextStop?.id === stop.id;
           const proofPhotos = group?.proofPhotos || [];
           const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
+          const customerSafePlaceNote = group?.safePlaceNote || "";
 
           return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)" }}>
             <div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
@@ -459,12 +490,13 @@ export default function DriverRoutePage() {
             </div>
             <div style={{ padding: 16, display: "grid", gap: 12 }}>
               <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
+              <SafePlaceRequestCard note={customerSafePlaceNote} />
               <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items to deliver</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>No item details stored for this order.</p>}</div>
               <ProofCard proofPhotos={proofPhotos} />
               {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>✓ Delivery complete</p> : null}
               {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>Delivery marked missed</p> : null}
-              {!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} /> : null}
+              {!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} customerSafePlaceNote={customerSafePlaceNote} /> : null}
             </div>
           </article>;
         })}</section>
