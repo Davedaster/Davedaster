@@ -1,4 +1,5 @@
 import { getAppCredentials, hasResendCredentials, hasTwilioCredentials } from "./appCredentials.server";
+import { getEmailNotificationsEnabled } from "./notificationSettings.server";
 import type { NotificationMessage } from "./notificationTemplates.server";
 
 type SendSmsInput = {
@@ -139,10 +140,19 @@ export async function isTwilioEnabled() {
   return hasTwilioCredentials(credentials);
 }
 
-export async function isResendEnabled() {
+export async function isResendConfigured() {
   const credentials = await getAppCredentials();
 
   return hasResendCredentials(credentials);
+}
+
+export async function isResendEnabled() {
+  const [credentials, emailNotificationsEnabled] = await Promise.all([
+    getAppCredentials(),
+    getEmailNotificationsEnabled(),
+  ]);
+
+  return emailNotificationsEnabled && hasResendCredentials(credentials);
 }
 
 export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult> {
@@ -184,6 +194,12 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
 }
 
 export async function sendEmailWithResend(input: SendEmailInput): Promise<SendResult> {
+  const emailNotificationsEnabled = await getEmailNotificationsEnabled();
+
+  if (!emailNotificationsEnabled) {
+    throw new Error("Email notifications are turned off in Notifications.");
+  }
+
   const credentials = await getAppCredentials();
   const apiKey = requireCredential(credentials.resendApiKey, "Resend API Key");
   const fromEmail = requireCredential(credentials.resendFromEmail, "Resend From Email");
