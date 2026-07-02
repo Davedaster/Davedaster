@@ -386,20 +386,60 @@ export async function updateRoutePlanningSettings(routeId: string, input: RouteP
 }
 
 export async function assignDriverToRoute(routeId: string, driverId: string | null) {
-  const driver = driverId
-    ? await prisma.driver.findUnique({ where: { id: driverId } })
-    : null;
+  if (!driverId) {
+    return prisma.route.update({
+      where: {
+        id: routeId,
+      },
+      data: {
+        driverId: null,
+        history: {
+          create: {
+            action: "Driver removed",
+            details: "Driver assignment removed",
+          },
+        },
+      },
+    });
+  }
+
+  const driver = await prisma.driver.findUnique({
+    where: {
+      id: driverId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!driver) {
+    return prisma.route.update({
+      where: {
+        id: routeId,
+      },
+      data: {
+        driverId: null,
+        history: {
+          create: {
+            action: "Driver not assigned",
+            details: "Selected driver could not be found. Choose the driver again from the route details page.",
+          },
+        },
+      },
+    });
+  }
 
   return prisma.route.update({
     where: {
       id: routeId,
     },
     data: {
-      driverId,
+      driverId: driver.id,
       history: {
         create: {
-          action: driver ? "Driver assigned" : "Driver removed",
-          details: driver ? `Assigned to ${driver.name}` : "Driver assignment removed",
+          action: "Driver assigned",
+          details: `Assigned to ${driver.name}`,
         },
       },
     },
