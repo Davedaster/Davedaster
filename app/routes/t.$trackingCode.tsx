@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { useEffect, useState } from "react";
 
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
 import { formatEtaSlot } from "../lib/etaSlots";
@@ -30,6 +31,12 @@ function formatSlot(estimatedArrival: string | Date | null | undefined, slotMinu
 function cleanStatus(value: string) {
   return value.replaceAll("_", " ").toLowerCase();
 }
+
+type ProofPhoto = {
+  id: string;
+  url: string;
+  label?: string | null;
+};
 
 export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   const trackingCode = params.trackingCode || "";
@@ -76,7 +83,87 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   });
 };
 
-function ProofImages({ photos, title }: { photos: Array<{ id: string; url: string; label?: string | null }>; title: string }) {
+function ProofImageViewer({ photo, onClose }: { photo: ProofPhoto; onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = "";
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={photo.label || "Proof image"}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "rgba(15,23,42,0.92)",
+        padding: "max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left))",
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div onClick={(event) => event.stopPropagation()} style={{ position: "relative", width: "min(1100px, 100%)", maxHeight: "100%", display: "grid", gap: 10 }}>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close image"
+          style={{
+            position: "absolute",
+            right: -8,
+            top: -8,
+            width: 42,
+            height: 42,
+            borderRadius: "50%",
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: "#ffffff",
+            color: "#111827",
+            fontSize: 24,
+            lineHeight: "38px",
+            fontWeight: 900,
+            cursor: "pointer",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.25)",
+          }}
+        >
+          ×
+        </button>
+        <img
+          src={photo.url}
+          alt={photo.label || "Proof image"}
+          style={{
+            display: "block",
+            width: "100%",
+            maxWidth: "100%",
+            maxHeight: "calc(100dvh - 86px)",
+            objectFit: "contain",
+            borderRadius: 18,
+            background: "#ffffff",
+            boxShadow: "0 18px 44px rgba(0,0,0,0.34)",
+            touchAction: "pinch-zoom",
+          }}
+        />
+        <p style={{ margin: 0, color: "#ffffff", textAlign: "center", fontSize: 13, fontWeight: 800 }}>
+          {photo.label || "Proof image"}. On mobile, hold the image to save it.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ProofImages({ photos, title, onOpen }: { photos: ProofPhoto[]; title: string; onOpen: (photo: ProofPhoto) => void }) {
   if (!photos.length) return null;
 
   return (
@@ -84,10 +171,10 @@ function ProofImages({ photos, title }: { photos: Array<{ id: string; url: strin
       <p style={{ margin: "0 0 10px", fontWeight: 900 }}>{title}</p>
       <div style={{ display: "grid", gap: 12 }}>
         {photos.map((photo) => (
-          <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+          <button key={photo.id} type="button" onClick={() => onOpen(photo)} style={{ display: "block", width: "100%", padding: 0, border: 0, background: "transparent", textAlign: "left", color: "inherit", cursor: "zoom-in" }}>
             <img src={photo.url} alt={photo.label || title} style={{ display: "block", width: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 16, border: "1px solid #d0d5dd", background: "#ffffff" }} />
-            <p style={{ margin: "6px 0 0", color: "#667085", fontWeight: 700, fontSize: 13 }}>Tap to open larger. Hold the image to save it.</p>
-          </a>
+            <p style={{ margin: "6px 0 0", color: "#667085", fontWeight: 700, fontSize: 13 }}>Tap to open larger. Hold the larger image to save it.</p>
+          </button>
         ))}
       </div>
     </div>
@@ -96,6 +183,7 @@ function ProofImages({ photos, title }: { photos: Array<{ id: string; url: strin
 
 export default function CustomerTrackingPage() {
   const data = useLoaderData<typeof loader>();
+  const [selectedProofPhoto, setSelectedProofPhoto] = useState<ProofPhoto | null>(null);
   const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
   const complete = data.stopStatus === "DELIVERED";
   const missed = data.stopStatus === "FAILED";
@@ -135,8 +223,8 @@ export default function CustomerTrackingPage() {
           )
         ) : null}
 
-        <ProofImages photos={data.deliveryPhotos} title="Delivery photo" />
-        <ProofImages photos={data.signaturePhotos} title="Customer signature" />
+        <ProofImages photos={data.deliveryPhotos} title="Delivery photo" onOpen={setSelectedProofPhoto} />
+        <ProofImages photos={data.signaturePhotos} title="Customer signature" onOpen={setSelectedProofPhoto} />
 
         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Driver</p>
@@ -177,6 +265,7 @@ export default function CustomerTrackingPage() {
           </form>
         </div>
       </section>
+      {selectedProofPhoto ? <ProofImageViewer photo={selectedProofPhoto} onClose={() => setSelectedProofPhoto(null)} /> : null}
     </main>
   );
 }
