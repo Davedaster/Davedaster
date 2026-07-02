@@ -224,7 +224,7 @@ async function getStopForDriverToken(token: string, stopId: string) {
 export async function completeDriverStopFromToken(input: {
   token: string;
   stopId: string;
-  admin: ShopifyAdmin;
+  admin?: ShopifyAdmin | null;
   proofPhotoUrls: string[];
   deliveryNote?: string | null;
   safePlaceNote?: string | null;
