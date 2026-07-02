@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -172,6 +172,7 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
+  const navigate = useNavigate();
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const completedStops = orderedStops.filter(isStopDone);
   const deliveredStops = orderedStops.filter((stop) => stop.status === "DELIVERED");
@@ -193,7 +194,7 @@ function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
             <Text as="p" variant="bodyMd" tone="subdued">{route.name} · {formatDate(route.date)}</Text>
             <Text as="p" variant="bodySm" tone="subdued">Start {route.plannedStartTime || "05:00"} · {finishLocationLabel(route)}: {route.finishAddress || route.startAddress || "Base"}</Text>
           </BlockStack>
-          <Button url={`/app/routes/${route.id}`}>Open route</Button>
+          <Button onClick={() => navigate(`/app/routes/${route.id}`)}>Open route</Button>
         </InlineStack>
 
         <BlockStack gap="150">
@@ -242,6 +243,7 @@ function LiveRouteProgressCard({ route }: { route: RouteListItem }) {
 }
 
 export default function Routes() {
+  const navigate = useNavigate();
   const { routes } = useLoaderData<typeof loader>();
   const liveRoutes = routes.filter(isRouteInProgress);
 
@@ -289,7 +291,7 @@ export default function Routes() {
                   <ResourceItem
                     id={route.id}
                     accessibilityLabel={`View ${route.name}`}
-                    onClick={() => {}}
+                    onClick={() => navigate(`/app/routes/${route.id}`)}
                   >
                     <InlineStack align="space-between" blockAlign="center" gap="300">
                       <BlockStack gap="100">
@@ -317,7 +319,7 @@ export default function Routes() {
                       </BlockStack>
                       <InlineStack gap="200" blockAlign="center">
                         <Badge tone={statusTone(route.status)}>{route.status}</Badge>
-                        <Button url={`/app/routes/${route.id}`}>Open route</Button>
+                        <Button onClick={(event) => { event.stopPropagation(); navigate(`/app/routes/${route.id}`); }}>Open route</Button>
                       </InlineStack>
                     </InlineStack>
                   </ResourceItem>
