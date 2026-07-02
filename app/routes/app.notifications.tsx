@@ -5,10 +5,12 @@ import { Page, Layout, LegacyCard, Text, BlockStack, Badge, Divider, InlineStack
 import { useEffect, useState } from "react";
 
 import {
+  isResendConfigured,
   isResendEnabled,
   isTwilioEnabled,
   sendSmsWithTwilio,
 } from "../lib/notificationSenders.server";
+import { getEmailNotificationsEnabled, setEmailNotificationsEnabled } from "../lib/notificationSettings.server";
 import {
   availableNotificationVariables,
   buildNotificationTemplatePreview,
@@ -39,9 +41,11 @@ const previewInput = {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-  const [twilioEnabled, resendEnabled, templates] = await Promise.all([
+  const [twilioEnabled, resendConfigured, resendEnabled, emailNotificationsEnabled, templates] = await Promise.all([
     isTwilioEnabled(),
+    isResendConfigured(),
     isResendEnabled(),
+    getEmailNotificationsEnabled(),
     listNotificationTemplates(),
   ]);
   const previews = templates.map((template) => {
@@ -56,7 +60,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     twilioEnabled,
+    resendConfigured,
     resendEnabled,
+    emailNotificationsEnabled,
     templates,
     previews,
     variables: availableNotificationVariables(),
@@ -68,6 +74,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "");
   const templateId = String(formData.get("templateId") || "");
+
+  if (intent === "toggleEmailNotifications") {
+    const enabled = String(formData.get("enabled") || "") === "true";
+    await setEmailNotificationsEnabled(enabled);
+
+    return json({ ok: true, savedSection: enabled ? "Email notifications turned on" : "Email notifications turned off" });
+  }
 
   if (intent === "sendTestSms") {
     const testPhone = String(formData.get("testPhone") || "").trim();
@@ -113,6 +126,37 @@ function MessagePreview({ body }: { body: string }) {
     <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit", fontSize: 13 }}>
       {body}
     </pre>
+  );
+}
+
+function EmailMasterToggleCard({ emailNotificationsEnabled, resendConfigured, resendEnabled }: { emailNotificationsEnabled: boolean; resendConfigured: boolean; resendEnabled: boolean }) {
+  return (
+    <LegacyCard title="Email master switch" sectioned>
+      <BlockStack gap="300">
+        <InlineStack align="space-between" blockAlign="start" gap="300">
+          <BlockStack gap="100">
+            <InlineStack gap="200" blockAlign="center">
+              <Badge tone={emailNotificationsEnabled ? "success" : "critical"}>{emailNotificationsEnabled ? "Emails on" : "Emails off"}</Badge>
+              <Badge tone={resendConfigured ? "success" : "warning"}>{`Resend ${resendConfigured ? "set up" : "not set up"}`}</Badge>
+              <Badge tone={resendEnabled ? "success" : "attention"}>{resendEnabled ? "Ready to send" : "Email sending paused"}</Badge>
+            </InlineStack>
+            <Text as="p" variant="bodyMd">
+              Turn this off to stop all customer emails from the delivery app. SMS will still send as normal.
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              Use this while Resend email onboarding is being sorted. Publish routes can still send SMS without email errors.
+            </Text>
+          </BlockStack>
+          <Form method="post">
+            <input type="hidden" name="intent" value="toggleEmailNotifications" />
+            <input type="hidden" name="enabled" value={emailNotificationsEnabled ? "false" : "true"} />
+            <Button submit variant={emailNotificationsEnabled ? undefined : "primary"} tone={emailNotificationsEnabled ? "critical" : undefined}>
+              {emailNotificationsEnabled ? "Turn emails off" : "Turn emails on"}
+            </Button>
+          </Form>
+        </InlineStack>
+      </BlockStack>
+    </LegacyCard>
   );
 }
 
@@ -280,7 +324,7 @@ function TemplateEditor({
 }
 
 export default function Notifications() {
-  const { twilioEnabled, resendEnabled, templates, previews, variables } = useLoaderData<typeof loader>();
+  const { twilioEnabled, resendConfigured, resendEnabled, emailNotificationsEnabled, templates, previews, variables } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const previewsById = new Map(previews.map((preview) => [preview.id, preview]));
   const [openTemplateId, setOpenTemplateId] = useState<string | null>(templates[0]?.id || null);
@@ -297,12 +341,15 @@ export default function Notifications() {
               </Text>
               <InlineStack gap="200">
                 <Badge tone={twilioEnabled ? "success" : "warning"}>{`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}</Badge>
-                <Badge tone={resendEnabled ? "success" : "warning"}>{`Resend ${resendEnabled ? "enabled" : "not set up"}`}</Badge>
+                <Badge tone={resendConfigured ? "success" : "warning"}>{`Resend ${resendConfigured ? "set up" : "not set up"}`}</Badge>
+                <Badge tone={emailNotificationsEnabled ? "success" : "critical"}>{`Emails ${emailNotificationsEnabled ? "on" : "off"}`}</Badge>
               </InlineStack>
               {actionData?.ok ? <Badge tone="success">{actionData.savedSection}</Badge> : null}
               {actionData && "error" in actionData ? <Text as="p" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
+
+          <EmailMasterToggleCard emailNotificationsEnabled={emailNotificationsEnabled} resendConfigured={resendConfigured} resendEnabled={resendEnabled} />
 
           <TestSmsCard twilioEnabled={twilioEnabled} sent={Boolean(actionData?.ok && actionData.savedSection?.startsWith("Test SMS sent"))} />
 
