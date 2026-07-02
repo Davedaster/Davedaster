@@ -4,6 +4,7 @@ import { useLoaderData } from "@remix-run/react";
 
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
 import { formatEtaSlot } from "../lib/etaSlots";
+import { createSignedProofPhotoUrls } from "../lib/proofPhotoStorage.server";
 
 function formatDate(value: string | Date) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -46,6 +47,10 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     throw new Response("Tracking details not found", { status: 404 });
   }
 
+  const proofPhotos = await createSignedProofPhotoUrls(tracking.deliveryGroup?.proofPhotos || []);
+  const deliveryPhotos = proofPhotos.filter((photo) => !photo.label?.toLowerCase().includes("signature"));
+  const signaturePhotos = proofPhotos.filter((photo) => photo.label?.toLowerCase().includes("signature"));
+
   return json({
     trackingCode,
     saved: url.searchParams.get("instructions") === "saved",
@@ -65,8 +70,29 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     driverName: route.driver?.name || "your driver",
     vehicleName: route.driver?.vehicleName || "",
     vehicleRegistration: route.driver?.vehicleRegistration || "",
+    proofPhotos,
+    deliveryPhotos,
+    signaturePhotos,
   });
 };
+
+function ProofImages({ photos, title }: { photos: Array<{ id: string; url: string; label?: string | null }>; title: string }) {
+  if (!photos.length) return null;
+
+  return (
+    <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
+      <p style={{ margin: "0 0 10px", fontWeight: 900 }}>{title}</p>
+      <div style={{ display: "grid", gap: 12 }}>
+        {photos.map((photo) => (
+          <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+            <img src={photo.url} alt={photo.label || title} style={{ display: "block", width: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 16, border: "1px solid #d0d5dd", background: "#ffffff" }} />
+            <p style={{ margin: "6px 0 0", color: "#667085", fontWeight: 700, fontSize: 13 }}>Tap to open larger. Hold the image to save it.</p>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function CustomerTrackingPage() {
   const data = useLoaderData<typeof loader>();
@@ -100,6 +126,17 @@ export default function CustomerTrackingPage() {
             <p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>Stop {data.stopNumber}, {cleanStatus(data.stopStatus)}</p>
           </div>
         </div>
+
+        {complete || missed ? (
+          data.proofPhotos.length ? (
+            <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div>
+          ) : (
+            <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>
+          )
+        ) : null}
+
+        <ProofImages photos={data.deliveryPhotos} title="Delivery photo" />
+        <ProofImages photos={data.signaturePhotos} title="Customer signature" />
 
         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
           <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Driver</p>
