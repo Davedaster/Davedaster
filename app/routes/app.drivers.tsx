@@ -79,6 +79,7 @@ const emptyDriverForm: DriverFormValues = {
 };
 
 const DRIVER_PHONE_HELP = "For UK mobiles, 07123 456789 is fine. The app converts it to +44 before sending SMS.";
+const DRIVER_OPTIONAL_HELP = "Only the driver name is required. Photo, fuel card, start address, end address and notes can be left blank.";
 
 const DRIVER_IMAGE_FILES_QUERY = `#graphql
   query DriverImageFiles {
@@ -107,6 +108,14 @@ function fileNameFromUrl(url: string) {
   } catch {
     return "Shopify image";
   }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return `${fallback}: ${error.message}`;
+  }
+
+  return fallback;
 }
 
 function driverInputFromForm(formData: FormData): DriverInput {
@@ -176,12 +185,18 @@ async function listShopifyImageFiles(admin: Awaited<ReturnType<typeof authentica
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const [drivers, shopifyImageFiles] = await Promise.all([
-    listDrivers(),
-    listShopifyImageFiles(admin),
-  ]);
+  const shopifyImageFiles = await listShopifyImageFiles(admin);
 
-  return json({ drivers, shopifyImageFiles });
+  try {
+    const drivers = await listDrivers();
+
+    return json({ drivers, shopifyImageFiles, loadError: null });
+  } catch (error) {
+    const loadError = getErrorMessage(error, "Driver profiles could not be loaded");
+    console.error(loadError, error);
+
+    return json({ drivers: [], shopifyImageFiles, loadError });
+  }
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -189,41 +204,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "createDriver");
 
-  if (intent === "deleteDriver") {
-    const driverId = String(formData.get("driverId") || "").trim();
+  try {
+    if (intent === "deleteDriver") {
+      const driverId = String(formData.get("driverId") || "").trim();
 
-    if (!driverId) {
-      return json({ ok: false, error: "Driver could not be found." }, { status: 400 });
+      if (!driverId) {
+        return json({ ok: false, error: "Driver could not be found." }, { status: 400 });
+      }
+
+      await deleteDriver(driverId);
+      return redirect("/app/drivers");
     }
 
-    await deleteDriver(driverId);
-    return redirect("/app/drivers");
-  }
+    const driverInput = driverInputFromForm(formData);
 
-  const driverInput = driverInputFromForm(formData);
-
-  if (!driverInput.name) {
-    return json({ ok: false, error: "Driver name is required." }, { status: 400 });
-  }
-
-  if (intent === "updateDriver") {
-    const driverId = String(formData.get("driverId") || "").trim();
-
-    if (!driverId) {
-      return json({ ok: false, error: "Driver could not be found." }, { status: 400 });
+    if (!driverInput.name) {
+      return json({ ok: false, error: "Driver name is required." }, { status: 400 });
     }
 
-    await updateDriver(driverId, driverInput);
+    if (intent === "updateDriver") {
+      const driverId = String(formData.get("driverId") || "").trim();
+
+      if (!driverId) {
+        return json({ ok: false, error: "Driver could not be found." }, { status: 400 });
+      }
+
+      await updateDriver(driverId, driverInput);
+      return redirect("/app/drivers");
+    }
+
+    await createDriver(driverInput);
+
     return redirect("/app/drivers");
+  } catch (error) {
+    const actionError = getErrorMessage(error, "Driver save failed");
+    console.error(actionError, error);
+
+    return json({ ok: false, error: actionError }, { status: 400 });
   }
-
-  await createDriver(driverInput);
-
-  return redirect("/app/drivers");
 };
 
 export default function Drivers() {
-  const { drivers, shopifyImageFiles } = useLoaderData<typeof loader>();
+  const { drivers, shopifyImageFiles, loadError } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [createForm, setCreateForm] = useState<DriverFormValues>(emptyDriverForm);
   const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
@@ -275,9 +297,15 @@ export default function Drivers() {
           <LegacyCard title="Driver profiles">
             <Box padding="400">
               <BlockStack gap="300">
+                {loadError ? (
+                  <Text as="p" variant="bodySm" tone="critical">{loadError}</Text>
+                ) : null}
+
                 {actionData && "error" in actionData ? (
                   <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text>
                 ) : null}
+
+                <Text as="p" variant="bodySm" tone="subdued">{DRIVER_OPTIONAL_HELP}</Text>
 
                 <ResourceList
                   resourceName={resourceName}
