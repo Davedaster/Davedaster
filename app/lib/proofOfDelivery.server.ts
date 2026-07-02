@@ -134,7 +134,7 @@ export async function saveProofOfDelivery(input: {
   }
 
   if (stop.status === "DELIVERED") {
-    throw new Error("This stop has already been marked delivered.");
+    return;
   }
 
   if (stop.status === "FAILED") {
@@ -143,6 +143,10 @@ export async function saveProofOfDelivery(input: {
 
   if (!proofPhotoUrls.length || !primaryProofPhotoUrl) {
     throw new Error("Proof photo is required before marking delivered.");
+  }
+
+  if (leftInSafePlace && proofPhotoUrls.length < 2) {
+    throw new Error("Safe place deliveries need 2 proof photos before marking delivered.");
   }
 
   if (proofPhotoUrls.length > 3) {
@@ -171,34 +175,8 @@ export async function saveProofOfDelivery(input: {
       kind: "signature",
     })
     : null;
-  const signedPrimaryProofPhotoUrl = await createSignedProofPhotoUrl(primaryProofPhotoUrl);
-  const signedSignaturePhotoUrl = await createSignedProofPhotoUrl(signaturePhotoUrl);
-  const shopifyResults: string[] = [];
-
-  if (input.admin) {
-    for (const order of stop.deliveryGroup.orders) {
-      try {
-        const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
-        shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
-      } catch (error) {
-        shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
-      }
-    }
-  } else {
-    shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
-  }
-
-  const notificationResult = await sendDeliveryCompleteNotifications({
-    routeId: stop.routeId,
-    routeName: stop.route.name,
-    proofPhotoUrl: signedPrimaryProofPhotoUrl,
-    signaturePhotoUrl: signedSignaturePhotoUrl,
-    orders: stop.deliveryGroup.orders,
-  });
-  const notificationErrorDetails = notificationResult.errors.length
-    ? `. Notification errors: ${notificationResult.errors.join(" | ")}`
-    : "";
   const actualArrival = new Date();
+  const shopifyResults: string[] = [];
 
   await prisma.$transaction(async (tx) => {
     await tx.deliveryGroup.update({
@@ -246,24 +224,81 @@ export async function saveProofOfDelivery(input: {
         history: {
           create: {
             action: "Stop delivered",
-            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}${leftInSafePlace ? " and safe place confirmation" : ` and customer signature ${podName}`}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+            details: `Stop ${stop.orderIndex} marked delivered with ${proofPhotoUrls.length} proof photo${proofPhotoUrls.length === 1 ? "" : "s"}${leftInSafePlace ? " and safe place confirmation" : ` and customer signature ${podName}`}. Customer and Shopify follow up will run after the delivery has been saved.`,
           },
         },
       },
     });
   });
 
-  await recordEtaLearningObservation({
-    estimatedArrival: stop.estimatedArrival,
-    actualArrival,
-    deliveryGroup: {
-      postcode: stop.deliveryGroup.postcode,
-    },
-    route: {
-      driverId: stop.route.driverId,
-    },
-  });
+  if (input.admin) {
+    for (const order of stop.deliveryGroup.orders) {
+      try {
+        const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
+        shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
+      } catch (error) {
+        shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
+      }
+    }
+  } else {
+    shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
+  }
 
-  await recalculateTrafficEtaAfterStop(input.stopId);
-  await sendNextPendingStopNotification(stop.routeId, input.stopId);
+  try {
+    const signedPrimaryProofPhotoUrl = await createSignedProofPhotoUrl(primaryProofPhotoUrl);
+    const signedSignaturePhotoUrl = await createSignedProofPhotoUrl(signaturePhotoUrl);
+    const notificationResult = await sendDeliveryCompleteNotifications({
+      routeId: stop.routeId,
+      routeName: stop.route.name,
+      proofPhotoUrl: signedPrimaryProofPhotoUrl,
+      signaturePhotoUrl: signedSignaturePhotoUrl,
+      orders: stop.deliveryGroup.orders,
+    });
+    const notificationErrorDetails = notificationResult.errors.length
+      ? `. Notification errors: ${notificationResult.errors.join(" | ")}`
+      : "";
+
+    await prisma.routeHistory.create({
+      data: {
+        routeId: stop.routeId,
+        action: "Delivery follow up completed",
+        details: `Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+      },
+    });
+  } catch (error) {
+    await prisma.routeHistory.create({
+      data: {
+        routeId: stop.routeId,
+        action: "Delivery follow up skipped",
+        details: error instanceof Error ? error.message : "Delivery follow up failed after stop was saved.",
+      },
+    });
+  }
+
+  try {
+    await recordEtaLearningObservation({
+      estimatedArrival: stop.estimatedArrival,
+      actualArrival,
+      deliveryGroup: {
+        postcode: stop.deliveryGroup.postcode,
+      },
+      route: {
+        driverId: stop.route.driverId,
+      },
+    });
+  } catch {
+    // ETA learning must not undo a completed delivery.
+  }
+
+  try {
+    await recalculateTrafficEtaAfterStop(input.stopId);
+  } catch {
+    // Traffic ETA refresh must not undo a completed delivery.
+  }
+
+  try {
+    await sendNextPendingStopNotification(stop.routeId, input.stopId);
+  } catch {
+    // Customer update must not undo a completed delivery.
+  }
 }
