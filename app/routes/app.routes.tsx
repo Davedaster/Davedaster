@@ -418,6 +418,10 @@ function FulfilRouteForm({ route }: { route: RouteListItem }) {
   );
 }
 
+function PackingListButton({ route }: { route: RouteListItem }) {
+  return <Button url={`/app/routes/${route.id}/packing-list`} target="_blank">Print packing list</Button>;
+}
+
 function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const completedStops = orderedStops.filter(isStopDone);
@@ -443,6 +447,7 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
           <BlockStack gap="200">
             <DriverSelect route={route} drivers={drivers} />
             <InlineStack gap="200" align="end" wrap>
+              <PackingListButton route={route} />
               {isFulfilmentRetryAllowed(route.status) ? <FulfilRouteForm route={route} /> : null}
               {isTestDeleteAllowed(route.status) ? <DeleteRouteForm route={route} intent="deleteTest" label="Delete test route" confirmLabel="this published test route" /> : null}
             </InlineStack>
@@ -511,6 +516,7 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
 
             {isDraft ? (
               <InlineStack gap="200" wrap>
+                <PackingListButton route={route} />
                 <Form method="post">
                   <input type="hidden" name="intent" value="publish" />
                   <input type="hidden" name="routeId" value={route.id} />
@@ -520,12 +526,14 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
               </InlineStack>
             ) : canDeleteTestRoute ? (
               <InlineStack gap="200" wrap blockAlign="center">
+                <PackingListButton route={route} />
                 {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
                 <DeleteRouteForm route={route} intent="deleteTest" label="Delete published route" confirmLabel="this published test route" />
                 <Text as="span" variant="bodySm" tone="subdued">Use these for testing and fixing skipped fulfilments.</Text>
               </InlineStack>
             ) : (
               <InlineStack gap="200" wrap blockAlign="center">
+                <PackingListButton route={route} />
                 {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
                 <Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text>
               </InlineStack>
