@@ -1,8 +1,10 @@
+import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { getAppCredentials } from "./appCredentials.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { buildDeliveryCompleteMessage } from "./notificationTemplates.server";
 
 type DeliveryCompleteOrder = {
+  id?: string;
   shopifyOrderId: string;
   shopifyOrderNumber: string;
   customerName?: string | null;
@@ -26,10 +28,13 @@ type DeliveryCompleteResult = {
   errors: string[];
 };
 
-function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) {
-  const cleanBaseUrl = (baseUrl || "https://www.bathroompanelsdirect.co.uk").replace(/\/+$/, "");
+async function trackingUrlForOrder(baseUrl: string, order: DeliveryCompleteOrder) {
+  if (!order.id) {
+    return getPublicAppBaseUrl(baseUrl);
+  }
 
-  return `${cleanBaseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
+  const trackingCode = await ensureCustomerTrackingCode(order.id);
+  return buildShortCustomerTrackingUrl(baseUrl, trackingCode);
 }
 
 export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteInput): Promise<DeliveryCompleteResult> {
@@ -56,13 +61,12 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
   const errors: string[] = [];
 
   for (const order of input.orders) {
-    const messageInput = {
+    const trackingUrl = await trackingUrlForOrder(getPublicAppBaseUrl(credentials.shopPublicUrl), order);
+    const baseMessageInput = {
       customerName: order.customerName,
       orderNumber: order.shopifyOrderNumber,
       routeName: input.routeName,
-      proofPhotoUrl: input.proofPhotoUrl,
-      signaturePhotoUrl: input.signaturePhotoUrl,
-      trackingUrl: trackingUrlForRoute(credentials.shopPublicUrl, input.routeId, order.shopifyOrderId),
+      trackingUrl,
     };
 
     let sentAnything = false;
@@ -73,7 +77,11 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       try {
         await sendSmsWithTwilio({
           to: order.customerPhone,
-          message: await buildDeliveryCompleteMessage(messageInput, "sms"),
+          message: await buildDeliveryCompleteMessage({
+            ...baseMessageInput,
+            proofPhotoUrl: null,
+            signaturePhotoUrl: null,
+          }, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
@@ -88,7 +96,11 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       try {
         await sendEmailWithResend({
           to: order.customerEmail,
-          message: await buildDeliveryCompleteMessage(messageInput, "email"),
+          message: await buildDeliveryCompleteMessage({
+            ...baseMessageInput,
+            proofPhotoUrl: input.proofPhotoUrl,
+            signaturePhotoUrl: input.signaturePhotoUrl,
+          }, "email"),
         });
         emailsSent += 1;
         sentAnything = true;
