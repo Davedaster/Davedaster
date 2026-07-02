@@ -191,6 +191,9 @@ export async function recalculateFirstPendingEtaFromPoint(routeId: string, drive
     const firstStopPoint = pointForStop(firstPendingStop);
     const leg = await calculateLeg(driverPoint, firstStopPoint, route.timePerDropMinutes);
     const estimatedArrival = addMinutes(new Date(), leg.travelMinutes);
+    const firstNotificationHoldNote = leg.travelMinutes > 60
+      ? " First out for delivery notification held because first stop ETA is over 60 minutes."
+      : "";
 
     await prisma.$transaction([
       prisma.stop.update({
@@ -203,7 +206,7 @@ export async function recalculateFirstPendingEtaFromPoint(routeId: string, drive
           history: {
             create: {
               action: "First stop ETA updated",
-              details: `Driver start location used for drop ${firstPendingStop.orderIndex}. ${leg.usedTraffic ? "TomTom live traffic" : "Fallback route timing"} gave ${leg.travelMinutes} min travel time.`,
+              details: `Driver start location used for drop ${firstPendingStop.orderIndex}. ${leg.usedTraffic ? "TomTom live traffic" : "Fallback route timing"} gave ${leg.travelMinutes} min travel time.${firstNotificationHoldNote}`,
             },
           },
         },
