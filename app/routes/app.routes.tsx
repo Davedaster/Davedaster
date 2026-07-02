@@ -69,6 +69,13 @@ function publishMessage(input: {
   ].filter(Boolean).join(" · ");
 }
 
+function fulfilmentMessage(result: Awaited<ReturnType<typeof fulfilRouteOrders>>) {
+  return [
+    `Shopify fulfilment checked: ${result.fulfilled} fulfilled, ${result.skipped} skipped`,
+    result.errors.length ? `Details: ${result.errors.join(" | ")}` : "No errors returned by Shopify",
+  ].join(" · ");
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
@@ -104,6 +111,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ ok: true, message: "Route deleted for testing." });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be deleted." }, { status: 400 });
+    }
+  }
+
+  if (intent === "fulfilRoute") {
+    try {
+      const result = await fulfilRouteOrders(admin, routeId);
+      return json({ ok: true, message: fulfilmentMessage(result), errors: result.errors });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Shopify fulfilment could not be checked." }, { status: 400 });
     }
   }
 
@@ -229,6 +245,10 @@ function isTestDeleteAllowed(status: string) {
   return ["PUBLISHED", "NOTIFICATIONS_SENT", "COMPLETED", "CANCELLED"].includes(status);
 }
 
+function isFulfilmentRetryAllowed(status: string) {
+  return ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY", "COMPLETED"].includes(status);
+}
+
 function stopCustomerLabel(stop: StopListItem) {
   const names = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ");
   const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join(", ");
@@ -332,6 +352,16 @@ function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteL
   );
 }
 
+function FulfilRouteForm({ route }: { route: RouteListItem }) {
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value="fulfilRoute" />
+      <input type="hidden" name="routeId" value={route.id} />
+      <Button submit>Fulfil Shopify orders now</Button>
+    </Form>
+  );
+}
+
 function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const completedStops = orderedStops.filter(isStopDone);
@@ -356,11 +386,10 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
           </BlockStack>
           <BlockStack gap="200">
             <DriverSelect route={route} drivers={drivers} />
-            {isTestDeleteAllowed(route.status) ? (
-              <InlineStack align="end">
-                <DeleteRouteForm route={route} intent="deleteTest" label="Delete test route" confirmLabel="this published test route" />
-              </InlineStack>
-            ) : null}
+            <InlineStack gap="200" align="end" wrap>
+              {isFulfilmentRetryAllowed(route.status) ? <FulfilRouteForm route={route} /> : null}
+              {isTestDeleteAllowed(route.status) ? <DeleteRouteForm route={route} intent="deleteTest" label="Delete test route" confirmLabel="this published test route" /> : null}
+            </InlineStack>
           </BlockStack>
         </InlineStack>
 
@@ -396,6 +425,7 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
 function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const isDraft = route.status === "DRAFT";
   const canDeleteTestRoute = isTestDeleteAllowed(route.status);
+  const canRetryFulfilment = isFulfilmentRetryAllowed(route.status);
 
   return (
     <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`} onClick={() => {}}>
@@ -433,12 +463,16 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
                 <DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" />
               </InlineStack>
             ) : canDeleteTestRoute ? (
-              <InlineStack gap="200" wrap>
+              <InlineStack gap="200" wrap blockAlign="center">
+                {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
                 <DeleteRouteForm route={route} intent="deleteTest" label="Delete published route" confirmLabel="this published test route" />
-                <Text as="span" variant="bodySm" tone="subdued">Use this to reset test routes.</Text>
+                <Text as="span" variant="bodySm" tone="subdued">Use these for testing and fixing skipped fulfilments.</Text>
               </InlineStack>
             ) : (
-              <Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text>
+              <InlineStack gap="200" wrap blockAlign="center">
+                {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
+                <Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text>
+              </InlineStack>
             )}
           </BlockStack>
         </Box>
