@@ -89,7 +89,7 @@ export async function listStopsForProofOfDelivery() {
 }
 
 export async function saveProofOfDelivery(input: {
-  admin: ShopifyAdmin;
+  admin?: ShopifyAdmin | null;
   stopId: string;
   proofPhotoUrl: string | string[];
   deliveryNote?: string | null;
@@ -175,9 +175,17 @@ export async function saveProofOfDelivery(input: {
   const signedSignaturePhotoUrl = await createSignedProofPhotoUrl(signaturePhotoUrl);
   const shopifyResults: string[] = [];
 
-  for (const order of stop.deliveryGroup.orders) {
-    const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
-    shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
+  if (input.admin) {
+    for (const order of stop.deliveryGroup.orders) {
+      try {
+        const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
+        shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
+      } catch (error) {
+        shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
+      }
+    }
+  } else {
+    shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
   }
 
   const notificationResult = await sendDeliveryCompleteNotifications({
