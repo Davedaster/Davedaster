@@ -17,10 +17,11 @@ function createTrackingCode() {
 
 export function getPublicAppBaseUrl(fallbackUrl?: string | null) {
   return (
+    fallbackUrl ||
+    process.env.SHOP_PUBLIC_URL ||
     process.env.APP_BASE_URL ||
     process.env.SHOPIFY_APP_URL ||
     DEFAULT_APP_BASE_URL ||
-    fallbackUrl ||
     ""
   ).replace(/\/+$/g, "");
 }
