@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
+import { Link, Outlet, useLoaderData, useLocation, useRouteError } from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu, TitleBar } from "@shopify/app-bridge-react";
@@ -10,10 +10,14 @@ import { authenticate } from "../shopify.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
+function isPackingListPath(pathname: string) {
+  return pathname.includes("/packing-list");
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
 
-  if (!url.pathname.endsWith("/packing-list")) {
+  if (!isPackingListPath(url.pathname)) {
     await authenticate.admin(request);
   }
 
@@ -22,6 +26,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const location = useLocation();
+
+  if (isPackingListPath(location.pathname)) {
+    return <Outlet />;
+  }
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
