@@ -312,19 +312,19 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.92)", zIndex: 9999, padding: 14, display: "grid", alignItems: "center" }}>
-      <div style={{ background: "#ffffff", borderRadius: 22, padding: 16, display: "grid", gap: 12, maxWidth: 900, margin: "0 auto", width: "100%" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.92)", zIndex: 9999, padding: "max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom))", display: "grid", alignItems: "start", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div style={{ background: "#ffffff", borderRadius: 22, padding: 12, display: "grid", gap: 8, maxWidth: 900, margin: "0 auto", width: "100%", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 24 }}>Customer signature</h2>
-          <p style={{ margin: "6px 0 0", color: "#667085", fontWeight: 700 }}>Turn the phone sideways if possible, then ask the customer to sign in the white box.</p>
+          <h2 style={{ margin: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>Customer signature</h2>
+          <p style={{ margin: "4px 0 0", color: "#667085", fontWeight: 700, fontSize: "clamp(13px, 3.8vw, 17px)", lineHeight: 1.25 }}>Ask the customer to sign in the white box.</p>
         </div>
-        <p style={{ margin: 0, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, fontWeight: 800, lineHeight: 1.45 }}>By signing, I, {customerName || "the customer"}, confirm that the items received today match my order and have been received in good condition.</p>
-        <canvas ref={canvasRef} width={900} height={360} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ width: "100%", height: "min(42vh, 360px)", border: "2px solid #111827", borderRadius: 16, background: "#ffffff", touchAction: "none" }} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <p style={{ margin: 0, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, fontWeight: 800, lineHeight: 1.3, fontSize: "clamp(13px, 3.8vw, 18px)" }}>By signing, I, {customerName || "the customer"}, confirm that the items received today match my order and have been received in good condition.</p>
+        <canvas ref={canvasRef} width={900} height={360} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ width: "100%", height: "clamp(170px, 34dvh, 300px)", border: "2px solid #111827", borderRadius: 16, background: "#ffffff", touchAction: "none" }} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, position: "sticky", bottom: 0, background: "#ffffff", paddingTop: 8 }}>
           <button type="button" onClick={clearSignature} style={secondaryButtonStyle()}>Clear</button>
           <button type="button" onClick={submitSignature} disabled={!hasSignature} style={buttonStyle(hasSignature ? "#16a34a" : "#d0d5dd", hasSignature ? "#ffffff" : "#667085")}>Submit signature</button>
         </div>
-        <button type="button" onClick={onClose} style={{ ...secondaryButtonStyle(), borderRadius: 12 }}>Cancel</button>
+        <button type="button" onClick={onClose} style={{ ...secondaryButtonStyle(), borderRadius: 12, padding: "11px 12px" }}>Cancel</button>
       </div>
     </div>
   );
