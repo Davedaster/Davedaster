@@ -15,15 +15,8 @@ function createTrackingCode() {
     .replace(/=+$/g, "");
 }
 
-export function getPublicAppBaseUrl(fallbackUrl?: string | null) {
-  return (
-    fallbackUrl ||
-    process.env.SHOP_PUBLIC_URL ||
-    process.env.APP_BASE_URL ||
-    process.env.SHOPIFY_APP_URL ||
-    DEFAULT_APP_BASE_URL ||
-    ""
-  ).replace(/\/+$/g, "");
+export function getPublicAppBaseUrl(_fallbackUrl?: string | null) {
+  return DEFAULT_APP_BASE_URL;
 }
 
 export function buildShortCustomerTrackingUrl(baseUrl: string, trackingCode: string) {
