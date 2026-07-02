@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
+import { Form, Link, useLoaderData } from "@remix-run/react";
 import { Badge, BlockStack, Box, Button, Divider, FormLayout, InlineStack, Layout, LegacyCard, Page, Text, TextField } from "@shopify/polaris";
 import { useEffect, useState } from "react";
 
@@ -71,6 +71,32 @@ function formatDate(value?: string | Date | null) {
   }).format(new Date(value));
 }
 
+function CloseResultsButton() {
+  return (
+    <Link
+      to="/app/pod-search"
+      aria-label="Close proof of delivery search results"
+      style={{
+        alignItems: "center",
+        background: "#f3f4f6",
+        border: "1px solid #d0d5dd",
+        borderRadius: "999px",
+        color: "#323841",
+        display: "inline-flex",
+        fontSize: "20px",
+        fontWeight: 700,
+        height: "34px",
+        justifyContent: "center",
+        lineHeight: 1,
+        textDecoration: "none",
+        width: "34px",
+      }}
+    >
+      ×
+    </Link>
+  );
+}
+
 export default function PodSearchPage() {
   const { query, results } = useLoaderData<typeof loader>();
   const [searchValue, setSearchValue] = useState(query);
@@ -104,7 +130,7 @@ export default function PodSearchPage() {
               {query.trim() ? (
                 <InlineStack align="space-between" blockAlign="center" gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">Showing {results.length} result{results.length === 1 ? "" : "s"} for {query}</Text>
-                  <Button url="/app/pod-search" variant="plain" accessibilityLabel="Close proof of delivery search results">×</Button>
+                  <CloseResultsButton />
                 </InlineStack>
               ) : null}
             </BlockStack>
@@ -112,48 +138,58 @@ export default function PodSearchPage() {
 
           {query.trim() && !results.length ? (
             <LegacyCard sectioned>
-              <Text as="p" variant="bodyMd">No proof of delivery records found.</Text>
+              <InlineStack align="space-between" blockAlign="start" gap="200">
+                <Text as="p" variant="bodyMd">No proof of delivery records found.</Text>
+                <CloseResultsButton />
+              </InlineStack>
             </LegacyCard>
           ) : null}
 
-          <BlockStack gap="300">
-            {results.map((group) => {
-              const orders = group.orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join(", ") || "No order number";
-              const customers = group.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "No customer name";
-              const stop = group.stops[0];
-              const route = stop?.route;
-              const deliveredAt = stop?.actualArrival || null;
-              const driverName = route?.driver?.name || "No driver recorded";
+          {query.trim() && results.length ? (
+            <div style={{ position: "relative" }}>
+              <div style={{ position: "absolute", right: "14px", top: "14px", zIndex: 2 }}>
+                <CloseResultsButton />
+              </div>
+              <BlockStack gap="300">
+                {results.map((group) => {
+                  const orders = group.orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join(", ") || "No order number";
+                  const customers = group.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "No customer name";
+                  const stop = group.stops[0];
+                  const route = stop?.route;
+                  const deliveredAt = stop?.actualArrival || null;
+                  const driverName = route?.driver?.name || "No driver recorded";
 
-              return (
-                <LegacyCard key={group.id} sectioned>
-                  <BlockStack gap="300">
-                    <InlineStack align="space-between" blockAlign="start">
-                      <BlockStack gap="100">
-                        <Text as="h2" variant="headingMd">Orders: {orders}</Text>
-                        <Text as="p" variant="bodyMd" fontWeight="bold">{customers}</Text>
-                        <Text as="p" variant="bodySm" tone="subdued">{group.address || group.formattedAddress || "No address"}</Text>
-                        {group.postcode ? <Text as="p" variant="bodySm" tone="subdued">Postcode: {group.postcode}</Text> : null}
+                  return (
+                    <LegacyCard key={group.id} sectioned>
+                      <BlockStack gap="300">
+                        <InlineStack align="space-between" blockAlign="start">
+                          <BlockStack gap="100">
+                            <Text as="h2" variant="headingMd">Orders: {orders}</Text>
+                            <Text as="p" variant="bodyMd" fontWeight="bold">{customers}</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">{group.address || group.formattedAddress || "No address"}</Text>
+                            {group.postcode ? <Text as="p" variant="bodySm" tone="subdued">Postcode: {group.postcode}</Text> : null}
+                          </BlockStack>
+                          <Badge tone="success">POD saved</Badge>
+                        </InlineStack>
+                        <Divider />
+                        <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                          <BlockStack gap="100">
+                            <Text as="p" variant="bodySm">Delivered: {formatDateTime(deliveredAt)}</Text>
+                            <Text as="p" variant="bodySm">Route date: {formatDate(route?.date)}</Text>
+                            <Text as="p" variant="bodySm">Driver: {driverName}</Text>
+                            {route ? <Text as="p" variant="bodySm">Route: {route.name}</Text> : null}
+                            {group.deliveryNote ? <Text as="p" variant="bodySm">Delivery note: {group.deliveryNote}</Text> : null}
+                            {group.safePlaceNote ? <Text as="p" variant="bodySm">Safe place: {group.safePlaceNote}</Text> : null}
+                          </BlockStack>
+                        </Box>
+                        <ProofPhotoGallery proofPhotos={group.proofPhotos} routeId={route?.id} />
                       </BlockStack>
-                      <Badge tone="success">POD saved</Badge>
-                    </InlineStack>
-                    <Divider />
-                    <Box background="bg-surface-secondary" padding="300" borderRadius="300">
-                      <BlockStack gap="100">
-                        <Text as="p" variant="bodySm">Delivered: {formatDateTime(deliveredAt)}</Text>
-                        <Text as="p" variant="bodySm">Route date: {formatDate(route?.date)}</Text>
-                        <Text as="p" variant="bodySm">Driver: {driverName}</Text>
-                        {route ? <Text as="p" variant="bodySm">Route: {route.name}</Text> : null}
-                        {group.deliveryNote ? <Text as="p" variant="bodySm">Delivery note: {group.deliveryNote}</Text> : null}
-                        {group.safePlaceNote ? <Text as="p" variant="bodySm">Safe place: {group.safePlaceNote}</Text> : null}
-                      </BlockStack>
-                    </Box>
-                    <ProofPhotoGallery proofPhotos={group.proofPhotos} routeId={route?.id} />
-                  </BlockStack>
-                </LegacyCard>
-              );
-            })}
-          </BlockStack>
+                    </LegacyCard>
+                  );
+                })}
+              </BlockStack>
+            </div>
+          ) : null}
         </Layout.Section>
       </Layout>
     </Page>
