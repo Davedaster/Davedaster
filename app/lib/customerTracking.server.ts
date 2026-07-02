@@ -4,6 +4,7 @@ import prisma from "../db.server";
 
 const TRACKING_CODE_BYTES = 6;
 const TRACKABLE_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY", "COMPLETED"];
+const DEFAULT_APP_BASE_URL = "https://davedaster-production.up.railway.app";
 
 function createTrackingCode() {
   return crypto
@@ -18,13 +19,14 @@ export function getPublicAppBaseUrl(fallbackUrl?: string | null) {
   return (
     process.env.APP_BASE_URL ||
     process.env.SHOPIFY_APP_URL ||
+    DEFAULT_APP_BASE_URL ||
     fallbackUrl ||
     ""
   ).replace(/\/+$/g, "");
 }
 
 export function buildShortCustomerTrackingUrl(baseUrl: string, trackingCode: string) {
-  const cleanBaseUrl = getPublicAppBaseUrl(baseUrl) || "https://davedaster-production.up.railway.app";
+  const cleanBaseUrl = getPublicAppBaseUrl(baseUrl);
 
   return `${cleanBaseUrl}/t/${encodeURIComponent(trackingCode)}`;
 }
