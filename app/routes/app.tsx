@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu, TitleBar } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
+import { useEffect } from "react";
 
 import { appName } from "../lib/appName";
 import { authenticate } from "../shopify.server";
@@ -12,6 +13,25 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 function isPackingListPath(pathname: string) {
   return pathname.includes("/packing-list");
+}
+
+function standalonePackingListPath(pathname: string) {
+  const match = pathname.match(/^\/app\/routes\/([^/]+)\/packing-list\/?$/);
+  return match ? `/packing-list/${match[1]}` : null;
+}
+
+function rewritePackingListLinks() {
+  document.querySelectorAll<HTMLAnchorElement>('a[href*="/app/routes/"][href$="/packing-list"]').forEach((link) => {
+    try {
+      const url = new URL(link.href);
+      const standalonePath = standalonePackingListPath(url.pathname);
+      if (standalonePath) {
+        link.href = `${url.origin}${standalonePath}${url.search}`;
+      }
+    } catch {
+      // Ignore malformed browser hrefs.
+    }
+  });
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -27,6 +47,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
   const location = useLocation();
+
+  useEffect(() => {
+    rewritePackingListLinks();
+
+    const handleClick = (event: MouseEvent) => {
+      const link = (event.target as Element | null)?.closest?.('a[href*="/app/routes/"][href*="/packing-list"]') as HTMLAnchorElement | null;
+      if (!link) return;
+
+      const url = new URL(link.href);
+      const standalonePath = standalonePackingListPath(url.pathname);
+      if (!standalonePath) return;
+
+      event.preventDefault();
+      window.open(`${url.origin}${standalonePath}${url.search}`, link.target || "_blank");
+    };
+
+    document.addEventListener("click", handleClick, true);
+    return () => document.removeEventListener("click", handleClick, true);
+  }, [location.pathname]);
 
   if (isPackingListPath(location.pathname)) {
     return <Outlet />;
