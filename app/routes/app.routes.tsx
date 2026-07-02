@@ -291,7 +291,7 @@ export default function Routes() {
                     url={`/app/routes/${route.id}`}
                     accessibilityLabel={`View ${route.name}`}
                   >
-                    <InlineStack align="space-between">
+                    <InlineStack align="space-between" blockAlign="center" gap="300">
                       <BlockStack gap="100">
                         <Text as="h3" variant="bodyMd" fontWeight="bold">
                           {route.name}
@@ -315,7 +315,10 @@ export default function Routes() {
                             .join(" · ")}
                         </Text>
                       </BlockStack>
-                      <Badge tone={statusTone(route.status)}>{route.status}</Badge>
+                      <InlineStack gap="200" blockAlign="center">
+                        <Badge tone={statusTone(route.status)}>{route.status}</Badge>
+                        <Button url={`/app/routes/${route.id}`}>Open route</Button>
+                      </InlineStack>
                     </InlineStack>
                   </ResourceItem>
                 )}
