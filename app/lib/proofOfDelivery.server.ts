@@ -181,6 +181,7 @@ export async function saveProofOfDelivery(input: {
   }
 
   const notificationResult = await sendDeliveryCompleteNotifications({
+    routeId: stop.routeId,
     routeName: stop.route.name,
     proofPhotoUrl: signedPrimaryProofPhotoUrl,
     signaturePhotoUrl: signedSignaturePhotoUrl,
