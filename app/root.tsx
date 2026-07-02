@@ -49,6 +49,64 @@ const planningPanelStyles = `
     color: #667085;
   }
 
+  .bpd-admin-toast-stack {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 99999;
+    display: grid;
+    gap: 10px;
+    width: min(420px, calc(100vw - 36px));
+    pointer-events: none;
+  }
+
+  .bpd-admin-toast {
+    border-radius: 16px;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+    padding: 13px 14px;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 700ms ease, transform 700ms ease;
+    pointer-events: auto;
+  }
+
+  .bpd-admin-toast[data-leaving="true"] {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  .bpd-admin-toast-success {
+    border: 1px solid #bbf7d0;
+    background: #ecfdf3;
+    color: #166534;
+  }
+
+  .bpd-admin-toast-info {
+    border: 1px solid #b9d8ff;
+    background: #eff6ff;
+    color: #1d4ed8;
+  }
+
+  .bpd-admin-toast-critical {
+    border: 1px solid #fecdca;
+    background: #fff7f5;
+    color: #b42318;
+  }
+
+  .bpd-admin-toast-title {
+    margin: 0;
+    font-weight: 900;
+    font-size: 14px;
+  }
+
+  .bpd-admin-toast-detail {
+    margin: 5px 0 0;
+    font-weight: 700;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #323841;
+  }
+
   details:has(> summary[style*="list-style"] h3) {
     border: 1px solid #d0d5dd;
     border-radius: 12px;
@@ -86,11 +144,71 @@ const planningPanelScript = `
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
 
+    const getToastStack = () => {
+      let stack = document.querySelector('.bpd-admin-toast-stack');
+      if (stack) return stack;
+      stack = document.createElement('div');
+      stack.className = 'bpd-admin-toast-stack';
+      document.body.appendChild(stack);
+      return stack;
+    };
+
+    const showAdminToast = (title, detail, tone = 'success') => {
+      if (!document.body) return;
+      const toast = document.createElement('div');
+      toast.className = 'bpd-admin-toast bpd-admin-toast-' + tone;
+      toast.innerHTML = '<p class="bpd-admin-toast-title">' + bpdEscapeHtml(title) + '</p>' + (detail ? '<p class="bpd-admin-toast-detail">' + bpdEscapeHtml(detail) + '</p>' : '');
+      getToastStack().appendChild(toast);
+      window.setTimeout(() => toast.dataset.leaving = 'true', 5200);
+      window.setTimeout(() => toast.remove(), 6000);
+    };
+
+    const saveDraftToastPayloadFromForm = (form) => {
+      const formData = new FormData(form);
+      if (formData.get('intent') !== 'saveRoute') return null;
+      const selectedIds = String(formData.get('selectedOrderIds') || '').split(',').map((id) => id.trim()).filter(Boolean);
+      if (!selectedIds.length) return null;
+      const routeName = String(formData.get('routeName') || '').trim() || 'Draft route';
+      return {
+        title: 'Draft route saved',
+        detail: routeName + ' · ' + selectedIds.length + ' stop' + (selectedIds.length === 1 ? '' : 's'),
+      };
+    };
+
+    const watchDraftRouteSubmit = () => {
+      document.addEventListener('submit', (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        const payload = saveDraftToastPayloadFromForm(form);
+        if (!payload) return;
+        try {
+          window.sessionStorage.setItem('bpdDraftRouteToast', JSON.stringify(payload));
+        } catch {
+          // Toast storage is a nice to have only.
+        }
+        showAdminToast('Saving draft route', payload.detail, 'info');
+      }, true);
+    };
+
+    const showStoredDraftRouteToast = () => {
+      if (!window.location.pathname.startsWith('/app/routes')) return;
+      let payload = null;
+      try {
+        const rawPayload = window.sessionStorage.getItem('bpdDraftRouteToast');
+        if (rawPayload) payload = JSON.parse(rawPayload);
+        window.sessionStorage.removeItem('bpdDraftRouteToast');
+      } catch {
+        payload = null;
+      }
+      if (!payload?.title) return;
+      showAdminToast(payload.title, payload.detail || 'The route has been saved and is ready to publish.', 'success');
+    };
+
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
     const parseTooltipDate = (value) => {
-      const match = String(value).trim().match(/^(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})$/);
+      const match = String(value).trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
       if (!match) return null;
       const month = monthIndex[match[2].toLowerCase()];
       if (typeof month !== 'number') return null;
@@ -143,9 +261,9 @@ const planningPanelScript = `
       document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
         if (!(line instanceof HTMLElement)) return;
         const rawText = line.textContent?.trim() || '';
-        const cleanText = rawText.replace(/^[^A-Za-z0-9]*\\s*/, '').trim();
+        const cleanText = rawText.replace(/^[^A-Za-z0-9]*\s*/, '').trim();
         if (!cleanText.toLowerCase().startsWith('fulfil by:')) return;
-        const dateText = cleanText.replace(/^fulfil by:\\s*/i, '').trim();
+        const dateText = cleanText.replace(/^fulfil by:\s*/i, '').trim();
         const tone = fulfilDateTone(dateText);
         line.dataset.bpdFulfilStyled = 'true';
         line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
@@ -186,11 +304,13 @@ const planningPanelScript = `
 
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
+      showStoredDraftRouteToast();
     };
 
     const startObserver = () => {
       if (!document.body) return;
       tidyPlanningLabels();
+      watchDraftRouteSubmit();
       new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
       let runs = 0;
       const interval = window.setInterval(() => {
@@ -209,7 +329,10 @@ const planningPanelScript = `
     } else {
       startObserver();
     }
-    window.addEventListener('pageshow', tidyPlanningLabels);
+    window.addEventListener('pageshow', () => {
+      tidyPlanningLabels();
+      showStoredDraftRouteToast();
+    });
   })();
 `;
 
