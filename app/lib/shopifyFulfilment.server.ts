@@ -38,7 +38,7 @@ type FulfillmentOrdersPayload = {
 
 type FulfillmentCreatePayload = {
   data?: {
-    fulfillmentCreateV2?: {
+    fulfillmentCreate?: {
       fulfillment?: {
         id: string;
         status: string;
@@ -78,8 +78,8 @@ const GET_FULFILLMENT_ORDERS = `#graphql
 `;
 
 const FULFILLMENT_CREATE = `#graphql
-  mutation FulfillmentCreate($fulfillment: FulfillmentV2Input!) {
-    fulfillmentCreateV2(fulfillment: $fulfillment) {
+  mutation FulfillmentCreate($fulfillment: FulfillmentInput!) {
+    fulfillmentCreate(fulfillment: $fulfillment) {
       fulfillment {
         id
         status
@@ -193,11 +193,11 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   const createPayload = await createResponse.json() as FulfillmentCreatePayload;
 
   throwGraphQLErrors(createPayload);
-  throwUserErrors(createPayload.data?.fulfillmentCreateV2?.userErrors);
+  throwUserErrors(createPayload.data?.fulfillmentCreate?.userErrors);
 
   return {
     fulfilled: true,
-    fulfillmentId: createPayload.data?.fulfillmentCreateV2?.fulfillment?.id || null,
+    fulfillmentId: createPayload.data?.fulfillmentCreate?.fulfillment?.id || null,
   };
 }
 
