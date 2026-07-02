@@ -72,11 +72,11 @@ function dateKey(value: Date | string) {
 }
 
 function createToken() {
-  return crypto.randomBytes(32).toString("hex");
+  return crypto.randomBytes(12).toString("hex");
 }
 
 export function buildDriverRouteUrl(request: Request, token: string) {
-  return `${getBaseUrl(request)}/driver/routes/${token}`;
+  return `${getBaseUrl(request)}/d/${encodeURIComponent(token)}`;
 }
 
 export async function ensureDriverRouteAccessToken(routeId: string) {
