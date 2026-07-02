@@ -1,7 +1,9 @@
+import { getAppCredentials } from "./appCredentials.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { buildDeliveryCompleteMessage } from "./notificationTemplates.server";
 
 type DeliveryCompleteOrder = {
+  shopifyOrderId: string;
   shopifyOrderNumber: string;
   customerName?: string | null;
   customerEmail?: string | null;
@@ -9,6 +11,7 @@ type DeliveryCompleteOrder = {
 };
 
 type DeliveryCompleteInput = {
+  routeId: string;
   routeName: string;
   proofPhotoUrl?: string | null;
   signaturePhotoUrl?: string | null;
@@ -23,10 +26,17 @@ type DeliveryCompleteResult = {
   errors: string[];
 };
 
+function trackingUrlForRoute(baseUrl: string, routeId: string, orderId: string) {
+  const cleanBaseUrl = (baseUrl || "https://www.bathroompanelsdirect.co.uk").replace(/\/+$/, "");
+
+  return `${cleanBaseUrl}/apps/track/${encodeURIComponent(routeId)}?order=${encodeURIComponent(orderId)}`;
+}
+
 export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteInput): Promise<DeliveryCompleteResult> {
-  const [canSendSms, canSendEmail] = await Promise.all([
+  const [canSendSms, canSendEmail, credentials] = await Promise.all([
     isTwilioEnabled(),
     isResendEnabled(),
+    getAppCredentials(),
   ]);
 
   if (!canSendSms && !canSendEmail) {
@@ -52,6 +62,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       routeName: input.routeName,
       proofPhotoUrl: input.proofPhotoUrl,
       signaturePhotoUrl: input.signaturePhotoUrl,
+      trackingUrl: trackingUrlForRoute(credentials.shopPublicUrl, input.routeId, order.shopifyOrderId),
     };
 
     let sentAnything = false;
