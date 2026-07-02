@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData, useRevalidator, useSubmit } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
-import type { FormEvent, PointerEvent } from "react";
+import type { ChangeEvent, FormEvent, PointerEvent } from "react";
 
 import { RouteMap } from "../components/RouteMap";
 import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
@@ -55,7 +55,11 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
     throw new Response("Driver route not found", { status: 404 });
   }
 
-  return json({ route, canStart: canStartDriverRoute(route.date), proofPhotoStorageEnabled: await isProofPhotoStorageEnabled() });
+  return json({
+    route,
+    canStart: canStartDriverRoute(route.date),
+    proofPhotoStorageEnabled: await isProofPhotoStorageEnabled(),
+  });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -151,6 +155,7 @@ function formatDate(value: string | Date) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/London",
   }).format(new Date(value));
 }
 
@@ -165,6 +170,7 @@ function formatStart(value: string | Date) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/London",
   }).format(date);
 }
 
@@ -217,11 +223,42 @@ function highlightItemText(item: string) {
 }
 
 function buttonStyle(background: string, color = "#ffffff") {
-  return { border: 0, borderRadius: 16, padding: "15px 14px", background, color, fontSize: 16, fontWeight: 900, textAlign: "center" as const, textDecoration: "none", boxShadow: "0 6px 16px rgba(0,0,0,0.14)", maxWidth: "100%", boxSizing: "border-box" as const };
+  return {
+    border: 0,
+    borderRadius: 16,
+    padding: "15px 14px",
+    background,
+    color,
+    fontSize: 16,
+    fontWeight: 900,
+    textAlign: "center" as const,
+    textDecoration: "none",
+    boxShadow: "0 6px 16px rgba(0,0,0,0.14)",
+    maxWidth: "100%",
+    boxSizing: "border-box" as const,
+  };
 }
 
 function secondaryButtonStyle() {
-  return { border: "1px solid #d0d5dd", borderRadius: 16, padding: "14px 12px", background: "#ffffff", color: "#323841", fontSize: 15, fontWeight: 900, textAlign: "center" as const, textDecoration: "none", maxWidth: "100%", boxSizing: "border-box" as const };
+  return {
+    border: "1px solid #d0d5dd",
+    borderRadius: 16,
+    padding: "14px 12px",
+    background: "#ffffff",
+    color: "#323841",
+    fontSize: 15,
+    fontWeight: 900,
+    textAlign: "center" as const,
+    textDecoration: "none",
+    maxWidth: "100%",
+    boxSizing: "border-box" as const,
+  };
+}
+
+function proofPhotoSrc(value: string) {
+  if (!value) return "";
+  if (value.startsWith("http") || value.startsWith("data:image/")) return value;
+  return `/driver/routes/proof-of-delivery/${encodeURIComponent(value.replace(/^proof-of-delivery\//, ""))}`;
 }
 
 function StartRouteForm({ canStart, routeDate }: { canStart: boolean; routeDate: string | Date }) {
@@ -340,9 +377,11 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
 
 function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, proofPhotoStorageEnabled, customerSafePlaceNote }: { stopId: string; customerName: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean; customerSafePlaceNote?: string | null }) {
   const [deliveryMode, setDeliveryMode] = useState<"customer" | "safe" | "missed" | null>(null);
-  const [proofPhotoCount, setProofPhotoCount] = useState(0);
+  const [proofPhotoOneSelected, setProofPhotoOneSelected] = useState(false);
+  const [proofPhotoTwoSelected, setProofPhotoTwoSelected] = useState(false);
+  const [proofPreviewOne, setProofPreviewOne] = useState("");
+  const [proofPreviewTwo, setProofPreviewTwo] = useState("");
   const [proofPhotoUrl, setProofPhotoUrl] = useState("");
-  const [proofPreviewUrl, setProofPreviewUrl] = useState("");
   const [deliveryNote, setDeliveryNote] = useState("");
   const [safePlaceNote, setSafePlaceNote] = useState(customerSafePlaceNote || "");
   const [podImage, setPodImage] = useState("");
@@ -352,9 +391,9 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
   const [podLat, setPodLat] = useState("");
   const [podLng, setPodLng] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
-  const hasProofPhoto = proofPhotoCount > 0 || proofPhotoUrl.trim().length > 0;
-  const canCompleteCustomer = !updatesDisabled && deliveryMode === "customer" && hasProofPhoto && podImage.length > 0;
-  const canCompleteSafePlace = !updatesDisabled && deliveryMode === "safe" && hasProofPhoto && safePlaceNote.trim().length > 0;
+  const proofPhotoCount = (proofPhotoOneSelected ? 1 : 0) + (proofPhotoTwoSelected ? 1 : 0) + (proofPhotoUrl.trim() ? 1 : 0);
+  const canCompleteCustomer = !updatesDisabled && deliveryMode === "customer" && proofPhotoCount >= 1 && podImage.length > 0;
+  const canCompleteSafePlace = !updatesDisabled && deliveryMode === "safe" && proofPhotoCount >= 2 && safePlaceNote.trim().length > 0;
 
   useEffect(() => {
     if (!customerSafePlaceNote || safePlaceNote.trim()) return;
@@ -369,11 +408,20 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
     }, () => undefined, { enableHighAccuracy: true, timeout: 5000 });
   }, [routeStarted]);
 
-  function handleProofPhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.currentTarget.files;
-    setProofPhotoCount(files?.length || 0);
-    if (proofPreviewUrl) URL.revokeObjectURL(proofPreviewUrl);
-    setProofPreviewUrl(files?.[0] ? URL.createObjectURL(files[0]) : "");
+  function handleProofPhotoChange(event: ChangeEvent<HTMLInputElement>, slot: 1 | 2) {
+    const file = event.currentTarget.files?.[0];
+    const nextPreview = file ? URL.createObjectURL(file) : "";
+
+    if (slot === 1) {
+      if (proofPreviewOne) URL.revokeObjectURL(proofPreviewOne);
+      setProofPhotoOneSelected(Boolean(file));
+      setProofPreviewOne(nextPreview);
+      return;
+    }
+
+    if (proofPreviewTwo) URL.revokeObjectURL(proofPreviewTwo);
+    setProofPhotoTwoSelected(Boolean(file));
+    setProofPreviewTwo(nextPreview);
   }
 
   if (!routeStarted) return <p style={{ margin: "12px 0 0", color: "#667085", fontWeight: 800 }}>Start the route before completing stops.</p>;
@@ -381,11 +429,11 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
 
   return (
     <div style={{ marginTop: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
+      <button type="button" onClick={() => setDeliveryMode("customer")} style={{ width: "100%", ...buttonStyle(deliveryMode === "customer" ? "#16a34a" : "#2563eb") }}>Customer received</button>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0 }}>
-        <button type="button" onClick={() => setDeliveryMode("customer")} style={buttonStyle(deliveryMode === "customer" ? "#16a34a" : "#eff6ff", deliveryMode === "customer" ? "#ffffff" : "#2563eb")}>Customer received</button>
         <button type="button" onClick={() => setDeliveryMode("safe")} style={buttonStyle(deliveryMode === "safe" ? "#f97316" : "#fff7ed", deliveryMode === "safe" ? "#ffffff" : "#c2410c")}>Left safe</button>
+        <button type="button" onClick={() => setDeliveryMode("missed")} style={buttonStyle(deliveryMode === "missed" ? "#b42318" : "#fef3f2", deliveryMode === "missed" ? "#ffffff" : "#b42318")}>Could not deliver</button>
       </div>
-      <button type="button" onClick={() => setDeliveryMode("missed")} style={buttonStyle(deliveryMode === "missed" ? "#b42318" : "#fef3f2", deliveryMode === "missed" ? "#ffffff" : "#b42318")}>Could not deliver</button>
 
       {deliveryMode === "customer" || deliveryMode === "safe" ? (
         <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 12, border: "1px solid #e5e7eb", borderRadius: 18, padding: 12, background: "#f8fafc", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
@@ -397,14 +445,23 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
           <input type="hidden" name="podTicked" value={deliveryMode === "customer" && podImage ? "true" : "false"} />
           <input type="hidden" name="podLat" value={podLat} />
           <input type="hidden" name="podLng" value={podLng} />
-          <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>Add proof photo<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" multiple={false} disabled={!proofPhotoStorageEnabled} onChange={handleProofPhotoChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
+
+          <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{deliveryMode === "safe" ? "Safe place photo 1" : "Proof photo"}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 1)} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
+          {proofPreviewOne ? <img src={proofPreviewOne} alt="Proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
+
+          {deliveryMode === "safe" ? (
+            <>
+              <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>Safe place photo 2<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 2)} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
+              {proofPreviewTwo ? <img src={proofPreviewTwo} alt="Second proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
+            </>
+          ) : null}
+
           {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /> : null}
-          {proofPreviewUrl ? <img src={proofPreviewUrl} alt="Proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
           {deliveryMode === "customer" ? <div style={{ display: "grid", gap: 8, maxWidth: "100%", overflow: "hidden" }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(podImage ? "#16a34a" : "#323841")}>{podImage ? "Signature added" : "Get customer signature"}</button>{podImage ? <img src={podImage} alt="Customer signature" style={{ width: "100%", maxWidth: "100%", maxHeight: 110, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd", boxSizing: "border-box" }} /> : null}{signatureOpen ? <SignatureModal customerName={customerName} disabled={updatesDisabled} onSave={setPodImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
           {deliveryMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Safe place note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Behind side gate, under covered porch" style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label> : null}
           <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Driver note optional<textarea name="deliveryNote" rows={2} value={deliveryNote} onChange={(event) => setDeliveryNote(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label>
           <button type="submit" disabled={deliveryMode === "customer" ? !canCompleteCustomer : !canCompleteSafePlace} style={{ width: "100%", ...buttonStyle((deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#16a34a" : "#d0d5dd", (deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#ffffff" : "#667085") }}>Complete delivery</button>
-          <p style={{ margin: 0, color: "#667085", fontWeight: 700, fontSize: 13 }}>{deliveryMode === "customer" ? "Needs photo and customer signature." : "Needs photo and safe place note."}</p>
+          <p style={{ margin: 0, color: "#667085", fontWeight: 700, fontSize: 13 }}>{deliveryMode === "customer" ? "Needs 1 photo and customer signature." : "Needs 2 photos and a safe place note."}</p>
         </Form>
       ) : null}
 
@@ -426,7 +483,7 @@ function SafePlaceRequestCard({ note }: { note?: string | null }) {
 
 function ProofCard({ proofPhotos }: { proofPhotos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!proofPhotos.length) return null;
-  return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Delivery card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><img src={photo.url} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
+  return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Delivery card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><a href={proofPhotoSrc(photo.url)} target="_blank" rel="noreferrer"><img src={proofPhotoSrc(photo.url)} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /></a><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
 }
 
 export default function DriverRoutePage() {
