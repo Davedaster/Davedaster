@@ -140,6 +140,7 @@ model OrderStop {
   customerPhone     String?
   postcode          String?
   lineItemSummary   String?
+  trackingCode      String?  @unique
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
