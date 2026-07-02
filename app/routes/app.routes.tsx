@@ -16,7 +16,7 @@ import {
   Button,
 } from "@shopify/polaris";
 
-import { deleteDraftRoute, getRouteActionSummary } from "../lib/draftRouteActions.server";
+import { deleteDraftRoute, deleteTestRoute, getRouteActionSummary } from "../lib/draftRouteActions.server";
 import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { assignDriverToRoute, calculateEtaSlots, listRoutes, publishRoute } from "../lib/routeDrafts.server";
@@ -95,6 +95,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ ok: true, message: "Draft route deleted." });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Draft route could not be deleted." }, { status: 400 });
+    }
+  }
+
+  if (intent === "deleteTest") {
+    try {
+      await deleteTestRoute(routeId);
+      return json({ ok: true, message: "Route deleted for testing." });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Route could not be deleted." }, { status: 400 });
     }
   }
 
@@ -216,6 +225,10 @@ function isStopDone(stop: StopListItem) {
   return stop.status === "DELIVERED" || stop.status === "FAILED";
 }
 
+function isTestDeleteAllowed(status: string) {
+  return ["PUBLISHED", "NOTIFICATIONS_SENT", "COMPLETED", "CANCELLED"].includes(status);
+}
+
 function stopCustomerLabel(stop: StopListItem) {
   const names = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ");
   const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join(", ");
@@ -264,6 +277,10 @@ function finishLocationLabel(route: RouteListItem) {
   return returnsToBase ? "Return to base" : "Custom end point";
 }
 
+function confirmDelete(routeName: string, label: string) {
+  return `Are you sure you want to delete ${label} "${routeName}"? This cannot be undone.`;
+}
+
 function ProgressBar({ value }: { value: number }) {
   const safeValue = Math.max(0, Math.min(100, value));
 
@@ -298,6 +315,23 @@ function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: Drive
   );
 }
 
+function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteListItem; intent: "deleteDraft" | "deleteTest"; label: string; confirmLabel: string }) {
+  return (
+    <Form
+      method="post"
+      onSubmit={(event) => {
+        if (!window.confirm(confirmDelete(route.name, confirmLabel))) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="intent" value={intent} />
+      <input type="hidden" name="routeId" value={route.id} />
+      <Button submit tone="critical">{label}</Button>
+    </Form>
+  );
+}
+
 function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const completedStops = orderedStops.filter(isStopDone);
@@ -320,7 +354,14 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
             <Text as="p" variant="bodyMd" tone="subdued">{route.name} · {formatDate(route.date)}</Text>
             <Text as="p" variant="bodySm" tone="subdued">Start {route.plannedStartTime || "05:00"} · {finishLocationLabel(route)}: {route.finishAddress || route.startAddress || "Base"}</Text>
           </BlockStack>
-          <DriverSelect route={route} drivers={drivers} />
+          <BlockStack gap="200">
+            <DriverSelect route={route} drivers={drivers} />
+            {isTestDeleteAllowed(route.status) ? (
+              <InlineStack align="end">
+                <DeleteRouteForm route={route} intent="deleteTest" label="Delete test route" confirmLabel="this published test route" />
+              </InlineStack>
+            ) : null}
+          </BlockStack>
         </InlineStack>
 
         <BlockStack gap="150">
@@ -354,6 +395,7 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
 
 function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const isDraft = route.status === "DRAFT";
+  const canDeleteTestRoute = isTestDeleteAllowed(route.status);
 
   return (
     <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`} onClick={() => {}}>
@@ -388,14 +430,15 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
                   <input type="hidden" name="routeId" value={route.id} />
                   <Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button>
                 </Form>
-                <Form method="post">
-                  <input type="hidden" name="intent" value="deleteDraft" />
-                  <input type="hidden" name="routeId" value={route.id} />
-                  <Button submit tone="critical">Delete draft</Button>
-                </Form>
+                <DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" />
+              </InlineStack>
+            ) : canDeleteTestRoute ? (
+              <InlineStack gap="200" wrap>
+                <DeleteRouteForm route={route} intent="deleteTest" label="Delete published route" confirmLabel="this published test route" />
+                <Text as="span" variant="bodySm" tone="subdued">Use this to reset test routes.</Text>
               </InlineStack>
             ) : (
-              <Text as="p" variant="bodySm" tone="subdued">This route is no longer a draft. Publishing and deleting are locked.</Text>
+              <Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text>
             )}
           </BlockStack>
         </Box>
