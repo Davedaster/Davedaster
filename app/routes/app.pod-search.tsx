@@ -101,7 +101,12 @@ export default function PodSearchPage() {
                   <Button submit variant="primary">Search POD</Button>
                 </FormLayout>
               </Form>
-              {query.trim() ? <Text as="p" variant="bodySm" tone="subdued">Showing {results.length} result{results.length === 1 ? "" : "s"} for {query}</Text> : null}
+              {query.trim() ? (
+                <InlineStack align="space-between" blockAlign="center" gap="200">
+                  <Text as="p" variant="bodySm" tone="subdued">Showing {results.length} result{results.length === 1 ? "" : "s"} for {query}</Text>
+                  <Button url="/app/pod-search" variant="plain" accessibilityLabel="Close proof of delivery search results">×</Button>
+                </InlineStack>
+              ) : null}
             </BlockStack>
           </LegacyCard>
 
