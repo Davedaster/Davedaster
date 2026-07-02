@@ -288,8 +288,8 @@ export default function Routes() {
                 renderItem={(route) => (
                   <ResourceItem
                     id={route.id}
-                    url={`/app/routes/${route.id}`}
                     accessibilityLabel={`View ${route.name}`}
+                    onClick={() => {}}
                   >
                     <InlineStack align="space-between" blockAlign="center" gap="300">
                       <BlockStack gap="100">
