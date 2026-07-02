@@ -88,6 +88,11 @@ export async function getCustomerTrackingByCode(trackingCode: string) {
       deliveryGroup: {
         include: {
           orders: true,
+          proofPhotos: {
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           stops: {
             where: {
               route: {
