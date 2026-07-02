@@ -19,7 +19,7 @@ import {
 import { deleteDraftRoute, getRouteActionSummary } from "../lib/draftRouteActions.server";
 import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
 import { listActiveDrivers } from "../lib/drivers.server";
-import { assignDriverToRoute, listRoutes, publishRoute } from "../lib/routeDrafts.server";
+import { assignDriverToRoute, calculateEtaSlots, listRoutes, publishRoute } from "../lib/routeDrafts.server";
 import { sendDriverRouteLink } from "../lib/driverRouteAccess.server";
 import { sendBookedSlotNotifications } from "../lib/routeNotifications.server";
 import { fulfilRouteOrders } from "../lib/shopifyFulfilment.server";
@@ -115,6 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
 
       await publishRoute(routeId);
+      await calculateEtaSlots(routeId);
       await tagPublishedRouteOrders(admin, routeId);
 
       const fulfilmentSettings = await getFulfilmentSettings();
