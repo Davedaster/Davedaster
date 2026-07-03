@@ -42,7 +42,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route, proofPhotoStorageEnabled: isProofPhotoStorageEnabled() });
+  const proofPhotoStorageEnabled = await isProofPhotoStorageEnabled();
+
+  return json({ route, proofPhotoStorageEnabled });
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
