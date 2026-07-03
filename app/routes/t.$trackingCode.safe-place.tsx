@@ -3,13 +3,7 @@ import { redirect } from "@remix-run/node";
 
 import prisma from "../db.server";
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
-
-const SAFE_PLACE_LABELS: Record<string, string> = {
-  side_gate: "Leave behind side gate",
-  rear_garden: "Leave in rear garden",
-  garage: "Leave in garage",
-  other: "Other safe place",
-};
+import { getCustomerTrackingSettings } from "../lib/customerTrackingSettings.server";
 
 function cleanInstruction(value: FormDataEntryValue | null) {
   return String(value || "")
@@ -18,16 +12,21 @@ function cleanInstruction(value: FormDataEntryValue | null) {
     .slice(0, 500);
 }
 
-function buildSafePlaceNote(formData: FormData) {
-  const option = cleanInstruction(formData.get("safePlaceOption"));
+async function buildSafePlaceNote(formData: FormData) {
+  const settings = await getCustomerTrackingSettings();
+  const optionId = cleanInstruction(formData.get("safePlaceOption"));
   const details = cleanInstruction(formData.get("safePlaceDetails"));
-  const optionLabel = SAFE_PLACE_LABELS[option] || SAFE_PLACE_LABELS.other;
+  const option = settings.safePlaceOptions.find((safePlaceOption) => safePlaceOption.id === optionId) || settings.safePlaceOptions[0];
 
-  if (option === "other" && !details) {
+  if (!option) {
     return "";
   }
 
-  return [optionLabel, details].filter(Boolean).join(". ");
+  if (option.requiresDetails && !details) {
+    return "";
+  }
+
+  return [option.label, details].filter(Boolean).join(". ");
 }
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -38,7 +37,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   const formData = await request.formData();
-  const safePlaceNote = buildSafePlaceNote(formData);
+  const safePlaceNote = await buildSafePlaceNote(formData);
 
   if (!safePlaceNote) {
     return redirect(`/t/${encodeURIComponent(trackingCode)}?instructions=missing`);
