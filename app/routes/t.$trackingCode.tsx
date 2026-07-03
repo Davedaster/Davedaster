@@ -101,63 +101,11 @@ function ProofImageViewer({ photo, onClose }: { photo: ProofPhoto; onClose: () =
   }, [onClose]);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={photo.label || "Proof image"}
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9999,
-        background: "rgba(15,23,42,0.92)",
-        padding: "max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left))",
-        display: "grid",
-        placeItems: "center",
-      }}
-    >
+    <div role="dialog" aria-modal="true" aria-label={photo.label || "Proof image"} onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(15,23,42,0.92)", padding: "max(14px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left))", display: "grid", placeItems: "center" }}>
       <div onClick={(event) => event.stopPropagation()} style={{ position: "relative", width: "min(1100px, 100%)", maxHeight: "100%", display: "grid", gap: 10 }}>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close image"
-          style={{
-            position: "absolute",
-            right: -8,
-            top: -8,
-            width: 42,
-            height: 42,
-            borderRadius: "50%",
-            border: "1px solid rgba(255,255,255,0.35)",
-            background: "#ffffff",
-            color: "#111827",
-            fontSize: 24,
-            lineHeight: "38px",
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 10px 24px rgba(0,0,0,0.25)",
-          }}
-        >
-          ×
-        </button>
-        <img
-          src={photo.url}
-          alt={photo.label || "Proof image"}
-          style={{
-            display: "block",
-            width: "100%",
-            maxWidth: "100%",
-            maxHeight: "calc(100dvh - 86px)",
-            objectFit: "contain",
-            borderRadius: 18,
-            background: "#ffffff",
-            boxShadow: "0 18px 44px rgba(0,0,0,0.34)",
-            touchAction: "pinch-zoom",
-          }}
-        />
-        <p style={{ margin: 0, color: "#ffffff", textAlign: "center", fontSize: 13, fontWeight: 800 }}>
-          {photo.label || "Proof image"}. On mobile, hold the image to save it.
-        </p>
+        <button type="button" onClick={onClose} aria-label="Close image" style={{ position: "absolute", right: -8, top: -8, width: 42, height: 42, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.35)", background: "#ffffff", color: "#111827", fontSize: 24, lineHeight: "38px", fontWeight: 900, cursor: "pointer", boxShadow: "0 10px 24px rgba(0,0,0,0.25)" }}>×</button>
+        <img src={photo.url} alt={photo.label || "Proof image"} style={{ display: "block", width: "100%", maxWidth: "100%", maxHeight: "calc(100dvh - 86px)", objectFit: "contain", borderRadius: 18, background: "#ffffff", boxShadow: "0 18px 44px rgba(0,0,0,0.34)", touchAction: "pinch-zoom" }} />
+        <p style={{ margin: 0, color: "#ffffff", textAlign: "center", fontSize: 13, fontWeight: 800 }}>{photo.label || "Proof image"}. On mobile, hold the image to save it.</p>
       </div>
     </div>
   );
@@ -184,9 +132,11 @@ function ProofImages({ photos, title, onOpen }: { photos: ProofPhoto[]; title: s
 export default function CustomerTrackingPage() {
   const data = useLoaderData<typeof loader>();
   const [selectedProofPhoto, setSelectedProofPhoto] = useState<ProofPhoto | null>(null);
+  const [safePlaceOption, setSafePlaceOption] = useState("side_gate");
   const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
   const complete = data.stopStatus === "DELIVERED";
   const missed = data.stopStatus === "FAILED";
+  const requiresExtraDetails = safePlaceOption === "other";
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f6fb", padding: "24px 14px", fontFamily: "Arial, sans-serif", color: "#1f2937" }}>
@@ -196,49 +146,25 @@ export default function CustomerTrackingPage() {
         <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>Order {data.orderNumber}</p>
 
         {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Safe place instructions saved.</div> : null}
-        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please choose or enter a safe place instruction.</div> : null}
+        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please add extra details for the driver before saving other safe place.</div> : null}
         {data.closed ? <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>This delivery is already closed, so instructions cannot be changed.</div> : null}
 
         <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
-          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}>
-            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Delivery date</p>
-            <p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{formatDate(data.routeDate)}</p>
-          </div>
-          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}>
-            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Booked slot</p>
-            <p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{data.etaSlot}</p>
-          </div>
-          <div style={{ background: "#f8fafc", borderRadius: 16, padding: 16 }}>
-            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Status</p>
-            <p style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{complete ? "Delivered" : missed ? "Delivery missed" : routeStarted ? "Out for delivery" : "Booked"}</p>
-            <p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>Stop {data.stopNumber}, {cleanStatus(data.stopStatus)}</p>
-          </div>
+          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Delivery date</p><p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{formatDate(data.routeDate)}</p></div>
+          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Booked slot</p><p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{data.etaSlot}</p></div>
+          <div style={{ background: "#f8fafc", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Status</p><p style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{complete ? "Delivered" : missed ? "Delivery missed" : routeStarted ? "Out for delivery" : "Booked"}</p><p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>Stop {data.stopNumber}, {cleanStatus(data.stopStatus)}</p></div>
         </div>
 
         <ProfileCard name={data.driverName} imageUrl={data.driverPhotoUrl} />
 
-        {complete || missed ? (
-          data.proofPhotos.length ? (
-            <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div>
-          ) : (
-            <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>
-          )
-        ) : null}
+        {complete || missed ? (data.proofPhotos.length ? <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div> : <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>) : null}
 
         <ProofImages photos={data.deliveryPhotos} title="Delivery photo" onOpen={setSelectedProofPhoto} />
         <ProofImages photos={data.signaturePhotos} title="Customer signature" onOpen={setSelectedProofPhoto} />
 
-        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
-          <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Delivery address</p>
-          <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.address || data.postcode || "Address held on your order"}</p>
-        </div>
+        <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Delivery address</p><p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.address || data.postcode || "Address held on your order"}</p></div>
 
-        {data.itemsSummary ? (
-          <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items</p>
-            <p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.itemsSummary}</p>
-          </div>
-        ) : null}
+        {data.itemsSummary ? <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items</p><p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.itemsSummary}</p></div> : null}
 
         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 20 }}>Safe place instructions</h2>
@@ -246,17 +172,17 @@ export default function CustomerTrackingPage() {
           <form method="post" action={`/t/${encodeURIComponent(data.trackingCode)}/safe-place`}>
             <label style={{ display: "block", fontWeight: 900, marginBottom: 8 }}>
               Choose a safe place
-              <select name="safePlaceOption" defaultValue="porch" style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>
-                <option value="porch">Leave in porch</option>
+              <select name="safePlaceOption" value={safePlaceOption} onChange={(event) => setSafePlaceOption(event.currentTarget.value)} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>
                 <option value="side_gate">Leave behind side gate</option>
-                <option value="shed">Leave in shed or outbuilding</option>
-                <option value="neighbour">Leave with neighbour</option>
+                <option value="rear_garden">Leave in rear garden</option>
+                <option value="garage">Leave in garage</option>
                 <option value="other">Other safe place</option>
               </select>
             </label>
             <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>
-              Extra details, optional
-              <textarea name="safePlaceDetails" rows={3} placeholder="Example, behind the black side gate" style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />
+              Extra details {requiresExtraDetails ? <span style={{ color: "#dc2626" }}>*</span> : <span style={{ color: "#667085", fontWeight: 700 }}>(optional)</span>}
+              <textarea name="safePlaceDetails" rows={3} maxLength={500} required={requiresExtraDetails} aria-invalid={requiresExtraDetails ? "true" : undefined} placeholder={requiresExtraDetails ? "Please tell us where the driver should leave the panels" : "Example, access instructions or where to place the panels"} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: requiresExtraDetails ? "2px solid #dc2626" : "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />
+              {requiresExtraDetails ? <span style={{ display: "block", marginTop: 6, color: "#dc2626", fontSize: 13 }}>Please add instructions for the driver.</span> : null}
             </label>
             <button type="submit" disabled={complete || missed} style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px 16px", background: complete || missed ? "#d0d5dd" : "#509AE6", color: "#ffffff", fontSize: 16, fontWeight: 900 }}>Save instructions</button>
           </form>
