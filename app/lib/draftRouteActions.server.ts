@@ -26,6 +26,7 @@ async function deleteRouteAndUnusedDeliveryGroups(routeId: string) {
       status: true,
       stops: {
         select: {
+          id: true,
           deliveryGroupId: true,
         },
       },
@@ -36,9 +37,44 @@ async function deleteRouteAndUnusedDeliveryGroups(routeId: string) {
     throw new Error("Route could not be found.");
   }
 
+  const stopIds = route.stops.map((stop) => stop.id);
   const deliveryGroupIds = [...new Set(route.stops.map((stop) => stop.deliveryGroupId).filter(Boolean))] as string[];
 
   await prisma.$transaction(async (tx) => {
+    if (stopIds.length) {
+      await tx.returnTicket.updateMany({
+        where: {
+          stopId: {
+            in: stopIds,
+          },
+        },
+        data: {
+          stopId: null,
+        },
+      });
+    }
+
+    await tx.returnTicket.updateMany({
+      where: {
+        routeId,
+      },
+      data: {
+        routeId: null,
+      },
+    });
+
+    await tx.routeHistory.deleteMany({
+      where: {
+        routeId,
+      },
+    });
+
+    await tx.stop.deleteMany({
+      where: {
+        routeId,
+      },
+    });
+
     await tx.route.delete({
       where: {
         id: routeId,
@@ -53,6 +89,18 @@ async function deleteRouteAndUnusedDeliveryGroups(routeId: string) {
       });
 
       if (remainingStops === 0) {
+        await tx.proofPhoto.deleteMany({
+          where: {
+            deliveryGroupId,
+          },
+        });
+
+        await tx.orderStop.deleteMany({
+          where: {
+            deliveryGroupId,
+          },
+        });
+
         await tx.deliveryGroup.delete({
           where: {
             id: deliveryGroupId,
