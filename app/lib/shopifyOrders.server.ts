@@ -167,7 +167,6 @@ function lineItems(order: ShopifyOrderNode) {
 function lineItemLines(items: ShopifyLineItem[]) {
   return items.map((item) => {
     const quantity = Number(item.quantity || 0);
-
     return quantity > 1 ? `${quantity} × ${item.title}` : item.title;
   });
 }
@@ -177,32 +176,20 @@ function getCustomerName(order: ShopifyOrderNode) {
   const lastName = order.customer?.lastName || "";
   const fromCustomer = `${firstName} ${lastName}`.trim();
   const fromAddress = order.shippingAddress?.name || "";
-
   return fromCustomer || fromAddress || "Customer";
 }
 
 function formatAddress(order: ShopifyOrderNode) {
   const address = order.shippingAddress;
+  if (!address) return "No delivery address";
 
-  if (!address) {
-    return "No delivery address";
-  }
-
-  return [
-    address.address1,
-    address.address2,
-    address.city,
-    address.province,
-    address.zip,
-    address.country,
-  ]
+  return [address.address1, address.address2, address.city, address.province, address.zip, address.country]
     .filter(Boolean)
     .join(", ");
 }
 
 function extractPostcode(value: string) {
   const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
-
   return match?.[0]?.toUpperCase() || "";
 }
 
@@ -231,9 +218,7 @@ function allocationLine(allocation: RouteAllocation) {
 }
 
 function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation | undefined): DeliveryOrder {
-  if (!allocation) {
-    return order;
-  }
+  if (!allocation) return order;
 
   return {
     ...order,
@@ -243,9 +228,7 @@ function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation 
 }
 
 function applyOverride(order: DeliveryOrder, override: AddressOverride | undefined): DeliveryOrder {
-  if (!override) {
-    return order;
-  }
+  if (!override) return order;
 
   return {
     ...order,
@@ -283,10 +266,7 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
   const shippingMethod = shippingTitle(order);
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const addressSummary = formatAddress(order);
-  const lookup = hasDeliveryAddress && !override
-    ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary)
-    : null;
-
+  const lookup = hasDeliveryAddress && !override ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary) : null;
   const lookupHasCoordinates = Boolean(lookup?.latitude && lookup?.longitude);
 
   const deliveryOrder: DeliveryOrder = {
@@ -305,11 +285,7 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     hasDeliveryAddress,
     hasPanel,
     isSampleOnly,
-    addressStatus: !hasDeliveryAddress
-      ? "NEEDS_ADDRESS"
-      : lookupHasCoordinates
-        ? "READY"
-        : "NEEDS_LOCATION_CHECK",
+    addressStatus: !hasDeliveryAddress ? "NEEDS_ADDRESS" : lookupHasCoordinates ? "READY" : "NEEDS_LOCATION_CHECK",
     addressConfidence: lookupHasCoordinates ? "HIGH" : lookup?.confidence || "LOW",
     latitude: lookup?.latitude || null,
     longitude: lookup?.longitude || null,
@@ -331,10 +307,7 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
   const addressSummary = input.address.trim();
   const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
   const reference = manualOrderReference(input);
-  const lineItemLines = input.lineItemSummary
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lineItemLines = input.lineItemSummary.split("\n").map((line) => line.trim()).filter(Boolean);
 
   return {
     id: reference,
@@ -427,15 +400,9 @@ const DELIVERY_ORDERS_QUERY = `#graphql
 `;
 
 async function fetchDeliveryOrderPage(admin: ShopifyAdmin, query: string, cursor: string | null) {
-  const response = await admin.graphql(DELIVERY_ORDERS_QUERY, {
-    variables: { query, cursor },
-  });
+  const response = await admin.graphql(DELIVERY_ORDERS_QUERY, { variables: { query, cursor } });
   const payload = await response.json() as DeliveryOrdersPayload;
-
-  if (payload.errors?.length) {
-    throw new Error(payload.errors.map((error) => error.message).join(", "));
-  }
-
+  if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(", "));
   return payload.data?.orders;
 }
 
@@ -447,11 +414,7 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
 
   do {
     const result = await fetchDeliveryOrderPage(admin, query, cursor);
-
-    if (!result) {
-      break;
-    }
-
+    if (!result) break;
     orders.push(...result.edges.map((edge) => edge.node));
     cursor = result.pageInfo.hasNextPage ? result.pageInfo.endCursor : null;
     page += 1;
@@ -462,5 +425,7 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
   const deliveryOrders = await Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
   const allocations = await getActiveRouteAllocations(deliveryOrders.map((order) => order.id));
 
-  return deliveryOrders.map((order) => applyRouteAllocation(order, allocations.get(order.id)));
+  return deliveryOrders
+    .filter((order) => !allocations.has(order.id))
+    .map((order) => applyRouteAllocation(order, allocations.get(order.id)));
 }
