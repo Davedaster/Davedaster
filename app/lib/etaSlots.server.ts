@@ -23,12 +23,51 @@ function addMinutes(date: Date, minutes: number) {
   return new Date(date.getTime() + minutes * 60 * 1000);
 }
 
+function londonOffsetMinutes(date: Date) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: ROUTE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const values: Record<string, string> = {};
+
+  for (const part of formatter.formatToParts(date)) {
+    values[part.type] = part.value;
+  }
+
+  const localAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+
+  return Math.round((localAsUtc - date.getTime()) / 60000);
+}
+
 function routeDateWithStartTime(routeDate: Date, startTime: string) {
   const startMinutes = parseTimeToMinutes(startTime);
+  const hours = Math.floor(startMinutes / 60);
+  const minutes = startMinutes % 60;
   const date = new Date(routeDate);
-  date.setUTCHours(0, 0, 0, 0);
+  const localClockTime = new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    hours,
+    minutes,
+    0,
+    0,
+  ));
 
-  return addMinutes(date, startMinutes);
+  return addMinutes(localClockTime, -londonOffsetMinutes(localClockTime));
 }
 
 export function formatEtaSlot(start: Date, end: Date) {
