@@ -22,6 +22,19 @@ export type AppCredentials = {
 export type AppCredentialKey = keyof AppCredentials;
 
 const APP_CREDENTIALS_KEY = "api_credentials";
+const MASKED_CREDENTIAL_PREFIX = "••••••";
+
+const secretCredentialKeys = new Set<AppCredentialKey>([
+  "routexlUsername",
+  "routexlPassword",
+  "tomtomApiKey",
+  "getAddressApiKey",
+  "twilioAccountSid",
+  "twilioAuthToken",
+  "resendApiKey",
+  "proofPhotoStorageAccessKeyId",
+  "proofPhotoStorageSecretAccessKey",
+]);
 
 const emptyCredentials: AppCredentials = {
   routexlUsername: "",
@@ -106,8 +119,32 @@ async function readStoredCredentials(): Promise<AppCredentials> {
   }
 }
 
+export function isMaskedAppCredentialValue(value: string) {
+  return clean(value).startsWith(MASKED_CREDENTIAL_PREFIX);
+}
+
+export function maskAppCredentialValue(value: string) {
+  const cleaned = clean(value);
+
+  if (!cleaned) {
+    return "";
+  }
+
+  return `${MASKED_CREDENTIAL_PREFIX}${cleaned.slice(-4)}`;
+}
+
+export function getBrowserSafeAppCredentials(credentials: AppCredentials): AppCredentials {
+  const safeCredentials = { ...credentials };
+
+  for (const key of secretCredentialKeys) {
+    safeCredentials[key] = maskAppCredentialValue(safeCredentials[key]);
+  }
+
+  return safeCredentials;
+}
+
 export async function getStoredAppCredentials() {
-  return readStoredCredentials();
+  return getBrowserSafeAppCredentials(await readStoredCredentials());
 }
 
 export async function getAppCredentials() {
@@ -124,9 +161,17 @@ export async function getAppCredentials() {
 
 export async function saveAppCredentialsPatch(input: Partial<AppCredentials>) {
   const current = await readStoredCredentials();
+  const safeInput = { ...input };
+
+  for (const key of Object.keys(safeInput) as AppCredentialKey[]) {
+    if (secretCredentialKeys.has(key) && isMaskedAppCredentialValue(String(safeInput[key] || ""))) {
+      delete safeInput[key];
+    }
+  }
+
   const next = normaliseCredentials({
     ...current,
-    ...input,
+    ...safeInput,
   });
 
   await prisma.setting.upsert({
