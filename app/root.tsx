@@ -54,6 +54,19 @@ const planningPanelStyles = `
     color: #667085;
   }
 
+  .bpd-driver-status-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: #e3f1ff;
+    color: #0b5cab;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 18px;
+    text-transform: uppercase;
+  }
+
   .bpd-admin-toast-stack {
     position: fixed;
     right: 18px;
@@ -219,6 +232,50 @@ const planningPanelScript = `
       window.location.reload();
     };
 
+    const replaceCardText = (card, from, to) => {
+      const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        if (node.nodeValue?.includes(from)) node.nodeValue = node.nodeValue.replaceAll(from, to);
+        node = walker.nextNode();
+      }
+    };
+
+    const getDriverStopCards = () => Array.from(document.querySelectorAll('h3'))
+      .map((heading) => ({ heading, match: heading.textContent?.trim().match(/^Stop\s+(\d+)$/) }))
+      .filter((entry) => entry.match)
+      .map((entry) => ({
+        heading: entry.heading,
+        orderIndex: Number(entry.match[1]),
+        card: entry.heading.closest('div[class*="LegacyCard"]'),
+      }))
+      .filter((entry) => entry.card);
+
+    const tidyDriverRouteCards = () => {
+      if (!window.location.pathname.startsWith('/app/driver-routes/')) return;
+      const cards = getDriverStopCards();
+      cards.forEach(({ card }) => card.querySelectorAll('[data-bpd-driver-status-pill="true"]').forEach((pill) => pill.remove()));
+      const pendingCards = cards
+        .filter(({ card }) => card.textContent?.includes('PENDING'))
+        .sort((a, b) => a.orderIndex - b.orderIndex);
+
+      pendingCards.forEach(({ card, heading }, index) => {
+        if (index === 0) {
+          replaceCardText(card, 'NEXT DROP', 'CURRENT');
+          replaceCardText(card, 'This is the next delivery', 'This is the current delivery');
+          return;
+        }
+
+        if (index === 1 && heading.parentElement) {
+          const pill = document.createElement('span');
+          pill.className = 'bpd-driver-status-pill';
+          pill.dataset.bpdDriverStatusPill = 'true';
+          pill.textContent = 'NEXT';
+          heading.parentElement.appendChild(pill);
+        }
+      });
+    };
+
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -321,6 +378,7 @@ const planningPanelScript = `
 
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
+      tidyDriverRouteCards();
       showStoredDraftRouteToast();
     };
 
