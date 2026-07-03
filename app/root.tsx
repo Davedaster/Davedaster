@@ -209,6 +209,16 @@ const planningPanelScript = `
       showAdminToast(payload.title, payload.detail || 'The route has been saved and is ready to publish.', 'success');
     };
 
+    const refreshRestoredDriverRouteTab = (event) => {
+      if (!event?.persisted || !window.location.pathname.startsWith('/app/driver-routes/')) return;
+      const now = Date.now();
+      const storageKey = 'bpdDriverRouteRestoredAt';
+      const lastReload = Number(window.sessionStorage.getItem(storageKey) || 0);
+      if (now - lastReload < 5000) return;
+      window.sessionStorage.setItem(storageKey, String(now));
+      window.location.reload();
+    };
+
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -336,7 +346,8 @@ const planningPanelScript = `
     } else {
       startObserver();
     }
-    window.addEventListener('pageshow', () => {
+    window.addEventListener('pageshow', (event) => {
+      refreshRestoredDriverRouteTab(event);
       tidyPlanningLabels();
       showStoredDraftRouteToast();
     });
