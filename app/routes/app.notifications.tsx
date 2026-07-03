@@ -8,7 +8,6 @@ import {
   isResendConfigured,
   isResendEnabled,
   isTwilioEnabled,
-  sendEmailWithResend,
   sendSmsWithTwilio,
 } from "../lib/notificationSenders.server";
 import { getEmailNotificationsEnabled, setEmailNotificationsEnabled } from "../lib/notificationSettings.server";
@@ -39,12 +38,6 @@ const previewInput = {
   proofPhotoUrl: "https://example.com/proof-of-delivery-photo.jpg",
   delayMinutes: 45,
 };
-
-function friendlyActionError(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message.trim() : "";
-
-  return message || fallback;
-}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -106,68 +99,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return json({ ok: true, savedSection: result.id ? `Test SMS sent, ${result.id}` : "Test SMS sent" });
     } catch (error) {
-      return json({ ok: false, error: friendlyActionError(error, "Test SMS failed.") }, { status: 400 });
-    }
-  }
-
-  if (intent === "sendTestEmail") {
-    const testEmail = String(formData.get("testEmail") || "").trim();
-
-    if (!testEmail || !testEmail.includes("@")) {
-      return json({ ok: false, error: "Enter a valid email address to send the test email." }, { status: 400 });
-    }
-
-    try {
-      const result = await sendEmailWithResend({
-        to: testEmail,
-        message: {
-          subject: "Bathroom Panels Direct email test",
-          body: "Bathroom Panels Direct email test. Your delivery email setup is working.",
-          html: "<p>Bathroom Panels Direct email test.</p><p>Your delivery email setup is working.</p>",
-        },
-      });
-
-      return json({ ok: true, savedSection: result.id ? `Test email sent, ${result.id}` : "Test email sent" });
-    } catch (error) {
-      return json({ ok: false, error: friendlyActionError(error, "Test email failed.") }, { status: 400 });
+      return json({ ok: false, error: error instanceof Error ? error.message : "Test SMS failed." }, { status: 400 });
     }
   }
 
   if (intent === "resetTemplate") {
-    if (!templateId) {
-      return json({ ok: false, error: "Choose a template before resetting it." }, { status: 400 });
-    }
-
-    try {
-      await resetNotificationTemplate(templateId);
-      return json({ ok: true, savedSection: "Template reset" });
-    } catch (error) {
-      return json({ ok: false, error: friendlyActionError(error, "Template reset failed.") }, { status: 400 });
-    }
+    await resetNotificationTemplate(templateId);
+    return json({ ok: true, savedSection: "Template reset" });
   }
 
   if (intent === "saveTemplate") {
-    if (!templateId) {
-      return json({ ok: false, error: "Choose a template before saving it." }, { status: 400 });
-    }
+    await saveNotificationTemplate(templateId, {
+      emailSubject: String(formData.get("emailSubject") || ""),
+      emailHtml: String(formData.get("emailHtml") || ""),
+      smsBody: String(formData.get("smsBody") || ""),
+    });
 
-    const smsBody = String(formData.get("smsBody") || "");
-
-    if (!smsBody.trim()) {
-      return json({ ok: false, error: "SMS template cannot be blank." }, { status: 400 });
-    }
-
-    try {
-      await saveNotificationTemplate(templateId, {
-        emailSubject: String(formData.get("emailSubject") || ""),
-        emailHtml: String(formData.get("emailHtml") || ""),
-        smsBody,
-      });
-
-      return json({ ok: true, savedSection: "Template saved" });
-    } catch (error) {
-      return json({ ok: false, error: friendlyActionError(error, "Template save failed.") }, { status: 400 });
-    }
+    return json({ ok: true, savedSection: "Template saved" });
   }
 
   return json({ ok: false, error: "Template action was not recognised." }, { status: 400 });
@@ -242,43 +190,6 @@ function TestSmsCard({ twilioEnabled, sent }: { twilioEnabled: boolean; sent: bo
           />
           <Button submit variant="primary" disabled={!twilioEnabled || !testPhone.trim()}>
             Send test SMS
-          </Button>
-        </BlockStack>
-      </Form>
-    </LegacyCard>
-  );
-}
-
-function TestEmailCard({ resendEnabled, sent }: { resendEnabled: boolean; sent: boolean }) {
-  const [testEmail, setTestEmail] = useState("");
-
-  return (
-    <LegacyCard title="Email setup test" sectioned>
-      <Form method="post">
-        <input type="hidden" name="intent" value="sendTestEmail" />
-        <BlockStack gap="300">
-          <InlineStack align="space-between" blockAlign="center" gap="300">
-            <BlockStack gap="100">
-              <Text as="p" variant="bodyMd">
-                Send one test email before using customer email notifications.
-              </Text>
-              <Text as="p" variant="bodySm" tone="subdued">
-                Add your Resend details in Settings, Notifications first. The email master switch must be on.
-              </Text>
-            </BlockStack>
-            {sent ? <Badge tone="success">Test sent</Badge> : null}
-          </InlineStack>
-          <TextField
-            label="Test email address"
-            name="testEmail"
-            type="email"
-            value={testEmail}
-            onChange={setTestEmail}
-            placeholder="name@example.com"
-            autoComplete="off"
-          />
-          <Button submit variant="primary" disabled={!resendEnabled || !testEmail.trim()}>
-            Send test email
           </Button>
         </BlockStack>
       </Form>
@@ -434,19 +345,13 @@ export default function Notifications() {
                 <Badge tone={emailNotificationsEnabled ? "success" : "critical"}>{`Emails ${emailNotificationsEnabled ? "on" : "off"}`}</Badge>
               </InlineStack>
               {actionData?.ok ? <Badge tone="success">{actionData.savedSection}</Badge> : null}
-              {actionData && "error" in actionData ? (
-                <Box background="bg-surface-critical" padding="300" borderRadius="300">
-                  <Text as="p" tone="critical">{actionData.error}</Text>
-                </Box>
-              ) : null}
+              {actionData && "error" in actionData ? <Text as="p" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
 
           <EmailMasterToggleCard emailNotificationsEnabled={emailNotificationsEnabled} resendConfigured={resendConfigured} resendEnabled={resendEnabled} />
 
           <TestSmsCard twilioEnabled={twilioEnabled} sent={Boolean(actionData?.ok && actionData.savedSection?.startsWith("Test SMS sent"))} />
-
-          <TestEmailCard resendEnabled={resendEnabled} sent={Boolean(actionData?.ok && actionData.savedSection?.startsWith("Test email sent"))} />
 
           <LegacyCard title="Variables" sectioned>
             <BlockStack gap="200">
