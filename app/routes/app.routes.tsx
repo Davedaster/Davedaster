@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { useState } from "react";
 import {
   Page,
   Layout,
@@ -96,11 +97,7 @@ function fulfilmentMessage(result: Awaited<ReturnType<typeof fulfilRouteOrders>>
 }
 
 function actionToast(title: string, detail?: string, tone: AdminToastMessage["tone"] = "success"): AdminToastMessage {
-  return {
-    title,
-    detail,
-    tone,
-  };
+  return { title, detail, tone };
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -139,7 +136,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "deleteTest") {
     try {
       await deleteTestRoute(routeId);
-      return json<RouteActionData>({ ok: true, message: "Route deleted for testing.", toasts: [actionToast("Route deleted for testing")] });
+      return json<RouteActionData>({ ok: true, message: "Route deleted.", toasts: [actionToast("Route deleted")] });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Route could not be deleted.";
       return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Route could not be deleted", message, "critical")] }, { status: 400 });
@@ -231,61 +228,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 function formatDate(value: string | Date) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
 }
 
 function formatDateTime(value: string | Date | null | undefined) {
-  if (!value) {
-    return "Pending";
-  }
-
+  if (!value) return "Pending";
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Pending";
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
+}
 
-  if (Number.isNaN(date.getTime())) {
-    return "Pending";
-  }
+function todayInputValue() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+function routeDateInputValue(value: string | Date) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
 }
 
 function statusTone(status: string) {
-  if (status === "DRAFT") {
-    return "info" as const;
-  }
-
-  if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") {
-    return "success" as const;
-  }
-
-  if (status === "OUT_FOR_DELIVERY") {
-    return "attention" as const;
-  }
-
-  if (status === "COMPLETED") {
-    return "success" as const;
-  }
-
+  if (status === "DRAFT") return "info" as const;
+  if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") return "success" as const;
+  if (status === "OUT_FOR_DELIVERY") return "attention" as const;
+  if (status === "COMPLETED") return "success" as const;
   return "attention" as const;
 }
 
 function routeLiveLabel(status: string) {
-  if (status === "OUT_FOR_DELIVERY") {
-    return "Driver out";
-  }
-
-  if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") {
-    return "Ready, not started";
-  }
-
+  if (status === "OUT_FOR_DELIVERY") return "Driver out";
+  if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") return "Ready, not started";
   return status.replaceAll("_", " ").toLowerCase();
 }
 
@@ -297,7 +270,7 @@ function isStopDone(stop: StopListItem) {
   return stop.status === "DELIVERED" || stop.status === "FAILED";
 }
 
-function isTestDeleteAllowed(status: string) {
+function isRouteDeleteAllowed(status: string) {
   return ["PUBLISHED", "NOTIFICATIONS_SENT", "COMPLETED", "CANCELLED"].includes(status);
 }
 
@@ -309,19 +282,12 @@ function stopCustomerLabel(stop: StopListItem) {
   const names = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ");
   const orders = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).filter(Boolean).join(", ");
   const postcode = stop.deliveryGroup?.postcode || "No postcode";
-
   return [orders, names, postcode].filter(Boolean).join(" · ");
 }
 
 function stopEtaLabel(stop: StopListItem) {
-  if (stop.status === "DELIVERED") {
-    return `Delivered ${formatDateTime(stop.actualArrival)}`;
-  }
-
-  if (stop.status === "FAILED") {
-    return `Missed ${formatDateTime(stop.actualArrival)}`;
-  }
-
+  if (stop.status === "DELIVERED") return `Delivered ${formatDateTime(stop.actualArrival)}`;
+  if (stop.status === "FAILED") return `Missed ${formatDateTime(stop.actualArrival)}`;
   return `ETA ${formatDateTime(stop.estimatedArrival)}`;
 }
 
@@ -329,19 +295,11 @@ function estimateFinishTime(route: RouteListItem) {
   const orderedStops = [...route.stops].sort((a, b) => a.orderIndex - b.orderIndex);
   const remainingStops = orderedStops.filter((stop) => stop.status === "PENDING");
   const timePerDropMinutes = Math.max(1, route.timePerDropMinutes || 10);
-
   if (remainingStops.length) {
     const lastRemainingEta = remainingStops[remainingStops.length - 1]?.estimatedArrival;
-
-    if (lastRemainingEta) {
-      return new Date(new Date(lastRemainingEta).getTime() + timePerDropMinutes * 60 * 1000);
-    }
+    if (lastRemainingEta) return new Date(new Date(lastRemainingEta).getTime() + timePerDropMinutes * 60 * 1000);
   }
-
-  const lastActual = [...orderedStops]
-    .reverse()
-    .find((stop) => stop.actualArrival)?.actualArrival;
-
+  const lastActual = [...orderedStops].reverse().find((stop) => stop.actualArrival)?.actualArrival;
   return lastActual || null;
 }
 
@@ -349,7 +307,6 @@ function finishLocationLabel(route: RouteListItem) {
   const finishAddress = route.finishAddress || route.startAddress || "Base";
   const startAddress = route.startAddress || "";
   const returnsToBase = finishAddress.trim().toLowerCase() === startAddress.trim().toLowerCase() || finishAddress.toLowerCase().includes("olympus");
-
   return returnsToBase ? "Return to base" : "Custom end point";
 }
 
@@ -359,12 +316,7 @@ function confirmDelete(routeName: string, label: string) {
 
 function ProgressBar({ value }: { value: number }) {
   const safeValue = Math.max(0, Math.min(100, value));
-
-  return (
-    <div style={{ width: "100%", height: 10, background: "#eef2f7", borderRadius: 999, overflow: "hidden" }}>
-      <div style={{ width: `${safeValue}%`, height: "100%", background: "#509AE6", borderRadius: 999 }} />
-    </div>
-  );
+  return <div style={{ width: "100%", height: 10, background: "#eef2f7", borderRadius: 999, overflow: "hidden" }}><div style={{ width: `${safeValue}%`, height: "100%", background: "#509AE6", borderRadius: 999 }} /></div>;
 }
 
 function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
@@ -374,16 +326,9 @@ function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: Drive
       <input type="hidden" name="routeId" value={route.id} />
       <InlineStack gap="200" blockAlign="center" wrap>
         <label style={{ fontSize: 13, fontWeight: 600 }} htmlFor={`driver-${route.id}`}>Driver</label>
-        <select
-          id={`driver-${route.id}`}
-          name="driverId"
-          defaultValue={route.driverId || ""}
-          style={{ minWidth: 180, minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }}
-        >
+        <select id={`driver-${route.id}`} name="driverId" defaultValue={route.driverId || ""} style={{ minWidth: 180, minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }}>
           <option value="">No driver</option>
-          {drivers.map((driver) => (
-            <option key={driver.id} value={driver.id}>{driver.name}</option>
-          ))}
+          {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
         </select>
         <Button submit>Save driver</Button>
       </InlineStack>
@@ -393,14 +338,7 @@ function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: Drive
 
 function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteListItem; intent: "deleteDraft" | "deleteTest"; label: string; confirmLabel: string }) {
   return (
-    <Form
-      method="post"
-      onSubmit={(event) => {
-        if (!window.confirm(confirmDelete(route.name, confirmLabel))) {
-          event.preventDefault();
-        }
-      }}
-    >
+    <Form method="post" onSubmit={(event) => { if (!window.confirm(confirmDelete(route.name, confirmLabel))) event.preventDefault(); }}>
       <input type="hidden" name="intent" value={intent} />
       <input type="hidden" name="routeId" value={route.id} />
       <Button submit tone="critical">{label}</Button>
@@ -409,13 +347,7 @@ function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteL
 }
 
 function FulfilRouteForm({ route }: { route: RouteListItem }) {
-  return (
-    <Form method="post">
-      <input type="hidden" name="intent" value="fulfilRoute" />
-      <input type="hidden" name="routeId" value={route.id} />
-      <Button submit>Fulfil Shopify orders now</Button>
-    </Form>
-  );
+  return <Form method="post"><input type="hidden" name="intent" value="fulfilRoute" /><input type="hidden" name="routeId" value={route.id} /><Button submit>Fulfil Shopify orders now</Button></Form>;
 }
 
 function PackingListButton({ route }: { route: RouteListItem }) {
@@ -436,48 +368,12 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
     <LegacyCard sectioned>
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="start" gap="300">
-          <BlockStack gap="100">
-            <InlineStack gap="200" blockAlign="center">
-              <Text as="h3" variant="headingMd">{route.driver?.name || "No driver"}</Text>
-              <Badge tone={statusTone(route.status)}>{routeLiveLabel(route.status)}</Badge>
-            </InlineStack>
-            <Text as="p" variant="bodyMd" tone="subdued">{route.name} · {formatDate(route.date)}</Text>
-            <Text as="p" variant="bodySm" tone="subdued">Start {route.plannedStartTime || "05:00"} · {finishLocationLabel(route)}: {route.finishAddress || route.startAddress || "Base"}</Text>
-          </BlockStack>
-          <BlockStack gap="200">
-            <DriverSelect route={route} drivers={drivers} />
-            <InlineStack gap="200" align="end" wrap>
-              <PackingListButton route={route} />
-              {isFulfilmentRetryAllowed(route.status) ? <FulfilRouteForm route={route} /> : null}
-              {isTestDeleteAllowed(route.status) ? <DeleteRouteForm route={route} intent="deleteTest" label="Delete test route" confirmLabel="this published test route" /> : null}
-            </InlineStack>
-          </BlockStack>
+          <BlockStack gap="100"><InlineStack gap="200" blockAlign="center"><Text as="h3" variant="headingMd">{route.driver?.name || "No driver"}</Text><Badge tone={statusTone(route.status)}>{routeLiveLabel(route.status)}</Badge></InlineStack><Text as="p" variant="bodyMd" tone="subdued">{route.name} · {formatDate(route.date)}</Text><Text as="p" variant="bodySm" tone="subdued">Start {route.plannedStartTime || "05:00"} · {finishLocationLabel(route)}: {route.finishAddress || route.startAddress || "Base"}</Text></BlockStack>
+          <BlockStack gap="200"><DriverSelect route={route} drivers={drivers} /><InlineStack gap="200" align="end" wrap><PackingListButton route={route} />{isFulfilmentRetryAllowed(route.status) ? <FulfilRouteForm route={route} /> : null}{isRouteDeleteAllowed(route.status) ? <DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /> : null}</InlineStack></BlockStack>
         </InlineStack>
-
-        <BlockStack gap="150">
-          <InlineStack align="space-between">
-            <Text as="span" variant="bodySm">{completedStops.length}/{orderedStops.length} stops resolved</Text>
-            <Text as="span" variant="bodySm" tone="subdued">{progress}%</Text>
-          </InlineStack>
-          <ProgressBar value={progress} />
-        </BlockStack>
-
-        <InlineStack gap="400" wrap>
-          <Text as="span" variant="bodyMd">Delivered: {deliveredStops.length}</Text>
-          <Text as="span" variant="bodyMd">Missed: {failedStops.length}</Text>
-          <Text as="span" variant="bodyMd">To go: {remainingStops.length}</Text>
-          <Text as="span" variant="bodyMd">Finish target: {formatDateTime(finishTime)}</Text>
-        </InlineStack>
-
-        {nextStop ? (
-          <Box background="bg-surface-secondary" padding="300" borderRadius="300">
-            <BlockStack gap="100">
-              <Text as="p" variant="bodyMd" fontWeight="bold">Next drop: Stop {nextStop.orderIndex}</Text>
-              <Text as="p" variant="bodySm">{stopCustomerLabel(nextStop)}</Text>
-              <Text as="p" variant="bodySm" tone="subdued">{stopEtaLabel(nextStop)}</Text>
-            </BlockStack>
-          </Box>
-        ) : null}
+        <BlockStack gap="150"><InlineStack align="space-between"><Text as="span" variant="bodySm">{completedStops.length}/{orderedStops.length} stops resolved</Text><Text as="span" variant="bodySm" tone="subdued">{progress}%</Text></InlineStack><ProgressBar value={progress} /></BlockStack>
+        <InlineStack gap="400" wrap><Text as="span" variant="bodyMd">Delivered: {deliveredStops.length}</Text><Text as="span" variant="bodyMd">Missed: {failedStops.length}</Text><Text as="span" variant="bodyMd">To go: {remainingStops.length}</Text><Text as="span" variant="bodyMd">Finish target: {formatDateTime(finishTime)}</Text></InlineStack>
+        {nextStop ? <Box background="bg-surface-secondary" padding="300" borderRadius="300"><BlockStack gap="100"><Text as="p" variant="bodyMd" fontWeight="bold">Next drop: Stop {nextStop.orderIndex}</Text><Text as="p" variant="bodySm">{stopCustomerLabel(nextStop)}</Text><Text as="p" variant="bodySm" tone="subdued">{stopEtaLabel(nextStop)}</Text></BlockStack></Box> : null}
       </BlockStack>
     </LegacyCard>
   );
@@ -485,7 +381,7 @@ function LiveRouteProgressCard({ route, drivers }: { route: RouteListItem; drive
 
 function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverListItem[] }) {
   const isDraft = route.status === "DRAFT";
-  const canDeleteTestRoute = isTestDeleteAllowed(route.status);
+  const canDeleteRoute = isRouteDeleteAllowed(route.status);
   const canRetryFulfilment = isFulfilmentRetryAllowed(route.status);
 
   return (
@@ -494,49 +390,23 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
         <InlineStack align="space-between" blockAlign="start" gap="300">
           <BlockStack gap="100">
             <Text as="h3" variant="bodyMd" fontWeight="bold">{route.name}</Text>
-            <Text as="p" variant="bodySm" tone="subdued">
-              {formatDate(route.date)} · Start {route.plannedStartTime || "05:00"} · {route.timePerDropMinutes || 10} min/drop · {route.stops.length} stops
-            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">{formatDate(route.date)} · Start {route.plannedStartTime || "05:00"} · {route.timePerDropMinutes || 10} min/drop · {route.stops.length} stops</Text>
             <Text as="p" variant="bodySm" tone="subdued">Driver: {route.driver?.name || "No driver assigned"}</Text>
             <Text as="p" variant="bodySm" tone="subdued">Start: {route.startAddress || "Bathroom Panels Direct"}</Text>
             <Text as="p" variant="bodySm" tone="subdued">Finish: {route.finishAddress || "Bathroom Panels Direct"}</Text>
-            <Text as="p" variant="bodySm" tone="subdued">
-              {route.stops
-                .map((stop) => stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", "))
-                .filter(Boolean)
-                .join(" · ")}
-            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">{route.stops.map((stop) => stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ")).filter(Boolean).join(" · ")}</Text>
           </BlockStack>
           <Badge tone={statusTone(route.status)}>{route.status}</Badge>
         </InlineStack>
-
         <Box background="bg-surface-secondary" padding="300" borderRadius="300">
           <BlockStack gap="250">
             <DriverSelect route={route} drivers={drivers} />
-
             {isDraft ? (
-              <InlineStack gap="200" wrap>
-                <PackingListButton route={route} />
-                <Form method="post">
-                  <input type="hidden" name="intent" value="publish" />
-                  <input type="hidden" name="routeId" value={route.id} />
-                  <Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button>
-                </Form>
-                <DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" />
-              </InlineStack>
-            ) : canDeleteTestRoute ? (
-              <InlineStack gap="200" wrap blockAlign="center">
-                <PackingListButton route={route} />
-                {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
-                <DeleteRouteForm route={route} intent="deleteTest" label="Delete published route" confirmLabel="this published test route" />
-                <Text as="span" variant="bodySm" tone="subdued">Use these for testing and fixing skipped fulfilments.</Text>
-              </InlineStack>
+              <InlineStack gap="200" wrap><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
+            ) : canDeleteRoute ? (
+              <InlineStack gap="200" wrap blockAlign="center"><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /></InlineStack>
             ) : (
-              <InlineStack gap="200" wrap blockAlign="center">
-                <PackingListButton route={route} />
-                {canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}
-                <Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text>
-              </InlineStack>
+              <InlineStack gap="200" wrap blockAlign="center"><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text></InlineStack>
             )}
           </BlockStack>
         </Box>
@@ -548,7 +418,12 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
 export default function Routes() {
   const { routes, drivers, initialToasts } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const [completedDateDraft, setCompletedDateDraft] = useState(todayInputValue());
+  const [completedDateSearch, setCompletedDateSearch] = useState(todayInputValue());
   const liveRoutes = routes.filter(isRouteInProgress);
+  const visibleRoutes = routes.filter((route) => route.status !== "COMPLETED");
+  const completedRoutesForDate = routes.filter((route) => route.status === "COMPLETED" && routeDateInputValue(route.date) === completedDateSearch);
+  const completedRouteCount = routes.filter((route) => route.status === "COMPLETED").length;
   const actionToasts = actionData?.toasts || (actionData && "error" in actionData && actionData.error ? [actionToast("Action failed", actionData.error, "critical")] : []);
 
   return (
@@ -559,12 +434,7 @@ export default function Routes() {
           <LegacyCard sectioned>
             <BlockStack gap="200">
               <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h2" variant="headingMd">Live route progress</Text>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Track drivers that are ready or out on the road, with completed drops, remaining drops, next ETA and finish target.
-                  </Text>
-                </BlockStack>
+                <BlockStack gap="100"><Text as="h2" variant="headingMd">Live route progress</Text><Text as="p" variant="bodyMd" tone="subdued">Track drivers that are ready or out on the road, with completed drops, remaining drops, next ETA and finish target.</Text></BlockStack>
                 <Badge tone={liveRoutes.length ? "attention" : "success"}>{liveRoutes.length ? `${liveRoutes.length} active` : "No live routes"}</Badge>
               </InlineStack>
               {actionData && "message" in actionData ? <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text> : null}
@@ -572,30 +442,30 @@ export default function Routes() {
             </BlockStack>
           </LegacyCard>
 
-          {liveRoutes.length ? (
+          {liveRoutes.length ? <BlockStack gap="300">{liveRoutes.map((route) => <LiveRouteProgressCard key={route.id} route={route} drivers={drivers} />)}</BlockStack> : <LegacyCard sectioned><Text as="p" variant="bodyMd" tone="subdued">No published or active delivery routes are currently running.</Text></LegacyCard>}
+
+          <LegacyCard sectioned>
             <BlockStack gap="300">
-              {liveRoutes.map((route) => <LiveRouteProgressCard key={route.id} route={route} drivers={drivers} />)}
+              <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
+                <BlockStack gap="100"><Text as="h2" variant="headingMd">Find completed routes</Text><Text as="p" variant="bodyMd" tone="subdued">Completed routes are hidden from the main list. Pick a delivery date to view completed routes for that day.</Text></BlockStack>
+                <Badge tone="success">{completedRouteCount} completed</Badge>
+              </InlineStack>
+              <form onSubmit={(event) => { event.preventDefault(); setCompletedDateSearch(completedDateDraft); }}>
+                <InlineStack gap="200" blockAlign="center" wrap>
+                  <label style={{ fontSize: 13, fontWeight: 600 }} htmlFor="completed-route-date">Delivery date</label>
+                  <input id="completed-route-date" type="date" value={completedDateDraft} onChange={(event) => setCompletedDateDraft(event.currentTarget.value)} style={{ minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }} />
+                  <Button submit>Search</Button>
+                </InlineStack>
+              </form>
+              {completedRoutesForDate.length ? <ResourceList resourceName={{ singular: "completed route", plural: "completed routes" }} items={completedRoutesForDate} renderItem={(route) => <RouteCard route={route} drivers={drivers} />} /> : <Text as="p" variant="bodyMd" tone="subdued">No completed routes found for {formatDate(completedDateSearch)}.</Text>}
             </BlockStack>
-          ) : (
-            <LegacyCard sectioned>
-              <Text as="p" variant="bodyMd" tone="subdued">No published or active delivery routes are currently running.</Text>
-            </LegacyCard>
-          )}
+          </LegacyCard>
 
           <LegacyCard>
-            {routes.length === 0 ? (
-              <EmptyState
-                heading="No saved routes yet"
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
-              >
-                <p>Create a draft route from the Orders Map by selecting delivery pins.</p>
-              </EmptyState>
+            {visibleRoutes.length === 0 ? (
+              <EmptyState heading="No active or draft routes" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>Create a draft route from the Orders Map by selecting delivery pins, or search completed routes by date above.</p></EmptyState>
             ) : (
-              <ResourceList
-                resourceName={{ singular: "route", plural: "routes" }}
-                items={routes}
-                renderItem={(route) => <RouteCard route={route} drivers={drivers} />}
-              />
+              <ResourceList resourceName={{ singular: "route", plural: "routes" }} items={visibleRoutes} renderItem={(route) => <RouteCard route={route} drivers={drivers} />} />
             )}
           </LegacyCard>
         </Layout.Section>
