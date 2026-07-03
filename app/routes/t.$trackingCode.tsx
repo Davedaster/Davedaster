@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { ProfileCard } from "../components/ProfileCard";
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
+import { getCustomerTrackingSettings, type CustomerTrackingSettings } from "../lib/customerTrackingSettings.server";
 import { formatEtaSlot } from "../lib/etaSlots";
 import { createSignedProofPhotoUrls } from "../lib/proofPhotoStorage.server";
 
@@ -33,6 +34,20 @@ function cleanStatus(value: string) {
   return value.replaceAll("_", " ").toLowerCase();
 }
 
+function pageHeading(input: { routeStatus: string; stopStatus: string; settings: CustomerTrackingSettings }) {
+  if (input.stopStatus === "DELIVERED") return input.settings.heroDeliveredTitle;
+  if (input.stopStatus === "FAILED") return input.settings.heroAttemptedTitle;
+  if (input.routeStatus === "OUT_FOR_DELIVERY") return input.settings.heroOutForDeliveryTitle;
+  return input.settings.heroPlannedTitle;
+}
+
+function pageMessage(input: { routeStatus: string; stopStatus: string; settings: CustomerTrackingSettings }) {
+  if (input.stopStatus === "DELIVERED") return input.settings.deliveredMessage;
+  if (input.stopStatus === "FAILED") return input.settings.attemptedMessage;
+  if (input.routeStatus === "OUT_FOR_DELIVERY") return input.settings.outForDeliveryMessage;
+  return input.settings.notNextMessage;
+}
+
 type ProofPhoto = {
   id: string;
   url: string;
@@ -47,7 +62,10 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     throw new Response("Tracking details not found", { status: 404 });
   }
 
-  const tracking = await getCustomerTrackingByCode(trackingCode);
+  const [tracking, settings] = await Promise.all([
+    getCustomerTrackingByCode(trackingCode),
+    getCustomerTrackingSettings(),
+  ]);
   const stop = tracking?.deliveryGroup?.stops?.[0];
   const route = stop?.route;
 
@@ -60,6 +78,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   const signaturePhotos = proofPhotos.filter((photo) => photo.label?.toLowerCase().includes("signature"));
 
   return json({
+    settings,
     trackingCode,
     saved: url.searchParams.get("instructions") === "saved",
     missing: url.searchParams.get("instructions") === "missing",
@@ -131,18 +150,28 @@ function ProofImages({ photos, title, onOpen }: { photos: ProofPhoto[]; title: s
 
 export default function CustomerTrackingPage() {
   const data = useLoaderData<typeof loader>();
+  const { settings } = data;
   const [selectedProofPhoto, setSelectedProofPhoto] = useState<ProofPhoto | null>(null);
   const [safePlaceOption, setSafePlaceOption] = useState("side_gate");
   const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
   const complete = data.stopStatus === "DELIVERED";
   const missed = data.stopStatus === "FAILED";
   const requiresExtraDetails = safePlaceOption === "other";
+  const primaryColour = settings.primaryColour || "#509AE6";
+  const heading = pageHeading({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
+  const message = pageMessage({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
+  const callHref = settings.supportPhone ? `tel:${settings.supportPhone.replace(/[^+\d]/g, "")}` : null;
+  const emailHref = settings.supportEmail ? `mailto:${settings.supportEmail}` : null;
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f6fb", padding: "24px 14px", fontFamily: "Arial, sans-serif", color: "#1f2937" }}>
+      {settings.customCss ? <style>{settings.customCss}</style> : null}
       <section style={{ maxWidth: 720, margin: "0 auto", background: "#ffffff", borderRadius: 20, padding: 24, boxShadow: "0 10px 30px rgba(15,23,42,0.10)" }}>
-        <p style={{ margin: 0, color: "#509AE6", fontWeight: 900 }}>Bathroom Panels Direct</p>
-        <h1 style={{ margin: "8px 0 10px", fontSize: 30, lineHeight: 1.1 }}>Your delivery booking</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          {settings.logoUrl ? <img src={settings.logoUrl} alt={settings.companyName} style={{ maxHeight: 52, maxWidth: 210, objectFit: "contain" }} /> : <p style={{ margin: 0, color: primaryColour, fontWeight: 900 }}>{settings.companyName}</p>}
+        </div>
+        <h1 style={{ margin: "8px 0 10px", fontSize: 30, lineHeight: 1.1 }}>{heading}</h1>
+        <p style={{ margin: "0 0 8px", color: "#667085", fontWeight: 700 }}>{message}</p>
         <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>Order {data.orderNumber}</p>
 
         {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Safe place instructions saved.</div> : null}
@@ -156,6 +185,9 @@ export default function CustomerTrackingPage() {
         </div>
 
         <ProfileCard name={data.driverName} imageUrl={data.driverPhotoUrl} />
+        {settings.roomOfChoiceText ? <p style={{ margin: "8px 0 18px", color: "#667085", fontWeight: 700 }}>{settings.roomOfChoiceText}</p> : null}
+
+        {(callHref || emailHref) ? <div style={{ display: "grid", gridTemplateColumns: callHref && emailHref ? "1fr 1fr" : "1fr", gap: 10, marginBottom: 18 }}>{callHref ? <a href={callHref} style={{ background: primaryColour, color: "#ffffff", borderRadius: 14, padding: "13px 14px", textAlign: "center", textDecoration: "none", fontWeight: 900 }}>Call our team</a> : null}{emailHref ? <a href={emailHref} style={{ background: "#323841", color: "#ffffff", borderRadius: 14, padding: "13px 14px", textAlign: "center", textDecoration: "none", fontWeight: 900 }}>Email our team</a> : null}</div> : null}
 
         {complete || missed ? (data.proofPhotos.length ? <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div> : <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>) : null}
 
@@ -181,12 +213,14 @@ export default function CustomerTrackingPage() {
             </label>
             <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>
               Extra details {requiresExtraDetails ? <span style={{ color: "#dc2626" }}>*</span> : <span style={{ color: "#667085", fontWeight: 700 }}>(optional)</span>}
-              <textarea name="safePlaceDetails" rows={3} maxLength={500} required={requiresExtraDetails} aria-invalid={requiresExtraDetails ? "true" : undefined} placeholder={requiresExtraDetails ? "Please tell us where the driver should leave the panels" : "Example, access instructions or where to place the panels"} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: requiresExtraDetails ? "2px solid #dc2626" : "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />
+              <textarea name="safePlaceDetails" rows={3} maxLength={500} required={requiresExtraDetails} aria-invalid={requiresExtraDetails ? "true" : undefined} placeholder={requiresExtraDetails ? "Please tell us where the driver should leave the panels" : "Example, where to place the panels"} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: requiresExtraDetails ? "2px solid #dc2626" : "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />
               {requiresExtraDetails ? <span style={{ display: "block", marginTop: 6, color: "#dc2626", fontSize: 13 }}>Please add instructions for the driver.</span> : null}
             </label>
-            <button type="submit" disabled={complete || missed} style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px 16px", background: complete || missed ? "#d0d5dd" : "#509AE6", color: "#ffffff", fontSize: 16, fontWeight: 900 }}>Save instructions</button>
+            <button type="submit" disabled={complete || missed} style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px 16px", background: complete || missed ? "#d0d5dd" : primaryColour, color: "#ffffff", fontSize: 16, fontWeight: 900 }}>Save instructions</button>
           </form>
         </div>
+
+        {settings.customFooterHtml ? <div style={{ marginTop: 18 }} dangerouslySetInnerHTML={{ __html: settings.customFooterHtml }} /> : null}
       </section>
       {selectedProofPhoto ? <ProofImageViewer photo={selectedProofPhoto} onClose={() => setSelectedProofPhoto(null)} /> : null}
     </main>
