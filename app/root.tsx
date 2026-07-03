@@ -22,7 +22,7 @@ const planningPanelStyles = `
   }
 
   .bpd-tomtom-popup .mapboxgl-popup-content:not([data-bpd-tooltip-ready="true"]) {
-    opacity: 0;
+    opacity: 1;
   }
 
   .bpd-tomtom-popup .mapboxgl-popup-content[data-bpd-tooltip-ready="true"] {
@@ -33,8 +33,17 @@ const planningPanelStyles = `
     font-weight: 800;
   }
 
+  .bpd-fulfil-dot {
+    font-size: 11px;
+    margin-right: 4px;
+  }
+
   .bpd-fulfil-date-green {
     color: #16a34a;
+  }
+
+  .bpd-fulfil-date-blue {
+    color: #2563eb;
   }
 
   .bpd-fulfil-date-orange {
@@ -251,6 +260,15 @@ const planningPanelScript = `
       return 'red';
     };
 
+    const fulfilDateToneFromLine = (rawText, dateText) => {
+      if (rawText.includes('🟢')) return 'green';
+      if (rawText.includes('🔵')) return 'blue';
+      if (rawText.includes('🟠')) return 'orange';
+      if (rawText.includes('🔴')) return 'red';
+      if (rawText.includes('⚪')) return 'grey';
+      return fulfilDateTone(dateText);
+    };
+
     const markTooltipReady = () => {
       document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
         if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
@@ -264,9 +282,11 @@ const planningPanelScript = `
         const cleanText = rawText.replace(/^[^A-Za-z0-9]*\s*/, '').trim();
         if (!cleanText.toLowerCase().startsWith('fulfil by:')) return;
         const dateText = cleanText.replace(/^fulfil by:\s*/i, '').trim();
-        const tone = fulfilDateTone(dateText);
-        line.dataset.bpdFulfilStyled = 'true';
-        line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
+        const tone = fulfilDateToneFromLine(rawText, dateText);
+        if (line.dataset.bpdFulfilStyled === tone && line.dataset.bpdFulfilDate === dateText) return;
+        line.dataset.bpdFulfilStyled = tone;
+        line.dataset.bpdFulfilDate = dateText;
+        line.innerHTML = '<span class="bpd-fulfil-dot bpd-fulfil-date-' + tone + '">●</span> Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
       });
       markTooltipReady();
     };
