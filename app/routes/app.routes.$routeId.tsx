@@ -351,6 +351,15 @@ function formatSlot(estimatedArrival: string | Date | null, slotMinutes = 60) {
   return formatEtaSlot(start, end);
 }
 
+const plannedStartTimeOptions = Array.from({ length: 24 * 4 }, (_, index) => {
+  const totalMinutes = index * 15;
+  const hours = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+  const minutes = String(totalMinutes % 60).padStart(2, "0");
+  const value = `${hours}:${minutes}`;
+
+  return { label: value, value };
+});
+
 export default function RouteDetails() {
   const { route, drivers, routexlEnabled } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -445,7 +454,7 @@ export default function RouteDetails() {
                 <BlockStack gap="200">
                   <input type="hidden" name="intent" value="updatePlanning" />
                   <TextField label="Route date" name="routeDate" type="date" value={routeDate} onChange={setRouteDate} autoComplete="off" />
-                  <TextField label="Planned start time" name="plannedStartTime" type="time" value={plannedStartTime} onChange={setPlannedStartTime} autoComplete="off" />
+                  <Select label="Planned start time" name="plannedStartTime" options={plannedStartTimeOptions} value={plannedStartTime} onChange={setPlannedStartTime} />
                   <TextField label="Minutes at each drop" name="timePerDropMinutes" type="number" min={1} value={timePerDropMinutes} onChange={setTimePerDropMinutes} autoComplete="off" />
                   <TextField label="Customer delivery slot minutes" name="customerSlotMinutes" type="number" min={15} value={customerSlotMinutes} onChange={setCustomerSlotMinutes} autoComplete="off" helpText="Example: 60 gives the customer a one hour ETA window." />
                   <TextField label="Route start address" name="startAddress" value={startAddress} onChange={setStartAddress} autoComplete="off" />
