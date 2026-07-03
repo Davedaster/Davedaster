@@ -276,6 +276,19 @@ const planningPanelScript = `
       });
     };
 
+    const tidyDriverMobileCompletedCards = () => {
+      if (!window.location.pathname.startsWith('/driver/routes/')) return;
+      document.querySelectorAll('article').forEach((card) => {
+        if (!card.textContent?.includes('✓ Delivery complete')) return;
+        const header = card.querySelector('h2')?.parentElement;
+        const timeLine = header?.querySelector('p');
+        if (!timeLine || timeLine.dataset.bpdCompletedTimeFixed === 'true') return;
+        if (!/^\d{2}:\d{2}\s+to\s+\d{2}:\d{2}$/.test(timeLine.textContent?.trim() || '')) return;
+        timeLine.textContent = 'Delivery complete';
+        timeLine.dataset.bpdCompletedTimeFixed = 'true';
+      });
+    };
+
     const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -379,6 +392,7 @@ const planningPanelScript = `
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
       tidyDriverRouteCards();
+      tidyDriverMobileCompletedCards();
       showStoredDraftRouteToast();
     };
 
