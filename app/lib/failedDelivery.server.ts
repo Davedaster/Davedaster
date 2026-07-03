@@ -48,6 +48,10 @@ function tidyReasonForTag(reason: string) {
   return reason.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
+function shopifyErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown Shopify error";
+}
+
 async function tagOrderFailedDelivery(admin: ShopifyAdmin, shopifyOrderId: string, reason: string) {
   const response = await admin.graphql(TAGS_ADD_MUTATION, {
     variables: {
@@ -104,13 +108,6 @@ export async function markStopFailedDelivery(input: {
     throw new Error("This stop has already been marked failed.");
   }
 
-  const shopifyResults: string[] = [];
-
-  for (const order of stop.deliveryGroup.orders) {
-    await tagOrderFailedDelivery(input.admin, order.shopifyOrderId, reason);
-    shopifyResults.push(order.shopifyOrderNumber);
-  }
-
   await prisma.$transaction(async (tx) => {
     await tx.deliveryGroup.update({
       where: {
@@ -143,10 +140,33 @@ export async function markStopFailedDelivery(input: {
         history: {
           create: {
             action: "Stop failed",
-            details: `Stop ${stop.orderIndex} marked failed. Reason: ${reason}. Shopify orders tagged: ${shopifyResults.join(", ")}`,
+            details: `Stop ${stop.orderIndex} marked failed. Reason: ${reason}. Shopify tagging will run after the failed delivery has been saved.`,
           },
         },
       },
     });
   });
+
+  const shopifyResults: string[] = [];
+
+  for (const order of stop.deliveryGroup.orders) {
+    try {
+      await tagOrderFailedDelivery(input.admin, order.shopifyOrderId, reason);
+      shopifyResults.push(`${order.shopifyOrderNumber}: tagged`);
+    } catch (error) {
+      shopifyResults.push(`${order.shopifyOrderNumber}: Shopify tag skipped, ${shopifyErrorMessage(error)}`);
+    }
+  }
+
+  try {
+    await prisma.routeHistory.create({
+      data: {
+        routeId: stop.routeId,
+        action: "Failed delivery follow up completed",
+        details: `Shopify: ${shopifyResults.join(", ") || "No linked Shopify orders found"}`,
+      },
+    });
+  } catch {
+    // Follow up logging must not undo a failed delivery.
+  }
 }
