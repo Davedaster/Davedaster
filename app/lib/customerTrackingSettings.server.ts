@@ -1,5 +1,11 @@
 import prisma from "../db.server";
 
+export type SafePlaceOption = {
+  id: string;
+  label: string;
+  requiresDetails: boolean;
+};
+
 export type CustomerTrackingSettings = {
   companyName: string;
   logoUrl: string;
@@ -28,11 +34,19 @@ export type CustomerTrackingSettings = {
   previewItemOne: string;
   previewItemTwo: string;
   previewItemThree: string;
+  safePlaceOptions: SafePlaceOption[];
   customFooterHtml: string;
   customCss: string;
 };
 
 const SETTINGS_KEY = "customer_tracking_page_settings";
+
+export const defaultSafePlaceOptions: SafePlaceOption[] = [
+  { id: "side_gate", label: "Leave behind side gate", requiresDetails: false },
+  { id: "rear_garden", label: "Leave in rear garden", requiresDetails: false },
+  { id: "garage", label: "Leave in garage", requiresDetails: false },
+  { id: "other", label: "Other safe place", requiresDetails: true },
+];
 
 export const defaultCustomerTrackingSettings: CustomerTrackingSettings = {
   companyName: "Bathroom Panels Direct",
@@ -62,6 +76,7 @@ export const defaultCustomerTrackingSettings: CustomerTrackingSettings = {
   previewItemOne: "2 × White Marble Gloss Panels",
   previewItemTwo: "1 × Chrome End Cap Trim",
   previewItemThree: "2 × Soudal Grip All Adhesive",
+  safePlaceOptions: defaultSafePlaceOptions,
   customFooterHtml: "",
   customCss: "",
 };
@@ -72,6 +87,31 @@ function clean(value: unknown) {
 
 function normaliseColour(value: string, fallback = defaultCustomerTrackingSettings.primaryColour) {
   return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function makeSafePlaceId(label: string, index: number) {
+  const letters = label.toLowerCase().replaceAll(" ", "_").replaceAll("/", "_").replaceAll(".", "_").replaceAll(",", "_");
+  return letters.replace(/_+/g, "_").replace(/^_/, "").replace(/_$/, "").slice(0, 40) || `safe_place_${index + 1}`;
+}
+
+function normaliseSafePlaceOptions(value: unknown): SafePlaceOption[] {
+  if (!Array.isArray(value)) return defaultSafePlaceOptions;
+
+  const options: SafePlaceOption[] = [];
+
+  value.forEach((rawOption, index) => {
+    if (!rawOption || typeof rawOption !== "object") return;
+    const option = rawOption as Partial<SafePlaceOption>;
+    const label = clean(option.label).slice(0, 80);
+    if (!label) return;
+    options.push({
+      id: makeSafePlaceId(clean(option.id) || label, index),
+      label,
+      requiresDetails: Boolean(option.requiresDetails),
+    });
+  });
+
+  return options.length ? options.slice(0, 12) : defaultSafePlaceOptions;
 }
 
 function normaliseSettings(value: Partial<CustomerTrackingSettings> | null | undefined): CustomerTrackingSettings {
@@ -103,6 +143,7 @@ function normaliseSettings(value: Partial<CustomerTrackingSettings> | null | und
     previewItemOne: clean(value?.previewItemOne) || defaultCustomerTrackingSettings.previewItemOne,
     previewItemTwo: clean(value?.previewItemTwo) || defaultCustomerTrackingSettings.previewItemTwo,
     previewItemThree: clean(value?.previewItemThree) || defaultCustomerTrackingSettings.previewItemThree,
+    safePlaceOptions: normaliseSafePlaceOptions(value?.safePlaceOptions),
     customFooterHtml: clean(value?.customFooterHtml),
     customCss: clean(value?.customCss),
   };
