@@ -5,6 +5,8 @@ export type EtaSlot = {
   slotEnd: Date;
 };
 
+const ROUTE_TIME_ZONE = "Europe/London";
+
 function parseTimeToMinutes(value: string) {
   const [hours, minutes = "0"] = value.split(":");
   const parsedHours = Number(hours);
@@ -33,6 +35,8 @@ export function formatEtaSlot(start: Date, end: Date) {
   const formatter = new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: ROUTE_TIME_ZONE,
   });
 
   return `${formatter.format(start)} to ${formatter.format(end)}`;
