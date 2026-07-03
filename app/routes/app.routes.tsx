@@ -338,10 +338,10 @@ function DriverSelect({ route, drivers }: { route: RouteListItem; drivers: Drive
 
 function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteListItem; intent: "deleteDraft" | "deleteTest"; label: string; confirmLabel: string }) {
   return (
-    <Form method="post" onSubmit={(event) => { if (!window.confirm(confirmDelete(route.name, confirmLabel))) event.preventDefault(); }}>
+    <Form method="post" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.stopPropagation(); if (!window.confirm(confirmDelete(route.name, confirmLabel))) event.preventDefault(); }}>
       <input type="hidden" name="intent" value={intent} />
       <input type="hidden" name="routeId" value={route.id} />
-      <Button submit tone="critical">{label}</Button>
+      <button type="submit" onClick={(event) => event.stopPropagation()} style={{ background: "#d82c0d", border: "1px solid #d82c0d", borderRadius: 8, color: "#ffffff", fontSize: 13, fontWeight: 600, minHeight: 32, padding: "6px 12px" }}>{label}</button>
     </Form>
   );
 }
