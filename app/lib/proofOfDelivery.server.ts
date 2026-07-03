@@ -260,6 +260,7 @@ export async function saveProofOfDelivery(input: {
       routeName: stop.route.name,
       proofPhotoUrl: signedPrimaryProofPhotoUrl,
       signaturePhotoUrl: signedSignaturePhotoUrl,
+      leftInSafePlace,
       orders: stop.deliveryGroup.orders,
     });
     const notificationErrorDetails = notificationResult.errors.length
