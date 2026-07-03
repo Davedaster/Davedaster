@@ -58,6 +58,10 @@ function tick(value: boolean) {
   return value ? "✓" : "✗";
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
 function publishMessage(input: {
   driverSms: boolean;
   driverEmail: boolean;
@@ -67,10 +71,13 @@ function publishMessage(input: {
   fulfilmentMode: string;
   fulfilmentFulfilled: number;
   fulfilmentSkipped: number;
+  shopifyTagged: number;
+  shopifyTagFailed: number;
   errors: string[];
 }) {
   return [
     `Route published`,
+    `Shopify tags: ${input.shopifyTagged} tagged${input.shopifyTagFailed ? `, ${input.shopifyTagFailed} failed` : ""}`,
     `Driver SMS ${tick(input.driverSms)}`,
     `Driver email ${tick(input.driverEmail)}`,
     `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
@@ -103,15 +110,47 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
 
       await publishRoute(routeId);
-      await tagPublishedRouteOrders(admin, routeId);
 
-      const fulfilmentSettings = await getFulfilmentSettings();
-      const fulfilmentResult = fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
-        ? await fulfilRouteOrders(admin, routeId)
-        : { fulfilled: 0, skipped: 0, errors: [] };
-      const driverResult = await sendDriverRouteLink({ routeId, request });
-      const customerResult = await sendBookedSlotNotifications(routeId);
-      const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
+      let tagResult = { tagged: 0, failed: 0, errors: [] as string[] };
+      try {
+        tagResult = await tagPublishedRouteOrders(admin, routeId);
+      } catch (error) {
+        tagResult.errors.push(`Shopify tagging step failed: ${errorMessage(error)}`);
+        tagResult.failed += 1;
+      }
+
+      let fulfilmentMode = "on_delivery";
+      let fulfilmentResult = { fulfilled: 0, skipped: 0, errors: [] as string[] };
+      try {
+        const fulfilmentSettings = await getFulfilmentSettings();
+        fulfilmentMode = fulfilmentSettings.routePublishFulfilmentMode;
+        fulfilmentResult = fulfilmentMode === "on_publish"
+          ? await fulfilRouteOrders(admin, routeId)
+          : fulfilmentResult;
+      } catch (error) {
+        fulfilmentResult.errors.push(`Shopify fulfilment step failed: ${errorMessage(error)}`);
+      }
+
+      let driverResult = { smsSent: false, emailSent: false, errors: [] as string[] };
+      try {
+        driverResult = await sendDriverRouteLink({ routeId, request });
+      } catch (error) {
+        driverResult.errors.push(`Driver route link step failed: ${errorMessage(error)}`);
+      }
+
+      let customerResult = { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] as string[] };
+      try {
+        customerResult = await sendBookedSlotNotifications(routeId);
+      } catch (error) {
+        customerResult.errors.push(`Customer booked slot notification step failed: ${errorMessage(error)}`);
+      }
+
+      const errors = [
+        ...tagResult.errors,
+        ...fulfilmentResult.errors,
+        ...driverResult.errors,
+        ...customerResult.errors,
+      ];
 
       return json({
         ok: true,
@@ -121,9 +160,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           customerSms: customerResult.smsSent,
           customerEmail: customerResult.emailsSent,
           customerSkipped: customerResult.skipped,
-          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
+          fulfilmentMode,
           fulfilmentFulfilled: fulfilmentResult.fulfilled,
           fulfilmentSkipped: fulfilmentResult.skipped,
+          shopifyTagged: tagResult.tagged,
+          shopifyTagFailed: tagResult.failed,
           errors,
         }),
         publishStatus: {
@@ -132,9 +173,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
           customerSms: customerResult.smsSent,
           customerEmail: customerResult.emailsSent,
           customerSkipped: customerResult.skipped,
-          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
+          fulfilmentMode,
           fulfilmentFulfilled: fulfilmentResult.fulfilled,
           fulfilmentSkipped: fulfilmentResult.skipped,
+          shopifyTagged: tagResult.tagged,
+          shopifyTagFailed: tagResult.failed,
           errors,
         },
         errors,
