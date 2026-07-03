@@ -476,13 +476,21 @@ export async function optimiseRoute(routeId: string) {
 
   const start = getRouteEndpoint(route, "start");
   const finish = getRouteEndpoint(route, "finish");
-  const optimisableStops = route.stops.filter((stop) => {
+
+  const lockedStops = route.stops.filter((stop) => stop.isLocked);
+  const unlockedStops = route.stops.filter((stop) => !stop.isLocked);
+
+  const optimisableStops = unlockedStops.filter((stop) => {
     const group = stop.deliveryGroup;
     return typeof group?.latitude === "number" && typeof group?.longitude === "number";
   });
 
-  if (optimisableStops.length !== route.stops.length) {
-    throw new Error("Every stop needs latitude and longitude before RouteXL can optimise the route.");
+  if (!unlockedStops.length) {
+    throw new Error("There are no unlocked stops to optimise.");
+  }
+
+  if (optimisableStops.length !== unlockedStops.length) {
+    throw new Error("Every unlocked stop needs latitude and longitude before RouteXL can optimise the route. Locked stops are left in place.");
   }
 
   const stopByRouteXLKey = new Map(
@@ -522,16 +530,23 @@ export async function optimiseRoute(routeId: string) {
     throw new Error("RouteXL returned an infeasible route. Check the stops and try again.");
   }
 
-  const orderedStopKeys = optimised.waypoints.slice(1, -1).map((waypoint) => extractRouteXLStopKey(waypoint.name));
+  const orderedStopKeys = optimised.waypoints
+    .slice(1, -1)
+    .map((waypoint) => extractRouteXLStopKey(waypoint.name));
+
+  const unlockedOrderIndexes = unlockedStops
+    .map((stop) => stop.orderIndex)
+    .sort((a, b) => a - b);
 
   await prisma.$transaction(async (tx) => {
     for (const [index, stopKey] of orderedStopKeys.entries()) {
       const matchingStop = stopByRouteXLKey.get(stopKey);
+      const orderIndex = unlockedOrderIndexes[index];
 
-      if (matchingStop) {
+      if (matchingStop && orderIndex) {
         await tx.stop.update({
           where: { id: matchingStop.id },
-          data: { orderIndex: index + 1 },
+          data: { orderIndex },
         });
       }
     }
@@ -544,7 +559,9 @@ export async function optimiseRoute(routeId: string) {
         history: {
           create: {
             action: "RouteXL optimised",
-            details: `RouteXL returned ${optimised.totalDistanceKm ?? 0} km and ${optimised.totalDurationMinutes ?? 0} minutes`,
+            details: lockedStops.length
+              ? `RouteXL optimised ${unlockedStops.length} unlocked stops and preserved ${lockedStops.length} locked stops`
+              : `RouteXL returned ${optimised.totalDistanceKm ?? 0} km and ${optimised.totalDurationMinutes ?? 0} minutes`,
           },
         },
       },
