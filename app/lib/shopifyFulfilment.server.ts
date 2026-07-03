@@ -119,6 +119,17 @@ function isShopifyOrderId(value: string) {
   return value.startsWith("gid://shopify/Order/");
 }
 
+function isBenignSkipReason(reason?: string | null) {
+  const value = (reason || "").toLowerCase();
+  return (
+    value.includes("manual route entry") ||
+    value.includes("no remaining items") ||
+    value.includes("already fulfilled") ||
+    value.includes("shopify statuses: closed") ||
+    value.includes("shopify statuses: fulfilled")
+  );
+}
+
 export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const response = await admin.graphql(TAGS_ADD_MUTATION, {
     variables: {
@@ -150,11 +161,9 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   throwGraphQLErrors(payload);
 
   const fulfillmentOrders = payload.data?.order?.fulfillmentOrders.nodes || [];
-  const openFulfillmentOrders = fulfillmentOrders.filter((fulfillmentOrder) => (
-    ["OPEN", "IN_PROGRESS"].includes(fulfillmentOrder.status)
-  ));
+  const fulfillableFulfillmentOrders = fulfillmentOrders.filter((fulfillmentOrder) => fulfillmentOrder.status === "OPEN");
 
-  if (!openFulfillmentOrders.length) {
+  if (!fulfillableFulfillmentOrders.length) {
     const seenStatuses = fulfillmentOrders.map((fulfillmentOrder) => fulfillmentOrder.status).filter(Boolean).join(", ");
 
     return {
@@ -163,7 +172,7 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
     };
   }
 
-  const lineItemsByFulfillmentOrder = openFulfillmentOrders
+  const lineItemsByFulfillmentOrder = fulfillableFulfillmentOrders
     .map((fulfillmentOrder) => ({
       fulfillmentOrderId: fulfillmentOrder.id,
       fulfillmentOrderLineItems: fulfillmentOrder.lineItems.nodes
@@ -236,6 +245,7 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
   let fulfilled = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const notes: string[] = [];
 
   for (const stop of route.stops) {
     for (const order of stop.deliveryGroup?.orders || []) {
@@ -246,7 +256,12 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
           fulfilled += 1;
         } else {
           skipped += 1;
-          errors.push(`${order.shopifyOrderNumber}: ${result.reason || "Shopify order was skipped"}`);
+          const detail = `${order.shopifyOrderNumber}: ${result.reason || "Shopify order was skipped"}`;
+          if (isBenignSkipReason(result.reason)) {
+            notes.push(detail);
+          } else {
+            errors.push(detail);
+          }
         }
       } catch (error) {
         errors.push(`${order.shopifyOrderNumber}: ${error instanceof Error ? error.message : "Unknown fulfilment error"}`);
@@ -257,8 +272,8 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
   await prisma.routeHistory.create({
     data: {
       routeId: route.id,
-      action: "Route fulfilment checked",
-      details: `${fulfilled} Shopify orders fulfilled, ${skipped} skipped${errors.length ? `. Errors: ${errors.join(" | ")}` : ""}`,
+      action: errors.length ? "Route fulfilment checked with errors" : "Route fulfilment checked",
+      details: `${fulfilled} Shopify orders fulfilled, ${skipped} skipped${notes.length ? `. Notes: ${notes.join(" | ")}` : ""}${errors.length ? `. Errors: ${errors.join(" | ")}` : ""}`,
     },
   });
 
