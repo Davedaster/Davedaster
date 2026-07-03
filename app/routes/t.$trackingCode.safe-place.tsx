@@ -5,10 +5,9 @@ import prisma from "../db.server";
 import { getCustomerTrackingByCode } from "../lib/customerTracking.server";
 
 const SAFE_PLACE_LABELS: Record<string, string> = {
-  porch: "Leave in porch",
   side_gate: "Leave behind side gate",
-  shed: "Leave in shed or outbuilding",
-  neighbour: "Leave with neighbour",
+  rear_garden: "Leave in rear garden",
+  garage: "Leave in garage",
   other: "Other safe place",
 };
 
@@ -23,6 +22,10 @@ function buildSafePlaceNote(formData: FormData) {
   const option = cleanInstruction(formData.get("safePlaceOption"));
   const details = cleanInstruction(formData.get("safePlaceDetails"));
   const optionLabel = SAFE_PLACE_LABELS[option] || SAFE_PLACE_LABELS.other;
+
+  if (option === "other" && !details) {
+    return "";
+  }
 
   return [optionLabel, details].filter(Boolean).join(". ");
 }
