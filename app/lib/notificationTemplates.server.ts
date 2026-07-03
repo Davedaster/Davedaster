@@ -20,6 +20,7 @@ export type NotificationTemplateInput = {
   trackingUrl?: string | null;
   proofPhotoUrl?: string | null;
   signaturePhotoUrl?: string | null;
+  leftInSafePlace?: boolean;
   delayMinutes?: number | null;
 };
 
@@ -86,6 +87,7 @@ function shell(title: string, intro: string, highlight: string, extra = "") {
 }
 
 const proofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Delivery photo</p><img src="{{ proof.photo_url }}" alt="Delivery photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer signature</p><img src="{{ proof.signature_url }}" alt="Customer signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
+const safePlaceDeliveryCompleteSmsBody = "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}";
 
 const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
   bookedSlot: {
@@ -126,7 +128,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent after a stop has been completed.",
     emailSubject: "Your panel order has been delivered, {{ order.number }}",
     emailHtml: shell("Your panels have been delivered", "Your panel order has been delivered. Thank you for your order.", "Completed today", proofImagesHtml),
-    smsBody: "Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order. View delivery details here: {{ tracking.url }}{% if proof.photo_url %} Proof photo: {{ proof.photo_url }}{% endif %}",
+    smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + "{% else %}Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order.\n\nNeed help? Call {{ company.phone }}{% endif %}",
   },
 };
 
@@ -272,7 +274,7 @@ function buildTemplateContext(input: NotificationTemplateInput, settings?: Await
     customer: { name: displayName(input.customerName) },
     order: { number: input.orderNumber || "your order", items_summary: input.itemsSummary || "" },
     route: { name: input.routeName || "your delivery route" },
-    delivery: { date: formatDate(input.deliveryDate), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes) },
+    delivery: { date: formatDate(input.deliveryDate), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes), left_in_safe_place: Boolean(input.leftInSafePlace) },
     tracking: { url: input.trackingUrl || "" },
     driver: { name: input.driverName || "", photo_url: input.driverPhotoUrl || "", vehicle_name: input.driverVehicleName || "", vehicle_registration: input.driverVehicleRegistration || "" },
     company: companyContext(settings),
@@ -303,7 +305,7 @@ export function buildNotificationTemplatePreview(input: NotificationTemplateInpu
 
 export function availableNotificationVariables() {
   return [
-    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ company.logo_url }}", "{{ company.accent_colour }}", "{{ proof.photo_url }}", "{{ proof.signature_url }}", "{{ delay.minutes }}",
+    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ delivery.left_in_safe_place }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ company.logo_url }}", "{{ company.accent_colour }}", "{{ proof.photo_url }}", "{{ proof.signature_url }}", "{{ delay.minutes }}",
   ];
 }
 
@@ -325,4 +327,11 @@ export async function buildDelayMessage(input: NotificationTemplateInput, channe
 
 export async function buildDeliveryCompleteMessage(input: NotificationTemplateInput, channel: NotificationChannel) {
   return buildNotificationMessage("deliveryComplete", input, channel);
+}
+
+export async function buildSafePlaceDeliveryCompleteSms(input: NotificationTemplateInput) {
+  const trackingSettings = await getCustomerTrackingSettings();
+  return {
+    body: renderLiquid(safePlaceDeliveryCompleteSmsBody, buildTemplateContext({ ...input, leftInSafePlace: true }, trackingSettings), "text"),
+  };
 }
