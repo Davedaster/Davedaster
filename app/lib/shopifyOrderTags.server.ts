@@ -20,6 +20,12 @@ type TagsAddPayload = {
   errors?: Array<{ message: string }>;
 };
 
+export type TagPublishedRouteOrdersResult = {
+  tagged: number;
+  failed: number;
+  errors: string[];
+};
+
 const TAGS_ADD_MUTATION = `#graphql
   mutation AddOrderTags($id: ID!, $tags: [String!]!) {
     tagsAdd(id: $id, tags: $tags) {
@@ -86,7 +92,11 @@ async function addTagsToShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: string
   }
 }
 
-export async function tagPublishedRouteOrders(admin: ShopifyAdmin, routeId: string) {
+function isShopifyOrderId(value: string) {
+  return value.startsWith("gid://shopify/Order/");
+}
+
+export async function tagPublishedRouteOrders(admin: ShopifyAdmin, routeId: string): Promise<TagPublishedRouteOrdersResult> {
   const route = await prisma.route.findUnique({
     where: {
       id: routeId,
@@ -112,7 +122,9 @@ export async function tagPublishedRouteOrders(admin: ShopifyAdmin, routeId: stri
     throw new Error("Route not found.");
   }
 
-  let taggedOrders = 0;
+  let tagged = 0;
+  let failed = 0;
+  const errors: string[] = [];
 
   for (const stop of route.stops) {
     const deliveryOrders = stop.deliveryGroup?.orders || [];
@@ -124,8 +136,17 @@ export async function tagPublishedRouteOrders(admin: ShopifyAdmin, routeId: stri
     });
 
     for (const order of deliveryOrders) {
-      await addTagsToShopifyOrder(admin, order.shopifyOrderId, tags);
-      taggedOrders += 1;
+      if (!isShopifyOrderId(order.shopifyOrderId)) {
+        continue;
+      }
+
+      try {
+        await addTagsToShopifyOrder(admin, order.shopifyOrderId, tags);
+        tagged += 1;
+      } catch (error) {
+        failed += 1;
+        errors.push(`${order.shopifyOrderNumber}: ${error instanceof Error ? error.message : "Unknown Shopify tag error"}`);
+      }
     }
   }
 
@@ -136,12 +157,16 @@ export async function tagPublishedRouteOrders(admin: ShopifyAdmin, routeId: stri
     data: {
       history: {
         create: {
-          action: "Shopify orders tagged",
-          details: `${taggedOrders} Shopify orders tagged with route details`,
+          action: failed ? "Shopify order tagging checked" : "Shopify orders tagged",
+          details: `${tagged} Shopify orders tagged${failed ? `, ${failed} failed. Errors: ${errors.join(" | ")}` : ""}`,
         },
       },
     },
   });
 
-  return taggedOrders;
+  return {
+    tagged,
+    failed,
+    errors,
+  };
 }
