@@ -1,6 +1,8 @@
 import prisma from "../db.server";
 import { createSignedProofPhotoUrl } from "./proofPhotoStorage.server";
 
+const TRACKABLE_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY", "COMPLETED"];
+
 function splitLineItems(summary?: string | null) {
   return (summary || "")
     .split(",")
@@ -62,7 +64,7 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
     },
   });
 
-  if (!route) {
+  if (!route || !TRACKABLE_ROUTE_STATUSES.includes(route.status)) {
     return null;
   }
 
