@@ -1,7 +1,7 @@
 import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { getAppCredentials } from "./appCredentials.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
-import { buildDeliveryCompleteMessage } from "./notificationTemplates.server";
+import { buildDeliveryCompleteMessage, buildSafePlaceDeliveryCompleteSms } from "./notificationTemplates.server";
 
 type DeliveryCompleteOrder = {
   id?: string;
@@ -17,6 +17,7 @@ type DeliveryCompleteInput = {
   routeName: string;
   proofPhotoUrl?: string | null;
   signaturePhotoUrl?: string | null;
+  leftInSafePlace?: boolean;
   orders: DeliveryCompleteOrder[];
 };
 
@@ -67,6 +68,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       orderNumber: order.shopifyOrderNumber,
       routeName: input.routeName,
       trackingUrl,
+      leftInSafePlace: input.leftInSafePlace,
     };
 
     let sentAnything = false;
@@ -77,11 +79,13 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       try {
         await sendSmsWithTwilio({
           to: order.customerPhone,
-          message: await buildDeliveryCompleteMessage({
-            ...baseMessageInput,
-            proofPhotoUrl: null,
-            signaturePhotoUrl: null,
-          }, "sms"),
+          message: input.leftInSafePlace
+            ? await buildSafePlaceDeliveryCompleteSms(baseMessageInput)
+            : await buildDeliveryCompleteMessage({
+              ...baseMessageInput,
+              proofPhotoUrl: null,
+              signaturePhotoUrl: null,
+            }, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
