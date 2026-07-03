@@ -151,12 +151,14 @@ function ProofImages({ photos, title, onOpen }: { photos: ProofPhoto[]; title: s
 export default function CustomerTrackingPage() {
   const data = useLoaderData<typeof loader>();
   const { settings } = data;
+  const safePlaceOptions = settings.safePlaceOptions.length ? settings.safePlaceOptions : [{ id: "other", label: "Other safe place", requiresDetails: true }];
   const [selectedProofPhoto, setSelectedProofPhoto] = useState<ProofPhoto | null>(null);
-  const [safePlaceOption, setSafePlaceOption] = useState("side_gate");
+  const [safePlaceOption, setSafePlaceOption] = useState(safePlaceOptions[0].id);
   const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
   const complete = data.stopStatus === "DELIVERED";
   const missed = data.stopStatus === "FAILED";
-  const requiresExtraDetails = safePlaceOption === "other";
+  const selectedSafePlace = safePlaceOptions.find((option) => option.id === safePlaceOption) || safePlaceOptions[0];
+  const requiresExtraDetails = selectedSafePlace.requiresDetails;
   const primaryColour = settings.primaryColour || "#509AE6";
   const heading = pageHeading({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
   const message = pageMessage({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
@@ -175,7 +177,7 @@ export default function CustomerTrackingPage() {
         <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>Order {data.orderNumber}</p>
 
         {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Safe place instructions saved.</div> : null}
-        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please add extra details for the driver before saving other safe place.</div> : null}
+        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please add extra details for the driver before saving this safe place.</div> : null}
         {data.closed ? <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>This delivery is already closed, so instructions cannot be changed.</div> : null}
 
         <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
@@ -205,10 +207,7 @@ export default function CustomerTrackingPage() {
             <label style={{ display: "block", fontWeight: 900, marginBottom: 8 }}>
               Choose a safe place
               <select name="safePlaceOption" value={safePlaceOption} onChange={(event) => setSafePlaceOption(event.currentTarget.value)} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>
-                <option value="side_gate">Leave behind side gate</option>
-                <option value="rear_garden">Leave in rear garden</option>
-                <option value="garage">Leave in garage</option>
-                <option value="other">Other safe place</option>
+                {safePlaceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
             </label>
             <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>
