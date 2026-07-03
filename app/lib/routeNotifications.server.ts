@@ -23,6 +23,13 @@ type NotificationMarker = {
   autoDelay?: boolean;
 };
 
+type BookedSlotChannel = "sms" | "email";
+
+type RouteHistoryCreateInput = {
+  action: string;
+  details: string;
+};
+
 function manualNotificationLabel(templateId: ManualRouteNotificationTemplateId) {
   if (templateId === "outForDelivery") return "Out for delivery";
   if (templateId === "nextDropTracking") return "You are next";
@@ -60,6 +67,20 @@ function hasNotificationHistory(route: RouteForNotifications, templateId: Manual
     (event.details || "").includes(stopMarker) &&
     (!autoDelay || (event.details || "").includes("autoDelay:true"))
   ));
+}
+
+function bookedSlotRecipientMarker(orderId: string, channel: BookedSlotChannel) {
+  return `bookedSlot orderId:${orderId} channel:${channel}`;
+}
+
+function hasBookedSlotRecipientHistory(route: RouteForNotifications, orderId: string, channel: BookedSlotChannel) {
+  const marker = bookedSlotRecipientMarker(orderId, channel);
+
+  return route.history.some((event) => event.action === "Booked slot recipient notified" && (event.details || "").includes(marker));
+}
+
+function notificationErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown notification error";
 }
 
 async function getRouteForNotifications(routeId: string) {
@@ -153,53 +174,93 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
   let smsSent = 0;
   let emailsSent = 0;
   let skipped = 0;
+  let failed = 0;
+  const errors: string[] = [];
+  const successfulRecipientLogs: RouteHistoryCreateInput[] = [];
 
   for (const stop of route.stops) {
     const orders = stop.deliveryGroup?.orders || [];
 
     for (const order of orders) {
       const messageInput = await buildMessageInput(route, stop, order, credentials);
+      let hasAvailableChannel = false;
+      let attemptedAnything = false;
       let sentAnything = false;
 
       if (canSendSms && order.customerPhone) {
-        await sendSmsWithTwilio({
-          to: order.customerPhone,
-          message: await buildBookedSlotMessage(messageInput, "sms"),
-        });
-        smsSent += 1;
-        sentAnything = true;
+        hasAvailableChannel = true;
+
+        if (!hasBookedSlotRecipientHistory(route, order.id, "sms")) {
+          attemptedAnything = true;
+
+          try {
+            await sendSmsWithTwilio({
+              to: order.customerPhone,
+              message: await buildBookedSlotMessage(messageInput, "sms"),
+            });
+            smsSent += 1;
+            sentAnything = true;
+            successfulRecipientLogs.push({
+              action: "Booked slot recipient notified",
+              details: `${bookedSlotRecipientMarker(order.id, "sms")} order:${order.shopifyOrderNumber} to:${order.customerPhone}`,
+            });
+          } catch (error) {
+            failed += 1;
+            errors.push(`${order.shopifyOrderNumber} SMS failed: ${notificationErrorMessage(error)}`);
+          }
+        }
       }
 
       if (canSendEmail && order.customerEmail) {
-        await sendEmailWithResend({
-          to: order.customerEmail,
-          message: await buildBookedSlotMessage(messageInput, "email"),
-        });
-        emailsSent += 1;
-        sentAnything = true;
+        hasAvailableChannel = true;
+
+        if (!hasBookedSlotRecipientHistory(route, order.id, "email")) {
+          attemptedAnything = true;
+
+          try {
+            await sendEmailWithResend({
+              to: order.customerEmail,
+              message: await buildBookedSlotMessage(messageInput, "email"),
+            });
+            emailsSent += 1;
+            sentAnything = true;
+            successfulRecipientLogs.push({
+              action: "Booked slot recipient notified",
+              details: `${bookedSlotRecipientMarker(order.id, "email")} order:${order.shopifyOrderNumber} to:${order.customerEmail}`,
+            });
+          } catch (error) {
+            failed += 1;
+            errors.push(`${order.shopifyOrderNumber} email failed: ${notificationErrorMessage(error)}`);
+          }
+        }
       }
 
-      if (!sentAnything) {
+      if (!hasAvailableChannel || (!attemptedAnything && !sentAnything)) {
         skipped += 1;
       }
     }
   }
 
+  const summaryAction = failed ? "Notifications partially sent" : "Notifications sent";
+  const summaryDetails = `${smsSent} SMS sent, ${emailsSent} emails sent, ${skipped} orders skipped${failed ? `, ${failed} failed. Errors: ${errors.join(" | ")}` : ""}`;
+
   await prisma.route.update({
     where: { id: routeId },
     data: {
-      status: "NOTIFICATIONS_SENT",
-      notificationsSent: true,
+      ...(failed ? {} : { status: "NOTIFICATIONS_SENT", notificationsSent: true }),
       history: {
-        create: {
-          action: "Notifications sent",
-          details: `${smsSent} SMS sent, ${emailsSent} emails sent, ${skipped} orders skipped`,
-        },
+        create: [
+          ...successfulRecipientLogs,
+          {
+            action: summaryAction,
+            details: summaryDetails,
+          },
+        ],
       },
     },
   });
 
-  return { smsSent, emailsSent, skipped, failed: 0, errors: [] };
+  return { smsSent, emailsSent, skipped, failed, errors };
 }
 
 export async function sendManualRouteNotification({
