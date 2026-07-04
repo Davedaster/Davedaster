@@ -38,6 +38,7 @@ type MappableEndpoint = RouteEndpoint & { id: string; latitude: number; longitud
 type RouteCoordinatePoint = { latitude: number; longitude: number };
 type TomTomMapRef = any;
 type TomTomPopupRef = any;
+type TooltipTone = "default" | "success" | "warning" | "critical";
 
 const DEFAULT_CENTER: [number, number] = [-3.6119, 50.5293];
 const DEFAULT_SHOP_LOCATION = {
@@ -49,6 +50,22 @@ const START_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-start-pin-v3";
 const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
 const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
+const TRAFFIC_MARKER_PATTERN = /^[\s🟢🔵🟠🔴⚪]+/u;
+const FULFIL_BY_PATTERN = /fulfil by:\s*([0-9]{2}\s+[A-Za-z]{3}\s+[0-9]{4})/i;
+const MONTHS: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   return points.filter((point): point is MappablePoint => (
@@ -84,6 +101,120 @@ function tooltipLinesForPoint(point: RouteMapPoint) {
     .filter(Boolean);
 }
 
+function localDateOnly(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function parseShortBritishDate(value: string) {
+  const match = value.match(/([0-9]{1,2})\s+([A-Za-z]{3})\s+([0-9]{4})/);
+
+  if (!match) {
+    return null;
+  }
+
+  const day = Number(match[1]);
+  const month = MONTHS[match[2].toLowerCase()];
+  const year = Number(match[3]);
+
+  if (!Number.isFinite(day) || typeof month !== "number" || !Number.isFinite(year)) {
+    return null;
+  }
+
+  return new Date(year, month, day);
+}
+
+function isWorkingDay(date: Date) {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+}
+
+function workingDaysUntil(target: Date) {
+  const today = localDateOnly(new Date());
+  const end = localDateOnly(target);
+
+  if (end.getTime() <= today.getTime()) {
+    return 0;
+  }
+
+  const cursor = new Date(today);
+  let days = 0;
+
+  while (cursor.getTime() < end.getTime()) {
+    cursor.setDate(cursor.getDate() + 1);
+    if (isWorkingDay(cursor)) {
+      days += 1;
+    }
+  }
+
+  return days;
+}
+
+function fulfilmentToneFromLine(line: string): TooltipTone | null {
+  const fulfilByMatch = line.match(FULFIL_BY_PATTERN);
+
+  if (!fulfilByMatch) {
+    return null;
+  }
+
+  const fulfilByDate = parseShortBritishDate(fulfilByMatch[1]);
+
+  if (!fulfilByDate) {
+    return "default";
+  }
+
+  const daysLeft = workingDaysUntil(fulfilByDate);
+
+  if (daysLeft >= 4) {
+    return "success";
+  }
+
+  if (daysLeft >= 2) {
+    return "warning";
+  }
+
+  return "critical";
+}
+
+function tooltipToneForLine(line: string): TooltipTone {
+  const lower = line.toLowerCase();
+  const fulfilmentTone = fulfilmentToneFromLine(line);
+
+  if (lower.includes("redeliver")) {
+    return "critical";
+  }
+
+  if (fulfilmentTone) {
+    return fulfilmentTone;
+  }
+
+  if (line.trim().startsWith("🟢")) {
+    return "success";
+  }
+
+  if (line.trim().startsWith("🟠") || line.trim().startsWith("🔵")) {
+    return "warning";
+  }
+
+  if (line.trim().startsWith("🔴")) {
+    return "critical";
+  }
+
+  return "default";
+}
+
+function cleanTooltipLine(line: string) {
+  return line.replace(TRAFFIC_MARKER_PATTERN, "").trim();
+}
+
+function tooltipLineHtml(line: string, index: number) {
+  if (index === 0) {
+    return `<div class="bpd-tooltip-heading">${escapeHtml(line)}</div>`;
+  }
+
+  const tone = tooltipToneForLine(line);
+  return `<div class="bpd-tooltip-line bpd-tooltip-line--${tone}">${escapeHtml(cleanTooltipLine(line))}</div>`;
+}
+
 function tooltipHtml(point: RouteMapPoint) {
   const lines = tooltipLinesForPoint(point);
   const heading = point.tooltipTitle || lines[0] || point.title || point.label;
@@ -91,7 +222,7 @@ function tooltipHtml(point: RouteMapPoint) {
 
   return [heading, ...bodyLines]
     .filter(Boolean)
-    .map((line, index) => `<div class="${index === 0 ? "bpd-tooltip-heading" : "bpd-tooltip-line"}">${escapeHtml(line)}</div>`)
+    .map(tooltipLineHtml)
     .join("");
 }
 
@@ -137,6 +268,9 @@ function styles() {
     .bpd-tomtom-popup .mapboxgl-popup-tip { display: none; }
     .bpd-tooltip-heading { font-size: 13px; font-weight: 800; line-height: 1.35; }
     .bpd-tooltip-line { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.35; color: #475467; }
+    .bpd-tooltip-line--success { color: #15803d; font-weight: 800; }
+    .bpd-tooltip-line--warning { color: #ea580c; font-weight: 800; }
+    .bpd-tooltip-line--critical { color: #b42318; font-weight: 800; }
   `;
 }
 
@@ -832,23 +966,23 @@ export function RouteMap({
         .addTo(map);
     };
 
-   const shouldShowDesktopPopup = () => {
-  if (typeof window === "undefined") {
-    return true;
-  }
+    const shouldShowDesktopPopup = () => {
+      if (typeof window === "undefined") {
+        return true;
+      }
 
-  return !window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches;
-};
+      return !window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches;
+    };
 
-const showPopup = async (event: any) => {
-  if (!shouldShowDesktopPopup()) {
-    hidePopup();
-    return;
-  }
+    const showPopup = async (event: any) => {
+      if (!shouldShowDesktopPopup()) {
+        hidePopup();
+        return;
+      }
 
-  map.getCanvas().style.cursor = "pointer";
-  await showPopupForFeature(event.features?.[0]);
-};
+      map.getCanvas().style.cursor = "pointer";
+      await showPopupForFeature(event.features?.[0]);
+    };
 
     const handleMapMovement = () => {
       hidePopup();
