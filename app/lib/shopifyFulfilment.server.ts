@@ -12,6 +12,14 @@ type ShopifyUserError = {
   message: string;
 };
 
+type FulfilShopifyOrderOptions = {
+  notifyCustomer?: boolean;
+};
+
+type FulfilRouteOrdersOptions = FulfilShopifyOrderOptions & {
+  markDelivered?: boolean;
+};
+
 type FulfillmentOrderLineItem = {
   id: string;
   remainingQuantity: number;
@@ -37,12 +45,32 @@ type FulfillmentOrder = {
   };
 };
 
+type ExistingFulfillment = {
+  id: string;
+  status: string;
+  deliveredAt?: string | null;
+  events?: {
+    nodes: Array<{
+      status: string;
+    }>;
+  };
+};
+
 type FulfillmentOrdersPayload = {
   data?: {
     order?: {
       fulfillmentOrders: {
         nodes: FulfillmentOrder[];
       };
+    } | null;
+  };
+  errors?: Array<{ message: string }>;
+};
+
+type OrderFulfillmentsPayload = {
+  data?: {
+    order?: {
+      fulfillments: ExistingFulfillment[];
     } | null;
   };
   errors?: Array<{ message: string }>;
@@ -112,6 +140,23 @@ const GET_FULFILLMENT_ORDERS = `#graphql
   }
 `;
 
+const GET_ORDER_FULFILLMENTS = `#graphql
+  query GetOrderFulfillments($id: ID!) {
+    order(id: $id) {
+      fulfillments(first: 20) {
+        id
+        status
+        deliveredAt
+        events(first: 20, reverse: true) {
+          nodes {
+            status
+          }
+        }
+      }
+    }
+  }
+`;
+
 const FULFILLMENT_CREATE = `#graphql
   mutation FulfillmentCreate($fulfillment: FulfillmentInput!) {
     fulfillmentCreate(fulfillment: $fulfillment) {
@@ -165,6 +210,10 @@ function throwUserErrors(userErrors?: ShopifyUserError[]) {
   }
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown Shopify error";
+}
+
 function isShopifyOrderId(value: string) {
   return value.startsWith("gid://shopify/Order/");
 }
@@ -175,6 +224,7 @@ function isBenignSkipReason(reason?: string | null) {
     value.includes("manual route entry") ||
     value.includes("no remaining items") ||
     value.includes("already fulfilled") ||
+    value.includes("already delivered") ||
     value.includes("shopify statuses: closed") ||
     value.includes("shopify statuses: fulfilled")
   );
@@ -211,6 +261,27 @@ function fulfilmentStatusSummary(fulfillmentOrders: FulfillmentOrder[]) {
     .join(", ");
 }
 
+function hasDeliveredEvent(fulfillment: ExistingFulfillment) {
+  return Boolean(fulfillment.deliveredAt) || Boolean(fulfillment.events?.nodes.some((event) => event.status === "DELIVERED"));
+}
+
+function isCancelledFulfillment(fulfillment: ExistingFulfillment) {
+  return ["CANCELLED", "CANCELED"].includes(fulfillment.status);
+}
+
+async function getExistingFulfillments(admin: ShopifyAdmin, shopifyOrderId: string) {
+  const response = await admin.graphql(GET_ORDER_FULFILLMENTS, {
+    variables: {
+      id: shopifyOrderId,
+    },
+  });
+  const payload = await response.json() as OrderFulfillmentsPayload;
+
+  throwGraphQLErrors(payload);
+
+  return payload.data?.order?.fulfillments || [];
+}
+
 async function createDeliveredFulfillmentEvent(admin: ShopifyAdmin, fulfillmentId: string) {
   const response = await admin.graphql(FULFILLMENT_EVENT_CREATE, {
     variables: {
@@ -226,6 +297,39 @@ async function createDeliveredFulfillmentEvent(admin: ShopifyAdmin, fulfillmentI
   throwUserErrors(payload.data?.fulfillmentEventCreate?.userErrors);
 }
 
+async function markFulfillmentIdsDelivered(admin: ShopifyAdmin, fulfillmentIds: string[]) {
+  const errors: string[] = [];
+  let delivered = 0;
+
+  for (const fulfillmentId of fulfillmentIds) {
+    try {
+      await createDeliveredFulfillmentEvent(admin, fulfillmentId);
+      delivered += 1;
+    } catch (error) {
+      errors.push(`${fulfillmentId}: ${errorMessage(error)}`);
+    }
+  }
+
+  return { delivered, errors };
+}
+
+async function markExistingOrderFulfillmentsDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
+  const fulfillments = await getExistingFulfillments(admin, shopifyOrderId);
+  const alreadyDelivered = fulfillments.filter(hasDeliveredEvent).length;
+  const pendingFulfillmentIds = fulfillments
+    .filter((fulfillment) => !hasDeliveredEvent(fulfillment))
+    .filter((fulfillment) => !isCancelledFulfillment(fulfillment))
+    .map((fulfillment) => fulfillment.id);
+  const result = await markFulfillmentIdsDelivered(admin, pendingFulfillmentIds);
+
+  return {
+    total: fulfillments.length,
+    alreadyDelivered,
+    delivered: result.delivered,
+    errors: result.errors,
+  };
+}
+
 export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const response = await admin.graphql(TAGS_ADD_MUTATION, {
     variables: {
@@ -239,10 +343,11 @@ export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: str
   throwUserErrors(payload.data?.tagsAdd?.userErrors);
 }
 
-export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: string) {
+export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: string, options: FulfilShopifyOrderOptions = {}) {
   if (!isShopifyOrderId(shopifyOrderId)) {
     return {
       fulfilled: false,
+      fulfillmentIds: [] as string[],
       reason: "Manual route entry, no Shopify order to fulfil",
     };
   }
@@ -264,6 +369,7 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
 
     return {
       fulfilled: false,
+      fulfillmentIds: [] as string[],
       reason: seenStatuses ? `No fulfillable fulfilment orders found. Shopify statuses: ${seenStatuses}` : "No fulfilment orders found on Shopify",
     };
   }
@@ -297,6 +403,7 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   if (!fulfillmentGroups.size) {
     return {
       fulfilled: false,
+      fulfillmentIds: [] as string[],
       reason: "No remaining items to fulfil",
     };
   }
@@ -310,7 +417,7 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
         variables: {
           fulfillment: {
             lineItemsByFulfillmentOrder,
-            notifyCustomer: false,
+            notifyCustomer: Boolean(options.notifyCustomer),
           },
         },
       });
@@ -340,21 +447,50 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   };
 }
 
-export async function markShopifyOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
-  const fulfilmentResult = await fulfilShopifyOrder(admin, shopifyOrderId);
+export async function markShopifyOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string, options: FulfilShopifyOrderOptions = {}) {
+  const fulfilmentResult = await fulfilShopifyOrder(admin, shopifyOrderId, options);
 
-  for (const fulfillmentId of fulfilmentResult.fulfillmentIds || []) {
-    await createDeliveredFulfillmentEvent(admin, fulfillmentId);
+  if (!isShopifyOrderId(shopifyOrderId)) {
+    return fulfilmentResult;
   }
 
-  if (isShopifyOrderId(shopifyOrderId)) {
+  const createdFulfillmentIds = fulfilmentResult.fulfillmentIds || [];
+  const deliveryEventResult = createdFulfillmentIds.length
+    ? await markFulfillmentIdsDelivered(admin, createdFulfillmentIds)
+    : await markExistingOrderFulfillmentsDelivered(admin, shopifyOrderId);
+  const alreadyDelivered = "alreadyDelivered" in deliveryEventResult ? deliveryEventResult.alreadyDelivered : 0;
+  const deliveredOrAlreadyDelivered = deliveryEventResult.delivered + alreadyDelivered;
+
+  if (deliveryEventResult.errors.length && deliveredOrAlreadyDelivered === 0) {
+    throw new Error(`Shopify delivery event failed. ${deliveryEventResult.errors.join(" | ")}`);
+  }
+
+  if (deliveredOrAlreadyDelivered > 0) {
     await tagOrderDelivered(admin, shopifyOrderId);
   }
 
-  return fulfilmentResult;
+  const reasonParts = [fulfilmentResult.reason];
+
+  if (createdFulfillmentIds.length && deliveryEventResult.delivered > 0) {
+    reasonParts.push(`${deliveryEventResult.delivered} fulfilment delivery event${deliveryEventResult.delivered === 1 ? "" : "s"} created`);
+  } else if (!createdFulfillmentIds.length && deliveryEventResult.delivered > 0) {
+    reasonParts.push(`${deliveryEventResult.delivered} existing fulfilment delivery event${deliveryEventResult.delivered === 1 ? "" : "s"} created`);
+  } else if (deliveredOrAlreadyDelivered > 0) {
+    reasonParts.push("Already delivered in Shopify");
+  }
+
+  if (deliveryEventResult.errors.length) {
+    reasonParts.push(`Delivery event errors: ${deliveryEventResult.errors.join(" | ")}`);
+  }
+
+  return {
+    ...fulfilmentResult,
+    fulfilled: fulfilmentResult.fulfilled || deliveredOrAlreadyDelivered > 0,
+    reason: reasonParts.filter(Boolean).join(". ") || undefined,
+  };
 }
 
-export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
+export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string, options: FulfilRouteOrdersOptions = {}) {
   const route = await prisma.route.findUnique({
     where: {
       id: routeId,
@@ -384,7 +520,9 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
   for (const stop of route.stops) {
     for (const order of stop.deliveryGroup?.orders || []) {
       try {
-        const result = await fulfilShopifyOrder(admin, order.shopifyOrderId);
+        const result = options.markDelivered
+          ? await markShopifyOrderDelivered(admin, order.shopifyOrderId, options)
+          : await fulfilShopifyOrder(admin, order.shopifyOrderId, options);
 
         if (result.fulfilled) {
           fulfilled += 1;
@@ -410,7 +548,7 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
     data: {
       routeId: route.id,
       action: errors.length ? "Route fulfilment checked with errors" : "Route fulfilment checked",
-      details: `${fulfilled} Shopify orders fulfilled, ${skipped} skipped${notes.length ? `. Notes: ${notes.join(" | ")}` : ""}${errors.length ? `. Errors: ${errors.join(" | ")}` : ""}`,
+      details: `${fulfilled} Shopify orders ${options.markDelivered ? "fulfilled and marked delivered" : "fulfilled"}, ${skipped} skipped${notes.length ? `. Notes: ${notes.join(" | ")}` : ""}${errors.length ? `. Errors: ${errors.join(" | ")}` : ""}`,
     },
   });
 
