@@ -20,6 +20,14 @@ type FulfillmentOrderLineItem = {
 type FulfillmentOrder = {
   id: string;
   status: string;
+  requestStatus?: string | null;
+  supportedActions: string[];
+  assignedLocation: {
+    name?: string | null;
+    location?: {
+      id: string;
+    } | null;
+  };
   lineItems: {
     nodes: FulfillmentOrderLineItem[];
   };
@@ -61,10 +69,18 @@ type TagsAddPayload = {
 const GET_FULFILLMENT_ORDERS = `#graphql
   query GetFulfillmentOrders($id: ID!) {
     order(id: $id) {
-      fulfillmentOrders(first: 20) {
+      fulfillmentOrders(first: 50) {
         nodes {
           id
           status
+          requestStatus
+          supportedActions
+          assignedLocation {
+            name
+            location {
+              id
+            }
+          }
           lineItems(first: 250) {
             nodes {
               id
@@ -130,6 +146,35 @@ function isBenignSkipReason(reason?: string | null) {
   );
 }
 
+function locationGroupKey(fulfillmentOrder: FulfillmentOrder) {
+  return fulfillmentOrder.assignedLocation.location?.id || `location-name:${fulfillmentOrder.assignedLocation.name || "unknown"}`;
+}
+
+function canCreateFulfillment(fulfillmentOrder: FulfillmentOrder) {
+  const hasRemainingItems = fulfillmentOrder.lineItems.nodes.some((lineItem) => lineItem.remainingQuantity > 0);
+
+  if (!hasRemainingItems) {
+    return false;
+  }
+
+  if (fulfillmentOrder.supportedActions?.includes("CREATE_FULFILLMENT")) {
+    return true;
+  }
+
+  return fulfillmentOrder.status === "OPEN";
+}
+
+function fulfilmentStatusSummary(fulfillmentOrders: FulfillmentOrder[]) {
+  return fulfillmentOrders
+    .map((fulfillmentOrder) => {
+      const locationName = fulfillmentOrder.assignedLocation.name ? ` at ${fulfillmentOrder.assignedLocation.name}` : "";
+      const requestStatus = fulfillmentOrder.requestStatus ? `/${fulfillmentOrder.requestStatus}` : "";
+      return `${fulfillmentOrder.status}${requestStatus}${locationName}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
 export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const response = await admin.graphql(TAGS_ADD_MUTATION, {
     variables: {
@@ -161,52 +206,86 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
   throwGraphQLErrors(payload);
 
   const fulfillmentOrders = payload.data?.order?.fulfillmentOrders.nodes || [];
-  const fulfillableFulfillmentOrders = fulfillmentOrders.filter((fulfillmentOrder) => fulfillmentOrder.status === "OPEN");
+  const fulfillableFulfillmentOrders = fulfillmentOrders.filter(canCreateFulfillment);
 
   if (!fulfillableFulfillmentOrders.length) {
-    const seenStatuses = fulfillmentOrders.map((fulfillmentOrder) => fulfillmentOrder.status).filter(Boolean).join(", ");
+    const seenStatuses = fulfilmentStatusSummary(fulfillmentOrders);
 
     return {
       fulfilled: false,
-      reason: seenStatuses ? `No open fulfilment orders found. Shopify statuses: ${seenStatuses}` : "No fulfilment orders found on Shopify",
+      reason: seenStatuses ? `No fulfillable fulfilment orders found. Shopify statuses: ${seenStatuses}` : "No fulfilment orders found on Shopify",
     };
   }
 
-  const lineItemsByFulfillmentOrder = fulfillableFulfillmentOrders
-    .map((fulfillmentOrder) => ({
-      fulfillmentOrderId: fulfillmentOrder.id,
-      fulfillmentOrderLineItems: fulfillmentOrder.lineItems.nodes
-        .filter((lineItem) => lineItem.remainingQuantity > 0)
-        .map((lineItem) => ({
-          id: lineItem.id,
-          quantity: lineItem.remainingQuantity,
-        })),
-    }))
-    .filter((fulfillmentOrder) => fulfillmentOrder.fulfillmentOrderLineItems.length > 0);
+  const fulfillmentGroups = new Map<string, Array<{
+    fulfillmentOrderId: string;
+    fulfillmentOrderLineItems: Array<{ id: string; quantity: number }>;
+  }>>();
 
-  if (!lineItemsByFulfillmentOrder.length) {
+  for (const fulfillmentOrder of fulfillableFulfillmentOrders) {
+    const fulfillmentOrderLineItems = fulfillmentOrder.lineItems.nodes
+      .filter((lineItem) => lineItem.remainingQuantity > 0)
+      .map((lineItem) => ({
+        id: lineItem.id,
+        quantity: lineItem.remainingQuantity,
+      }));
+
+    if (!fulfillmentOrderLineItems.length) {
+      continue;
+    }
+
+    const groupKey = locationGroupKey(fulfillmentOrder);
+    const currentGroup = fulfillmentGroups.get(groupKey) || [];
+    currentGroup.push({
+      fulfillmentOrderId: fulfillmentOrder.id,
+      fulfillmentOrderLineItems,
+    });
+    fulfillmentGroups.set(groupKey, currentGroup);
+  }
+
+  if (!fulfillmentGroups.size) {
     return {
       fulfilled: false,
       reason: "No remaining items to fulfil",
     };
   }
 
-  const createResponse = await admin.graphql(FULFILLMENT_CREATE, {
-    variables: {
-      fulfillment: {
-        lineItemsByFulfillmentOrder,
-        notifyCustomer: false,
-      },
-    },
-  });
-  const createPayload = await createResponse.json() as FulfillmentCreatePayload;
+  const fulfillmentIds: string[] = [];
+  const errors: string[] = [];
 
-  throwGraphQLErrors(createPayload);
-  throwUserErrors(createPayload.data?.fulfillmentCreate?.userErrors);
+  for (const lineItemsByFulfillmentOrder of fulfillmentGroups.values()) {
+    try {
+      const createResponse = await admin.graphql(FULFILLMENT_CREATE, {
+        variables: {
+          fulfillment: {
+            lineItemsByFulfillmentOrder,
+            notifyCustomer: false,
+          },
+        },
+      });
+      const createPayload = await createResponse.json() as FulfillmentCreatePayload;
+
+      throwGraphQLErrors(createPayload);
+      throwUserErrors(createPayload.data?.fulfillmentCreate?.userErrors);
+
+      const fulfillmentId = createPayload.data?.fulfillmentCreate?.fulfillment?.id;
+      if (fulfillmentId) {
+        fulfillmentIds.push(fulfillmentId);
+      }
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Unknown Shopify fulfilment error");
+    }
+  }
+
+  if (!fulfillmentIds.length && errors.length) {
+    throw new Error(errors.join(" | "));
+  }
 
   return {
-    fulfilled: true,
-    fulfillmentId: createPayload.data?.fulfillmentCreate?.fulfillment?.id || null,
+    fulfilled: fulfillmentIds.length > 0,
+    fulfillmentId: fulfillmentIds[0] || null,
+    fulfillmentIds,
+    reason: errors.length ? `Partially fulfilled. Errors: ${errors.join(" | ")}` : undefined,
   };
 }
 
@@ -254,6 +333,9 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
 
         if (result.fulfilled) {
           fulfilled += 1;
+          if (result.reason) {
+            notes.push(`${order.shopifyOrderNumber}: ${result.reason}`);
+          }
         } else {
           skipped += 1;
           const detail = `${order.shopifyOrderNumber}: ${result.reason || "Shopify order was skipped"}`;
