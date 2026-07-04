@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useLoaderData, useActionData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -24,13 +24,14 @@ import { formatEtaSlot } from "../lib/etaSlots";
 import { getFulfilmentSettings } from "../lib/fulfilmentSettings.server";
 import { assignDriverToRoute, calculateEtaSlots, getRoute, optimiseRoute, publishRoute, renameRoute, updateRoutePlanningSettings } from "../lib/routeDrafts.server";
 import { sendBookedSlotNotifications, sendManualRouteNotification } from "../lib/routeNotifications.server";
-import { moveDraftRouteStop } from "../lib/routeStopOrder.server";
+import { addOrderToDraftRoute, moveDraftRouteStop, removeDraftRouteStop } from "../lib/routeStopOrder.server";
 import { fulfilRouteOrders } from "../lib/shopifyFulfilment.server";
+import { getDeliveryOrders } from "../lib/shopifyOrders.server";
 import { tagPublishedRouteOrders } from "../lib/shopifyOrderTags.server";
 import { authenticate } from "../shopify.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const routeId = params.routeId;
 
   if (!routeId) {
@@ -47,7 +48,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     throw new Response("Route not found", { status: 404 });
   }
 
-  return json({ route, drivers, routexlEnabled: hasRouteXLCredentials(credentials) });
+  const existingOrderIds = new Set(
+    route.stops.flatMap((stop) => stop.deliveryGroup?.orders.map((order) => order.shopifyOrderId) || []),
+  );
+  const availableDraftOrders = route.status === "DRAFT"
+    ? (await getDeliveryOrders(admin)).filter((order) => !existingOrderIds.has(order.id))
+    : [];
+
+  return json({ route, drivers, routexlEnabled: hasRouteXLCredentials(credentials), availableDraftOrders });
 };
 
 function notificationResultMessage(label: string, result: { smsSent: number; emailsSent: number; skipped: number; failed?: number }) {
@@ -60,6 +68,18 @@ function tick(value: boolean) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function fulfilmentPublishLabel(mode: string, fulfilled: number, skipped: number) {
+  if (mode === "on_publish_delivered") {
+    return `Shopify fulfilment on publish: ${fulfilled} fulfilled and marked delivered, ${skipped} skipped`;
+  }
+
+  if (mode === "on_publish") {
+    return `Shopify fulfilment on publish: ${fulfilled} fulfilled, ${skipped} skipped`;
+  }
+
+  return "Shopify fulfilment will happen when each delivery is completed";
 }
 
 function publishMessage(input: {
@@ -83,9 +103,7 @@ function publishMessage(input: {
     `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
     `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
     input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
-    input.fulfilmentMode === "on_publish"
-      ? `Shopify fulfilment on publish: ${input.fulfilmentFulfilled} fulfilled, ${input.fulfilmentSkipped} skipped`
-      : "Shopify fulfilment will happen when each delivery is completed",
+    fulfilmentPublishLabel(input.fulfilmentMode, input.fulfilmentFulfilled, input.fulfilmentSkipped),
     input.errors.length ? `Errors: ${input.errors.join(" | ")}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -119,13 +137,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         tagResult.failed += 1;
       }
 
-      let fulfilmentMode = "on_delivery";
+      let fulfilmentMode = "on_delivery_complete";
       let fulfilmentResult = { fulfilled: 0, skipped: 0, errors: [] as string[] };
       try {
         const fulfilmentSettings = await getFulfilmentSettings();
         fulfilmentMode = fulfilmentSettings.routePublishFulfilmentMode;
-        fulfilmentResult = fulfilmentMode === "on_publish"
-          ? await fulfilRouteOrders(admin, routeId)
+        const fulfilOnPublish = fulfilmentMode === "on_publish" || fulfilmentMode === "on_publish_delivered";
+        fulfilmentResult = fulfilOnPublish
+          ? await fulfilRouteOrders(admin, routeId, {
+            markDelivered: fulfilmentMode === "on_publish_delivered",
+            notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
+          })
           : fulfilmentResult;
       } catch (error) {
         fulfilmentResult.errors.push(`Shopify fulfilment step failed: ${errorMessage(error)}`);
@@ -267,6 +289,32 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     return redirect(`/app/routes/${routeId}`);
   }
 
+  if (intent === "addDraftOrder") {
+    try {
+      const orderId = String(formData.get("orderId") || "").trim();
+      const order = (await getDeliveryOrders(admin)).find((deliveryOrder) => deliveryOrder.id === orderId);
+
+      if (!order) {
+        throw new Error("Selected order could not be found or is already allocated.");
+      }
+
+      await addOrderToDraftRoute(routeId, order);
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Draft order add failed." }, { status: 400 });
+    }
+  }
+
+  if (intent === "removeStop") {
+    try {
+      const stopId = String(formData.get("stopId") || "").trim();
+      await removeDraftRouteStop(routeId, stopId);
+      return redirect(`/app/routes/${routeId}`);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Draft stop remove failed." }, { status: 400 });
+    }
+  }
+
   if (intent === "moveStop") {
     try {
       const stopId = String(formData.get("stopId") || "").trim();
@@ -361,12 +409,13 @@ const plannedStartTimeOptions = Array.from({ length: 24 * 4 }, (_, index) => {
 });
 
 export default function RouteDetails() {
-  const { route, drivers, routexlEnabled } = useLoaderData<typeof loader>();
+  const { route, drivers, routexlEnabled, availableDraftOrders } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [routeName, setRouteName] = useState(route.name);
   const [selectedDriverId, setSelectedDriverId] = useState(route.driverId || "");
   const [delayMinutes, setDelayMinutes] = useState("45");
   const [selectedNextStopId, setSelectedNextStopId] = useState(route.stops.find((stop) => stop.status === "PENDING")?.id || "");
+  const [selectedAddOrderId, setSelectedAddOrderId] = useState(availableDraftOrders[0]?.id || "");
   const [routeDate, setRouteDate] = useState(dateInputValue(route.date));
   const [plannedStartTime, setPlannedStartTime] = useState(route.plannedStartTime || "05:00");
   const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(route.timePerDropMinutes || 10));
@@ -374,6 +423,9 @@ export default function RouteDetails() {
   const [startAddress, setStartAddress] = useState(route.startAddress || "Bathroom Panels Direct");
   const [finishAddress, setFinishAddress] = useState(route.finishAddress || "Bathroom Panels Direct");
   const driverOptions = [{ label: "No driver assigned", value: "" }, ...drivers.map((driver) => ({ label: driver.name, value: driver.id }))];
+  const addOrderOptions = availableDraftOrders.length
+    ? availableDraftOrders.map((order) => ({ label: `${order.name} · ${order.customerName} · ${order.postcode || "No postcode"}`, value: order.id }))
+    : [{ label: "No unallocated orders available", value: "" }];
   const stopRows = route.stops.map((stop) => {
     const orderNumbers = stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "";
     const customerNames = stop.deliveryGroup?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "";
@@ -400,6 +452,11 @@ export default function RouteDetails() {
             <input type="hidden" name="stopId" value={stop.id} />
             <input type="hidden" name="direction" value="down" />
             <Button submit disabled={stop.orderIndex === route.stops.length}>Down</Button>
+          </Form>
+          <Form method="post">
+            <input type="hidden" name="intent" value="removeStop" />
+            <input type="hidden" name="stopId" value={stop.id} />
+            <Button submit tone="critical">Remove</Button>
           </Form>
         </InlineStack>
       ) : "Locked",
@@ -445,6 +502,22 @@ export default function RouteDetails() {
               </Form>
             </BlockStack>
           </LegacyCard>
+
+          {route.status === "DRAFT" ? (
+            <LegacyCard sectioned>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">Edit draft drops</Text>
+                <Text as="p" variant="bodySm" tone="subdued">Add new unallocated Shopify orders, remove drops, or reorder them before the route is published. Published routes stay locked.</Text>
+                <Form method="post">
+                  <BlockStack gap="200">
+                    <input type="hidden" name="intent" value="addDraftOrder" />
+                    <Select label="Add order to this draft" name="orderId" options={addOrderOptions} value={selectedAddOrderId} onChange={setSelectedAddOrderId} />
+                    <Button submit disabled={!selectedAddOrderId}>Add drop to draft</Button>
+                  </BlockStack>
+                </Form>
+              </BlockStack>
+            </LegacyCard>
+          ) : null}
 
           <LegacyCard sectioned>
             <BlockStack gap="300">
