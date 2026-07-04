@@ -410,6 +410,38 @@ const planningPanelScript = `
       });
     };
 
+    const syncDraftRouteAddForm = () => {
+      if (!window.location.pathname.startsWith('/app/routes/')) return;
+      document.querySelectorAll('form').forEach((form) => {
+        if (!(form instanceof HTMLFormElement)) return;
+        const intent = form.querySelector('input[name="intent"][value="addDraftOrder"]');
+        const select = form.querySelector('select');
+        if (!intent || !(select instanceof HTMLSelectElement)) return;
+        let hidden = form.querySelector('input[data-bpd-draft-order-id="true"]');
+        if (!(hidden instanceof HTMLInputElement)) {
+          hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'orderId';
+          hidden.dataset.bpdDraftOrderId = 'true';
+          form.insertBefore(hidden, form.firstChild);
+        }
+        const firstOption = Array.from(select.options).find((option) => option.value)?.value || '';
+        hidden.value = select.value || firstOption;
+      });
+    };
+
+    const watchDraftRouteEditorLinks = () => {
+      document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const link = target.closest('a[href*="/app/routes/"]');
+        if (!(link instanceof HTMLAnchorElement) || !link.textContent?.includes('Edit draft drops')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        window.location.assign(link.href);
+      }, true);
+    };
+
     const tidyPlanningLabels = () => {
       document.querySelectorAll('details summary h4').forEach((heading) => {
         const summary = heading.closest('summary');
@@ -426,6 +458,7 @@ const planningPanelScript = `
         node = walker.nextNode();
       }
 
+      syncDraftRouteAddForm();
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
       tidyDriverRouteCards();
@@ -437,6 +470,7 @@ const planningPanelScript = `
       if (!document.body) return;
       tidyPlanningLabels();
       watchDraftRouteSubmit();
+      watchDraftRouteEditorLinks();
       new MutationObserver(tidyPlanningLabels).observe(document.body, { childList: true, subtree: true, characterData: true });
       let runs = 0;
       const interval = window.setInterval(() => {
@@ -449,6 +483,14 @@ const planningPanelScript = `
     document.addEventListener('mouseover', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
     document.addEventListener('mousemove', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
     document.addEventListener('touchstart', () => window.requestAnimationFrame(updateFulfilmentTooltipColours), true);
+    document.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLSelectElement) window.requestAnimationFrame(syncDraftRouteAddForm);
+    }, true);
+    document.addEventListener('submit', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLFormElement && target.querySelector('input[name="intent"][value="addDraftOrder"]')) syncDraftRouteAddForm();
+    }, true);
 
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', startObserver, { once: true });
