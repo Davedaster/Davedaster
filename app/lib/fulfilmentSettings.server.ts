@@ -1,24 +1,35 @@
 import prisma from "../db.server";
 
-export type RoutePublishFulfilmentMode = "on_publish" | "on_delivery_complete";
+export type RoutePublishFulfilmentMode = "on_publish" | "on_publish_delivered" | "on_delivery_complete";
 
 export type FulfilmentSettings = {
   routePublishFulfilmentMode: RoutePublishFulfilmentMode;
+  notifyCustomerOnFulfilment: boolean;
 };
 
 const SETTINGS_KEY = "fulfilment_settings";
 
 export const defaultFulfilmentSettings: FulfilmentSettings = {
   routePublishFulfilmentMode: "on_delivery_complete",
+  notifyCustomerOnFulfilment: false,
 };
 
 function normaliseMode(value: unknown): RoutePublishFulfilmentMode {
-  return value === "on_publish" ? "on_publish" : "on_delivery_complete";
+  if (value === "on_publish" || value === "on_publish_delivered") {
+    return value;
+  }
+
+  return "on_delivery_complete";
+}
+
+function normaliseBoolean(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function normaliseSettings(value: Partial<FulfilmentSettings> | null | undefined): FulfilmentSettings {
   return {
     routePublishFulfilmentMode: normaliseMode(value?.routePublishFulfilmentMode),
+    notifyCustomerOnFulfilment: normaliseBoolean(value?.notifyCustomerOnFulfilment),
   };
 }
 
