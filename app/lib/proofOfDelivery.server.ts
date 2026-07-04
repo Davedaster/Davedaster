@@ -235,12 +235,14 @@ export async function saveProofOfDelivery(input: {
     });
   });
 
-  if (fulfilmentSettings.routePublishFulfilmentMode === "on_delivery_complete") {
+  if (fulfilmentSettings.routePublishFulfilmentMode !== "on_publish_delivered") {
     if (input.admin) {
       for (const order of stop.deliveryGroup.orders) {
         try {
-          const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId);
-          shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled" : result.reason || "tagged"}`);
+          const result = await markShopifyOrderDelivered(input.admin, order.shopifyOrderId, {
+            notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
+          });
+          shopifyResults.push(`${order.shopifyOrderNumber}: ${result.fulfilled ? "fulfilled/delivered" : result.reason || "tagged"}`);
         } catch (error) {
           shopifyResults.push(`${order.shopifyOrderNumber}: Shopify skipped, ${error instanceof Error ? error.message : "unknown Shopify error"}`);
         }
@@ -249,7 +251,7 @@ export async function saveProofOfDelivery(input: {
       shopifyResults.push("Shopify fulfilment skipped, app shop domain is not set in Railway");
     }
   } else {
-    shopifyResults.push("Shopify fulfilment skipped on delivery completion because fulfilment is set to run when the route is published");
+    shopifyResults.push("Shopify fulfilment skipped on delivery completion because the route was set to fulfil and mark delivered on publish");
   }
 
   try {
