@@ -13,7 +13,7 @@ export const defaultFulfilmentSettings: FulfilmentSettings = {
 };
 
 function normaliseMode(value: unknown): RoutePublishFulfilmentMode {
-  return value === "on_publish" ? "on_publish" : "on_delivery_complete";
+  return value === "on_publish" ? "on_delivery_complete" : "on_delivery_complete";
 }
 
 function normaliseSettings(value: Partial<FulfilmentSettings> | null | undefined): FulfilmentSettings {
