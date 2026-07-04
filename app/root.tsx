@@ -290,6 +290,7 @@ const planningPanelScript = `
     };
 
     const monthIndex = { jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11 };
+    const fulfilByPattern = /fulfil\s*by\s*:?\s*([0-9]{1,2}\s+[A-Za-z]{3,9}\.?\s+[0-9]{4})/i;
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
     const parseTooltipDate = (value) => {
@@ -344,26 +345,53 @@ const planningPanelScript = `
       return '#667085';
     };
 
+    const renderFulfilLine = (line, dateText) => {
+      const tone = fulfilDateTone(dateText);
+      if (line.dataset.bpdFulfilStyled === tone && line.dataset.bpdFulfilDate === dateText) return;
+      line.dataset.bpdFulfilStyled = tone;
+      line.dataset.bpdFulfilDate = dateText;
+      const colour = fulfilDateColour(tone);
+      line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '" style="font-weight:800;color:' + colour + ' !important;">' + bpdEscapeHtml(dateText) + '</span>';
+    };
+
     const markTooltipReady = () => {
       document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
         if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
       });
     };
 
+    const styleFulfilmentTextNode = (textNode) => {
+      const rawText = textNode.nodeValue || '';
+      const match = rawText.match(fulfilByPattern);
+      if (!match || !textNode.parentElement || textNode.parentElement.closest('.bpd-fulfil-date')) return;
+      const line = textNode.parentElement.closest('.bpd-tooltip-line') || textNode.parentElement;
+      if (!(line instanceof HTMLElement)) return;
+      const cleanText = (line.textContent || rawText).replace(/^[\s🟢🔵🟠🔴⚪]+/u, '').trim();
+      const dateMatch = cleanText.match(fulfilByPattern);
+      if (!dateMatch) return;
+      renderFulfilLine(line, dateMatch[1].trim());
+    };
+
     const updateFulfilmentTooltipColours = () => {
       document.querySelectorAll('.bpd-tooltip-line, .mapboxgl-popup-content div').forEach((line) => {
         if (!(line instanceof HTMLElement)) return;
         const rawText = line.textContent?.trim() || '';
-        const cleanText = rawText.replace(/^[^A-Za-z0-9]*\s*/, '').trim();
-        if (!cleanText.toLowerCase().startsWith('fulfil by:')) return;
-        const dateText = cleanText.replace(/^fulfil by:\s*/i, '').trim();
-        const tone = fulfilDateTone(dateText);
-        if (line.dataset.bpdFulfilStyled === tone && line.dataset.bpdFulfilDate === dateText) return;
-        line.dataset.bpdFulfilStyled = tone;
-        line.dataset.bpdFulfilDate = dateText;
-        const colour = fulfilDateColour(tone);
-        line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '" style="font-weight:800;color:' + colour + ' !important;">' + bpdEscapeHtml(dateText) + '</span>';
+        const cleanText = rawText.replace(/^[\s🟢🔵🟠🔴⚪]+/u, '').trim();
+        const match = cleanText.match(/^fulfil\s*by\s*:?\s*([0-9]{1,2}\s+[A-Za-z]{3,9}\.?\s+[0-9]{4})$/i);
+        if (!match) return;
+        renderFulfilLine(line, match[1].trim());
       });
+
+      document.querySelectorAll('.mapboxgl-popup-content').forEach((popup) => {
+        const walker = document.createTreeWalker(popup, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          const nextNode = walker.nextNode();
+          styleFulfilmentTextNode(node);
+          node = nextNode;
+        }
+      });
+
       markTooltipReady();
     };
 
