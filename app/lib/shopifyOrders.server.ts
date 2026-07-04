@@ -1,4 +1,5 @@
 import type { AddressOverride } from "@prisma/client";
+import prisma from "../db.server";
 import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
 import { getActiveRouteAllocations, type RouteAllocation } from "./routeAllocations.server";
@@ -100,6 +101,10 @@ export type DeliveryOrder = {
   manualAddressNotes: string | null;
   orderSource?: "shopify" | "manual";
   routeAllocation?: RouteAllocation | null;
+  isRedelivery?: boolean;
+  redeliveryReason?: string | null;
+  redeliveryRouteName?: string | null;
+  redeliveryAttemptedAt?: string | null;
 };
 
 export type ManualDeliveryOrderInput = {
@@ -217,6 +222,10 @@ function allocationLine(allocation: RouteAllocation) {
   return `Already allocated to ${allocation.routeName}${allocation.driverName ? ` with ${allocation.driverName}` : ""}`;
 }
 
+function redeliveryLine(reason?: string | null) {
+  return `🔴 Redeliver${reason ? `, ${reason}` : ""}`;
+}
+
 function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation | undefined): DeliveryOrder {
   if (!allocation) return order;
 
@@ -224,6 +233,24 @@ function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation 
     ...order,
     routeAllocation: allocation,
     lineItemLines: [allocationLine(allocation), ...order.lineItemLines],
+  };
+}
+
+function applyRedeliveryFlag(order: DeliveryOrder, redelivery: DeliveryOrder | undefined): DeliveryOrder {
+  if (!redelivery) return order;
+
+  const redeliveryMarker = redeliveryLine(redelivery.redeliveryReason);
+  const lineItemLines = order.lineItemLines.some((line) => line.includes("Redeliver"))
+    ? order.lineItemLines
+    : [redeliveryMarker, ...order.lineItemLines];
+
+  return {
+    ...order,
+    isRedelivery: true,
+    redeliveryReason: redelivery.redeliveryReason,
+    redeliveryRouteName: redelivery.redeliveryRouteName,
+    redeliveryAttemptedAt: redelivery.redeliveryAttemptedAt,
+    lineItemLines,
   };
 }
 
@@ -243,6 +270,21 @@ function applyOverride(order: DeliveryOrder, override: AddressOverride | undefin
     manualAddress: override.manualAddress,
     manualAddressNotes: override.notes,
   };
+}
+
+function failedDeliveryReason(note?: string | null) {
+  const cleanNote = (note || "").trim();
+  const prefix = "Failed delivery,";
+
+  if (!cleanNote) {
+    return "Missed delivery";
+  }
+
+  if (!cleanNote.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return cleanNote;
+  }
+
+  return cleanNote.slice(prefix.length).trim().split(".")[0]?.trim() || "Missed delivery";
 }
 
 export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
@@ -340,6 +382,132 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
   };
 }
 
+function failedStopForOrderStop(orderStop: Awaited<ReturnType<typeof getFailedRedeliveryOrderStops>>[number]) {
+  return orderStop.deliveryGroup.stops
+    .filter((stop) => stop.status === "FAILED")
+    .sort((a, b) => new Date(b.actualArrival || b.updatedAt).getTime() - new Date(a.actualArrival || a.updatedAt).getTime())[0];
+}
+
+function toRedeliveryOrder(orderStop: Awaited<ReturnType<typeof getFailedRedeliveryOrderStops>>[number]): DeliveryOrder | null {
+  const group = orderStop.deliveryGroup;
+  const failedStop = failedStopForOrderStop(orderStop);
+
+  if (!failedStop) {
+    return null;
+  }
+
+  const reason = failedDeliveryReason(group.deliveryNote || group.safePlaceNote);
+  const lineItemLines = (orderStop.lineItemSummary || "")
+    .split(",")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    id: orderStop.shopifyOrderId,
+    name: orderStop.shopifyOrderNumber,
+    createdAt: (failedStop.actualArrival || orderStop.createdAt).toISOString(),
+    customerName: orderStop.customerName || "Customer",
+    email: orderStop.customerEmail,
+    phone: orderStop.customerPhone,
+    shippingMethod: "Redelivery required",
+    fulfilmentStatus: "redelivery_required",
+    financialStatus: "paid",
+    postcode: group.postcode || orderStop.postcode,
+    addressSummary: group.formattedAddress || group.manualAddress || group.address,
+    formattedAddress: group.formattedAddress || group.manualAddress || group.address,
+    hasDeliveryAddress: true,
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: group.latitude && group.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: group.latitude && group.longitude ? "HIGH" : "LOW",
+    latitude: group.latitude,
+    longitude: group.longitude,
+    lineItemSummary: orderStop.lineItemSummary || "Redelivery required",
+    lineItemLines: [redeliveryLine(reason), ...(lineItemLines.length ? lineItemLines : ["Redelivery required"])],
+    fulfilByDate: null,
+    hasManualOverride: group.useManualAddress,
+    manualAddress: group.manualAddress,
+    manualAddressNotes: group.useManualAddress ? "Redelivery from missed POD" : null,
+    orderSource: orderStop.orderSource === "manual" ? "manual" : "shopify",
+    routeAllocation: null,
+    isRedelivery: true,
+    redeliveryReason: reason,
+    redeliveryRouteName: failedStop.route.name,
+    redeliveryAttemptedAt: failedStop.actualArrival?.toISOString() || null,
+  };
+}
+
+async function getFailedRedeliveryOrderStops() {
+  return prisma.orderStop.findMany({
+    where: {
+      deliveryGroup: {
+        stops: {
+          some: {
+            status: "FAILED",
+          },
+        },
+      },
+    },
+    include: {
+      deliveryGroup: {
+        include: {
+          stops: {
+            include: {
+              route: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  });
+}
+
+async function getFailedRedeliveryOrders() {
+  const failedOrderStops = await getFailedRedeliveryOrderStops();
+  const orderIds = [...new Set(failedOrderStops.map((orderStop) => orderStop.shopifyOrderId))];
+
+  if (!orderIds.length) {
+    return [];
+  }
+
+  const deliveredOrderStops = await prisma.orderStop.findMany({
+    where: {
+      shopifyOrderId: {
+        in: orderIds,
+      },
+      deliveryGroup: {
+        stops: {
+          some: {
+            status: "DELIVERED",
+          },
+        },
+      },
+    },
+    select: {
+      shopifyOrderId: true,
+    },
+  });
+  const deliveredOrderIds = new Set(deliveredOrderStops.map((orderStop) => orderStop.shopifyOrderId));
+  const redeliveryByOrderId = new Map<string, DeliveryOrder>();
+
+  for (const orderStop of failedOrderStops) {
+    if (deliveredOrderIds.has(orderStop.shopifyOrderId)) {
+      continue;
+    }
+
+    const redeliveryOrder = toRedeliveryOrder(orderStop);
+
+    if (redeliveryOrder && !redeliveryByOrderId.has(redeliveryOrder.id)) {
+      redeliveryByOrderId.set(redeliveryOrder.id, redeliveryOrder);
+    }
+  }
+
+  return [...redeliveryByOrderId.values()];
+}
+
 const DELIVERY_ORDERS_QUERY = `#graphql
   query DeliveryOrders($query: String!, $cursor: String) {
     orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $query) {
@@ -421,11 +589,28 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
   } while (cursor && page < 10);
 
   const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
-  const overrides = await getAddressOverridesByOrderId();
+  const [overrides, redeliveryOrders] = await Promise.all([
+    getAddressOverridesByOrderId(),
+    getFailedRedeliveryOrders(),
+  ]);
   const deliveryOrders = await Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
-  const allocations = await getActiveRouteAllocations(deliveryOrders.map((order) => order.id));
+  const redeliveryOrdersById = new Map(redeliveryOrders.map((order) => [order.id, order]));
+  const mergedOrdersById = new Map<string, DeliveryOrder>();
 
-  return deliveryOrders
+  for (const order of deliveryOrders) {
+    mergedOrdersById.set(order.id, applyRedeliveryFlag(order, redeliveryOrdersById.get(order.id)));
+  }
+
+  for (const redeliveryOrder of redeliveryOrders) {
+    if (!mergedOrdersById.has(redeliveryOrder.id)) {
+      mergedOrdersById.set(redeliveryOrder.id, redeliveryOrder);
+    }
+  }
+
+  const mergedOrders = [...mergedOrdersById.values()];
+  const allocations = await getActiveRouteAllocations(mergedOrders.map((order) => order.id));
+
+  return mergedOrders
     .filter((order) => !allocations.has(order.id))
     .map((order) => applyRouteAllocation(order, allocations.get(order.id)));
 }
