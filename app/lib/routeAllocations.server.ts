@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 
 export const activeRouteStatuses = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY"];
+const activeStopStatuses = ["PENDING", "ARRIVED"];
 
 export type RouteAllocation = {
   orderId: string;
@@ -27,6 +28,9 @@ export async function getActiveRouteAllocations(orderIds?: string[]) {
       deliveryGroup: {
         stops: {
           some: {
+            status: {
+              in: activeStopStatuses,
+            },
             route: {
               status: {
                 in: activeRouteStatuses,
@@ -41,6 +45,9 @@ export async function getActiveRouteAllocations(orderIds?: string[]) {
         include: {
           stops: {
             where: {
+              status: {
+                in: activeStopStatuses,
+              },
               route: {
                 status: {
                   in: activeRouteStatuses,
