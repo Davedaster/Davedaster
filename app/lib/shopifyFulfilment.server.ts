@@ -61,6 +61,19 @@ type FulfillmentCreatePayload = {
   errors?: Array<{ message: string }>;
 };
 
+type FulfillmentEventCreatePayload = {
+  data?: {
+    fulfillmentEventCreate?: {
+      fulfillmentEvent?: {
+        id: string;
+        status: string;
+      } | null;
+      userErrors?: ShopifyUserError[];
+    };
+  };
+  errors?: Array<{ message: string }>;
+};
+
 type TagsAddPayload = {
   data?: {
     tagsAdd?: {
@@ -103,6 +116,21 @@ const FULFILLMENT_CREATE = `#graphql
   mutation FulfillmentCreate($fulfillment: FulfillmentInput!) {
     fulfillmentCreate(fulfillment: $fulfillment) {
       fulfillment {
+        id
+        status
+      }
+      userErrors {
+        field
+        message
+      }
+    }
+  }
+`;
+
+const FULFILLMENT_EVENT_CREATE = `#graphql
+  mutation FulfillmentEventCreate($fulfillmentEvent: FulfillmentEventInput!) {
+    fulfillmentEventCreate(fulfillmentEvent: $fulfillmentEvent) {
+      fulfillmentEvent {
         id
         status
       }
@@ -181,6 +209,21 @@ function fulfilmentStatusSummary(fulfillmentOrders: FulfillmentOrder[]) {
     })
     .filter(Boolean)
     .join(", ");
+}
+
+async function createDeliveredFulfillmentEvent(admin: ShopifyAdmin, fulfillmentId: string) {
+  const response = await admin.graphql(FULFILLMENT_EVENT_CREATE, {
+    variables: {
+      fulfillmentEvent: {
+        fulfillmentId,
+        status: "DELIVERED",
+      },
+    },
+  });
+  const payload = await response.json() as FulfillmentEventCreatePayload;
+
+  throwGraphQLErrors(payload);
+  throwUserErrors(payload.data?.fulfillmentEventCreate?.userErrors);
 }
 
 export async function tagOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
@@ -279,6 +322,7 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
       const fulfillmentId = createPayload.data?.fulfillmentCreate?.fulfillment?.id;
       if (fulfillmentId) {
         fulfillmentIds.push(fulfillmentId);
+        await createDeliveredFulfillmentEvent(admin, fulfillmentId);
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Unknown Shopify fulfilment error");
