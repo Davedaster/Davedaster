@@ -51,20 +51,32 @@ const FINISH_ENDPOINT_IMAGE_ID = "bpd-route-endpoint-finish-pin-v3";
 const SPLIT_ENDPOINT_IMAGE_ID = "bpd-route-start-finish-pin-return-v4";
 const ENDPOINT_ICON_SIZE = 0.62;
 const TRAFFIC_MARKER_PATTERN = /^[\s🟢🔵🟠🔴⚪]+/u;
-const FULFIL_BY_PATTERN = /fulfil by:\s*([0-9]{2}\s+[A-Za-z]{3}\s+[0-9]{4})/i;
+const FULFIL_BY_PATTERN = /fulfil\s*by\s*:?\s*([0-9]{1,2}\s+[A-Za-z]{3,9}\.?\s+[0-9]{4})/i;
 const MONTHS: Record<string, number> = {
   jan: 0,
+  january: 0,
   feb: 1,
+  february: 1,
   mar: 2,
+  march: 2,
   apr: 3,
+  april: 3,
   may: 4,
   jun: 5,
+  june: 5,
   jul: 6,
+  july: 6,
   aug: 7,
+  august: 7,
   sep: 8,
+  sept: 8,
+  september: 8,
   oct: 9,
+  october: 9,
   nov: 10,
+  november: 10,
   dec: 11,
+  december: 11,
 };
 
 function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
@@ -106,14 +118,15 @@ function localDateOnly(date: Date) {
 }
 
 function parseShortBritishDate(value: string) {
-  const match = value.match(/([0-9]{1,2})\s+([A-Za-z]{3})\s+([0-9]{4})/);
+  const match = value.match(/([0-9]{1,2})\s+([A-Za-z]{3,9})\.?\s+([0-9]{4})/);
 
   if (!match) {
     return null;
   }
 
   const day = Number(match[1]);
-  const month = MONTHS[match[2].toLowerCase()];
+  const monthText = match[2].toLowerCase().replace(".", "");
+  const month = MONTHS[monthText] ?? MONTHS[monthText.slice(0, 3)];
   const year = Number(match[3]);
 
   if (!Number.isFinite(day) || typeof month !== "number" || !Number.isFinite(year)) {
@@ -149,6 +162,24 @@ function workingDaysUntil(target: Date) {
   return days;
 }
 
+function markerToneFromLine(line: string): TooltipTone | null {
+  const trimmed = line.trim();
+
+  if (trimmed.startsWith("🟢")) {
+    return "success";
+  }
+
+  if (trimmed.startsWith("🟠") || trimmed.startsWith("🔵")) {
+    return "warning";
+  }
+
+  if (trimmed.startsWith("🔴")) {
+    return "critical";
+  }
+
+  return null;
+}
+
 function fulfilmentToneFromLine(line: string): TooltipTone | null {
   const fulfilByMatch = line.match(FULFIL_BY_PATTERN);
 
@@ -159,7 +190,7 @@ function fulfilmentToneFromLine(line: string): TooltipTone | null {
   const fulfilByDate = parseShortBritishDate(fulfilByMatch[1]);
 
   if (!fulfilByDate) {
-    return "default";
+    return markerToneFromLine(line) || "default";
   }
 
   const daysLeft = workingDaysUntil(fulfilByDate);
@@ -187,19 +218,7 @@ function tooltipToneForLine(line: string): TooltipTone {
     return fulfilmentTone;
   }
 
-  if (line.trim().startsWith("🟢")) {
-    return "success";
-  }
-
-  if (line.trim().startsWith("🟠") || line.trim().startsWith("🔵")) {
-    return "warning";
-  }
-
-  if (line.trim().startsWith("🔴")) {
-    return "critical";
-  }
-
-  return "default";
+  return markerToneFromLine(line) || "default";
 }
 
 function cleanTooltipLine(line: string) {
@@ -215,7 +234,10 @@ function fulfilmentDateLineHtml(line: string, tone: TooltipTone) {
   }
 
   const dateText = fulfilByMatch[1];
-  const labelText = cleanLine.slice(0, fulfilByMatch.index).concat(cleanLine.slice(fulfilByMatch.index, fulfilByMatch.index + fulfilByMatch[0].length).replace(dateText, ""));
+  const matchStart = fulfilByMatch.index || 0;
+  const labelText = cleanLine
+    .slice(0, matchStart)
+    .concat(cleanLine.slice(matchStart, matchStart + fulfilByMatch[0].length).replace(dateText, ""));
 
   return `<div class="bpd-tooltip-line">${escapeHtml(labelText)}<span class="bpd-tooltip-date bpd-tooltip-date--${tone}">${escapeHtml(dateText)}</span></div>`;
 }
