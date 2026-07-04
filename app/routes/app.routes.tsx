@@ -253,7 +253,7 @@ function statusTone(status: string) {
   if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") return "success" as const;
   if (status === "OUT_FOR_DELIVERY") return "attention" as const;
   if (status === "COMPLETED") return "success" as const;
-  return "attention" as const;
+  return "attention";
 }
 
 function routeLiveLabel(status: string) {
@@ -385,7 +385,7 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
   const canRetryFulfilment = isFulfilmentRetryAllowed(route.status);
 
   return (
-    <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`} onClick={() => {}}>
+    <ResourceItem id={route.id} accessibilityLabel={`View ${route.name}`}>
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="start" gap="300">
           <BlockStack gap="100">
