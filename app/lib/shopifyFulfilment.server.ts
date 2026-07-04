@@ -17,11 +17,15 @@ type FulfillmentOrderLineItem = {
   remainingQuantity: number;
 };
 
+type FulfillmentOrderSupportedAction = {
+  action: string;
+};
+
 type FulfillmentOrder = {
   id: string;
   status: string;
   requestStatus?: string | null;
-  supportedActions: string[];
+  supportedActions: FulfillmentOrderSupportedAction[];
   assignedLocation: {
     name?: string | null;
     location?: {
@@ -74,7 +78,9 @@ const GET_FULFILLMENT_ORDERS = `#graphql
           id
           status
           requestStatus
-          supportedActions
+          supportedActions {
+            action
+          }
           assignedLocation {
             name
             location {
@@ -157,7 +163,9 @@ function canCreateFulfillment(fulfillmentOrder: FulfillmentOrder) {
     return false;
   }
 
-  if (fulfillmentOrder.supportedActions?.includes("CREATE_FULFILLMENT")) {
+  const supportedActionNames = fulfillmentOrder.supportedActions?.map((supportedAction) => supportedAction.action) || [];
+
+  if (supportedActionNames.includes("CREATE_FULFILLMENT")) {
     return true;
   }
 
