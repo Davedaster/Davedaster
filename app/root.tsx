@@ -39,19 +39,19 @@ const planningPanelStyles = `
   }
 
   .bpd-fulfil-date-green {
-    color: #16a34a;
+    color: #16a34a !important;
   }
 
   .bpd-fulfil-date-orange {
-    color: #f97316;
+    color: #f97316 !important;
   }
 
   .bpd-fulfil-date-red {
-    color: #b42318;
+    color: #b42318 !important;
   }
 
   .bpd-fulfil-date-grey {
-    color: #667085;
+    color: #667085 !important;
   }
 
   .bpd-driver-status-pill {
@@ -289,13 +289,14 @@ const planningPanelScript = `
       });
     };
 
-    const monthIndex = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    const monthIndex = { jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11 };
     const dateOnly = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
     const parseTooltipDate = (value) => {
-      const match = String(value).trim().match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+      const match = String(value).trim().match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})$/);
       if (!match) return null;
-      const month = monthIndex[match[2].toLowerCase()];
+      const monthText = match[2].toLowerCase().replace('.', '');
+      const month = monthIndex[monthText] ?? monthIndex[monthText.slice(0, 3)];
       if (typeof month !== 'number') return null;
       return new Date(Number(match[3]), month, Number(match[1]));
     };
@@ -336,6 +337,13 @@ const planningPanelScript = `
       return 'red';
     };
 
+    const fulfilDateColour = (tone) => {
+      if (tone === 'green') return '#16a34a';
+      if (tone === 'orange') return '#f97316';
+      if (tone === 'red') return '#b42318';
+      return '#667085';
+    };
+
     const markTooltipReady = () => {
       document.querySelectorAll('.bpd-tomtom-popup .mapboxgl-popup-content').forEach((content) => {
         if (content instanceof HTMLElement) content.dataset.bpdTooltipReady = 'true';
@@ -353,7 +361,8 @@ const planningPanelScript = `
         if (line.dataset.bpdFulfilStyled === tone && line.dataset.bpdFulfilDate === dateText) return;
         line.dataset.bpdFulfilStyled = tone;
         line.dataset.bpdFulfilDate = dateText;
-        line.innerHTML = '<span class="bpd-fulfil-dot bpd-fulfil-date-' + tone + '">●</span> Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '">' + bpdEscapeHtml(dateText) + '</span>';
+        const colour = fulfilDateColour(tone);
+        line.innerHTML = 'Fulfil by: <span class="bpd-fulfil-date bpd-fulfil-date-' + tone + '" style="font-weight:800;color:' + colour + ' !important;">' + bpdEscapeHtml(dateText) + '</span>';
       });
       markTooltipReady();
     };
