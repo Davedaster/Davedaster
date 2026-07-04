@@ -43,10 +43,7 @@ type RouteActionData = {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
   const url = new URL(request.url);
-  const [routes, drivers] = await Promise.all([
-    listRoutes(),
-    listActiveDrivers(),
-  ]);
+  const [routes, drivers] = await Promise.all([listRoutes(), listActiveDrivers()]);
   const initialToasts: AdminToastMessage[] = [];
 
   if (url.searchParams.get("toast") === "draft_saved") {
@@ -64,19 +61,9 @@ function tick(value: boolean) {
   return value ? "✓" : "✗";
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
-
 function fulfilmentPublishLabel(mode: string, fulfilled: number, skipped: number) {
-  if (mode === "on_publish_delivered") {
-    return `Shopify fulfilment on publish: ${fulfilled} fulfilled and marked delivered, ${skipped} skipped`;
-  }
-
-  if (mode === "on_publish") {
-    return `Shopify fulfilment on publish: ${fulfilled} fulfilled, ${skipped} skipped`;
-  }
-
+  if (mode === "on_publish_delivered") return `Shopify fulfilment on publish: ${fulfilled} fulfilled and marked delivered, ${skipped} skipped`;
+  if (mode === "on_publish") return `Shopify fulfilment on publish: ${fulfilled} fulfilled, ${skipped} skipped`;
   return "Shopify fulfilment will happen when each delivery is completed";
 }
 
@@ -160,18 +147,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (intent === "fulfilRoute") {
     try {
       const fulfilmentSettings = await getFulfilmentSettings();
-      const result = await fulfilRouteOrders(admin, routeId, {
-        notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
-      });
-      return json<RouteActionData>({
-        ok: true,
-        message: fulfilmentMessage(result),
-        errors: result.errors,
-        toasts: [
-          actionToast("Shopify fulfilment checked", `${result.fulfilled} fulfilled, ${result.skipped} skipped`, result.errors.length ? "info" : "success"),
-          ...result.errors.map((error) => actionToast("Fulfilment detail", error, "info")),
-        ],
-      });
+      const result = await fulfilRouteOrders(admin, routeId, { notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment });
+      return json<RouteActionData>({ ok: true, message: fulfilmentMessage(result), errors: result.errors, toasts: [actionToast("Shopify fulfilment checked", `${result.fulfilled} fulfilled, ${result.skipped} skipped`, result.errors.length ? "info" : "success"), ...result.errors.map((error) => actionToast("Fulfilment detail", error, "info"))] });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Shopify fulfilment could not be checked.";
       return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Shopify fulfilment failed", message, "critical")] }, { status: 400 });
@@ -184,17 +161,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const drivers = await listActiveDrivers();
       const driverName = route?.driverId ? drivers.find((driver) => driver.id === route.driverId)?.name || "Driver" : "Driver";
 
-      if (!route) {
-        return json<RouteActionData>({ ok: false, error: "Route could not be found.", toasts: [actionToast("Publish failed", "Route could not be found.", "critical")] }, { status: 404 });
-      }
-
-      if (route.status !== "DRAFT") {
-        return json<RouteActionData>({ ok: false, error: "Only draft routes can be published from this card.", toasts: [actionToast("Publish failed", "Only draft routes can be published from this card.", "critical")] }, { status: 400 });
-      }
-
-      if (!route.driverId) {
-        return json<RouteActionData>({ ok: false, error: "Assign a driver before publishing this route.", toasts: [actionToast("Publish failed", "Assign a driver before publishing this route.", "critical")] }, { status: 400 });
-      }
+      if (!route) return json<RouteActionData>({ ok: false, error: "Route could not be found.", toasts: [actionToast("Publish failed", "Route could not be found.", "critical")] }, { status: 404 });
+      if (route.status !== "DRAFT") return json<RouteActionData>({ ok: false, error: "Only draft routes can be published from this card.", toasts: [actionToast("Publish failed", "Only draft routes can be published from this card.", "critical")] }, { status: 400 });
+      if (!route.driverId) return json<RouteActionData>({ ok: false, error: "Assign a driver before publishing this route.", toasts: [actionToast("Publish failed", "Assign a driver before publishing this route.", "critical")] }, { status: 400 });
 
       await publishRoute(routeId);
       await calculateEtaSlots(routeId);
@@ -222,28 +191,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         actionToast(driverResult.emailSent ? "Driver email sent" : "Driver email not sent", `${route.name} sent to ${driverName}`, driverResult.emailSent ? "success" : "info"),
         actionToast("Customer SMS update", `${customerResult.smsSent} sent, ${customerResult.skipped} skipped`, customerResult.smsSent ? "success" : "info"),
         actionToast("Customer email update", `${customerResult.emailsSent} sent, ${customerResult.skipped} skipped`, customerResult.emailsSent ? "success" : "info"),
-        fulfilOnPublish
-          ? actionToast(fulfilmentToastTitle, `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success")
-          : actionToast("Shopify fulfilment", "Will run when each delivery is completed", "info"),
+        fulfilOnPublish ? actionToast(fulfilmentToastTitle, `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success") : actionToast("Shopify fulfilment", "Will run when each delivery is completed", "info"),
         ...errors.map((error) => actionToast("Publish detail", error, "critical")),
       ];
 
-      return json<RouteActionData>({
-        ok: true,
-        message: publishMessage({
-          driverSms: driverResult.smsSent,
-          driverEmail: driverResult.emailSent,
-          customerSms: customerResult.smsSent,
-          customerEmail: customerResult.emailsSent,
-          customerSkipped: customerResult.skipped,
-          fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode,
-          fulfilmentFulfilled: fulfilmentResult.fulfilled,
-          fulfilmentSkipped: fulfilmentResult.skipped,
-          errors,
-        }),
-        errors,
-        toasts,
-      });
+      return json<RouteActionData>({ ok: true, message: publishMessage({ driverSms: driverResult.smsSent, driverEmail: driverResult.emailSent, customerSms: customerResult.smsSent, customerEmail: customerResult.emailsSent, customerSkipped: customerResult.skipped, fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode, fulfilmentFulfilled: fulfilmentResult.fulfilled, fulfilmentSkipped: fulfilmentResult.skipped, errors }), errors, toasts });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Route could not be published.";
       return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Route could not be published", message, "critical")] }, { status: 400 });
@@ -279,7 +231,7 @@ function statusTone(status: string) {
   if (status === "PUBLISHED" || status === "NOTIFICATIONS_SENT") return "success" as const;
   if (status === "OUT_FOR_DELIVERY") return "attention" as const;
   if (status === "COMPLETED") return "success" as const;
-  return "attention";
+  return "attention" as const;
 }
 
 function routeLiveLabel(status: string) {
@@ -428,7 +380,7 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
           <BlockStack gap="250">
             <DriverSelect route={route} drivers={drivers} />
             {isDraft ? (
-              <InlineStack gap="200" wrap><Button url={`/app/routes/${route.id}`}>Edit draft drops</Button><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
+              <InlineStack gap="200" wrap><Button url={`/app/edit-route/${route.id}`}>Edit Route</Button><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
             ) : canDeleteRoute ? (
               <InlineStack gap="200" wrap blockAlign="center"><Button url={`/app/routes/${route.id}`}>Open route</Button><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /></InlineStack>
             ) : (
@@ -467,32 +419,18 @@ export default function Routes() {
               {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
             </BlockStack>
           </LegacyCard>
-
           {liveRoutes.length ? <BlockStack gap="300">{liveRoutes.map((route) => <LiveRouteProgressCard key={route.id} route={route} drivers={drivers} />)}</BlockStack> : <LegacyCard sectioned><Text as="p" variant="bodyMd" tone="subdued">No published or active delivery routes are currently running.</Text></LegacyCard>}
-
           <LegacyCard sectioned>
             <BlockStack gap="300">
-              <InlineStack align="space-between" blockAlign="center" gap="300" wrap>
-                <BlockStack gap="100"><Text as="h2" variant="headingMd">Find completed routes</Text><Text as="p" variant="bodyMd" tone="subdued">Completed routes are hidden from the main list. Pick a delivery date to view completed routes for that day.</Text></BlockStack>
-                <Badge tone="success">{completedRouteCount} completed</Badge>
-              </InlineStack>
+              <InlineStack align="space-between" blockAlign="center" gap="300" wrap><BlockStack gap="100"><Text as="h2" variant="headingMd">Find completed routes</Text><Text as="p" variant="bodyMd" tone="subdued">Completed routes are hidden from the main list. Pick a delivery date to view completed routes for that day.</Text></BlockStack><Badge tone="success">{completedRouteCount} completed</Badge></InlineStack>
               <form onSubmit={(event) => { event.preventDefault(); setCompletedDateSearch(completedDateDraft); }}>
-                <InlineStack gap="200" blockAlign="center" wrap>
-                  <label style={{ fontSize: 13, fontWeight: 600 }} htmlFor="completed-route-date">Delivery date</label>
-                  <input id="completed-route-date" type="date" value={completedDateDraft} onChange={(event) => setCompletedDateDraft(event.currentTarget.value)} style={{ minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }} />
-                  <Button submit>Search</Button>
-                </InlineStack>
+                <InlineStack gap="200" blockAlign="center" wrap><label style={{ fontSize: 13, fontWeight: 600 }} htmlFor="completed-route-date">Delivery date</label><input id="completed-route-date" type="date" value={completedDateDraft} onChange={(event) => setCompletedDateDraft(event.currentTarget.value)} style={{ minHeight: 32, borderRadius: 8, border: "1px solid #c9cccf", padding: "4px 8px" }} /><Button submit>Search</Button></InlineStack>
               </form>
               {completedRoutesForDate.length ? <ResourceList resourceName={{ singular: "completed route", plural: "completed routes" }} items={completedRoutesForDate} renderItem={(route) => <RouteCard route={route} drivers={drivers} />} /> : <Text as="p" variant="bodyMd" tone="subdued">No completed routes found for {formatDate(completedDateSearch)}.</Text>}
             </BlockStack>
           </LegacyCard>
-
           <LegacyCard>
-            {visibleRoutes.length === 0 ? (
-              <EmptyState heading="No active or draft routes" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>Create a draft route from the Orders Map by selecting delivery pins, or search completed routes by date above.</p></EmptyState>
-            ) : (
-              <ResourceList resourceName={{ singular: "route", plural: "routes" }} items={visibleRoutes} renderItem={(route) => <RouteCard route={route} drivers={drivers} />} />
-            )}
+            {visibleRoutes.length === 0 ? <EmptyState heading="No active or draft routes" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>Create a draft route from the Orders Map by selecting delivery pins, or search completed routes by date above.</p></EmptyState> : <ResourceList resourceName={{ singular: "route", plural: "routes" }} items={visibleRoutes} renderItem={(route) => <RouteCard route={route} drivers={drivers} />} />}
           </LegacyCard>
         </Layout.Section>
       </Layout>
