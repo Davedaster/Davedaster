@@ -169,11 +169,40 @@ function lineItems(order: ShopifyOrderNode) {
   return order.lineItems.edges.map((edge) => edge.node);
 }
 
+function quantityLine(quantity: number, title: string) {
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+  return `${safeQuantity} × ${title}`;
+}
+
+function normaliseStoredLineItemLine(line: string) {
+  const cleanLine = line.replace(/\s+/g, " ").trim();
+
+  if (!cleanLine) {
+    return "";
+  }
+
+  const leadingQuantity = cleanLine.match(/^(\d+)(?:\s*[x×]\s+)(.+)$/i);
+  if (leadingQuantity) {
+    return quantityLine(Number(leadingQuantity[1]), leadingQuantity[2].trim());
+  }
+
+  const trailingQuantity = cleanLine.match(/^(.+?)(?:\s+[x×]\s*)(\d+)$/i);
+  if (trailingQuantity) {
+    return quantityLine(Number(trailingQuantity[2]), trailingQuantity[1].trim());
+  }
+
+  return quantityLine(1, cleanLine);
+}
+
+function normaliseStoredLineItemLines(summary: string) {
+  return summary
+    .split(/,|\n/)
+    .map(normaliseStoredLineItemLine)
+    .filter(Boolean);
+}
+
 function lineItemLines(items: ShopifyLineItem[]) {
-  return items.map((item) => {
-    const quantity = Number(item.quantity || 0);
-    return quantity > 1 ? `${quantity} × ${item.title}` : item.title;
-  });
+  return items.map((item) => quantityLine(Number(item.quantity || 1), item.title));
 }
 
 function getCustomerName(order: ShopifyOrderNode) {
@@ -349,7 +378,8 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
   const addressSummary = input.address.trim();
   const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
   const reference = manualOrderReference(input);
-  const lineItemLines = input.lineItemSummary.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lineItemLines = normaliseStoredLineItemLines(input.lineItemSummary);
+  const lineItemSummary = lineItemLines.join(", ");
 
   return {
     id: reference,
@@ -371,8 +401,8 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
     addressConfidence: lookup.latitude && lookup.longitude ? "HIGH" : lookup.confidence,
     latitude: lookup.latitude,
     longitude: lookup.longitude,
-    lineItemSummary: input.lineItemSummary.trim(),
-    lineItemLines: lineItemLines.length ? lineItemLines : [input.lineItemSummary.trim()].filter(Boolean),
+    lineItemSummary,
+    lineItemLines,
     fulfilByDate: null,
     hasManualOverride: true,
     manualAddress: addressSummary,
@@ -397,10 +427,8 @@ function toRedeliveryOrder(orderStop: Awaited<ReturnType<typeof getFailedRedeliv
   }
 
   const reason = failedDeliveryReason(group.deliveryNote || group.safePlaceNote);
-  const lineItemLines = (orderStop.lineItemSummary || "")
-    .split(",")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lineItemLines = normaliseStoredLineItemLines(orderStop.lineItemSummary || "");
+  const lineItemSummary = lineItemLines.join(", ") || "1 × Redelivery required";
 
   return {
     id: orderStop.shopifyOrderId,
@@ -422,8 +450,8 @@ function toRedeliveryOrder(orderStop: Awaited<ReturnType<typeof getFailedRedeliv
     addressConfidence: group.latitude && group.longitude ? "HIGH" : "LOW",
     latitude: group.latitude,
     longitude: group.longitude,
-    lineItemSummary: orderStop.lineItemSummary || "Redelivery required",
-    lineItemLines: [redeliveryLine(reason), ...(lineItemLines.length ? lineItemLines : ["Redelivery required"])],
+    lineItemSummary,
+    lineItemLines: [redeliveryLine(reason), ...(lineItemLines.length ? lineItemLines : [lineItemSummary])],
     fulfilByDate: null,
     hasManualOverride: group.useManualAddress,
     manualAddress: group.manualAddress,
