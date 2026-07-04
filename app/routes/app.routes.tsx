@@ -64,6 +64,22 @@ function tick(value: boolean) {
   return value ? "✓" : "✗";
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function fulfilmentPublishLabel(mode: string, fulfilled: number, skipped: number) {
+  if (mode === "on_publish_delivered") {
+    return `Shopify fulfilment on publish: ${fulfilled} fulfilled and marked delivered, ${skipped} skipped`;
+  }
+
+  if (mode === "on_publish") {
+    return `Shopify fulfilment on publish: ${fulfilled} fulfilled, ${skipped} skipped`;
+  }
+
+  return "Shopify fulfilment will happen when each delivery is completed";
+}
+
 function publishMessage(input: {
   driverSms: boolean;
   driverEmail: boolean;
@@ -82,9 +98,7 @@ function publishMessage(input: {
     `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
     `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
     input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
-    input.fulfilmentMode === "on_publish"
-      ? `Shopify fulfilment on publish: ${input.fulfilmentFulfilled} fulfilled, ${input.fulfilmentSkipped} skipped`
-      : "Shopify fulfilment will happen when each delivery is completed",
+    fulfilmentPublishLabel(input.fulfilmentMode, input.fulfilmentFulfilled, input.fulfilmentSkipped),
     input.errors.length ? `Errors: ${input.errors.join(" | ")}` : "",
   ].filter(Boolean).join(" · ");
 }
@@ -145,7 +159,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "fulfilRoute") {
     try {
-      const result = await fulfilRouteOrders(admin, routeId);
+      const fulfilmentSettings = await getFulfilmentSettings();
+      const result = await fulfilRouteOrders(admin, routeId, {
+        notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
+      });
       return json<RouteActionData>({
         ok: true,
         message: fulfilmentMessage(result),
@@ -184,20 +201,29 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await tagPublishedRouteOrders(admin, routeId);
 
       const fulfilmentSettings = await getFulfilmentSettings();
-      const fulfilmentResult = fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
-        ? await fulfilRouteOrders(admin, routeId)
+      const fulfilOnPublish = fulfilmentSettings.routePublishFulfilmentMode === "on_publish" || fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered";
+      const fulfilmentResult = fulfilOnPublish
+        ? await fulfilRouteOrders(admin, routeId, {
+          markDelivered: fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered",
+          notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
+        })
         : { fulfilled: 0, skipped: 0, errors: [] };
       const driverResult = await sendDriverRouteLink({ routeId, request });
       const customerResult = await sendBookedSlotNotifications(routeId);
       const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
+      const fulfilmentToastTitle = fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered"
+        ? "Shopify fulfilled and delivered on publish"
+        : fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
+          ? "Shopify fulfilment on publish"
+          : "Shopify fulfilment";
       const toasts: AdminToastMessage[] = [
         actionToast("Route published", route.name),
         actionToast(driverResult.smsSent ? "Driver SMS sent" : "Driver SMS not sent", `${route.name} sent to ${driverName}`, driverResult.smsSent ? "success" : "info"),
         actionToast(driverResult.emailSent ? "Driver email sent" : "Driver email not sent", `${route.name} sent to ${driverName}`, driverResult.emailSent ? "success" : "info"),
         actionToast("Customer SMS update", `${customerResult.smsSent} sent, ${customerResult.skipped} skipped`, customerResult.smsSent ? "success" : "info"),
         actionToast("Customer email update", `${customerResult.emailsSent} sent, ${customerResult.skipped} skipped`, customerResult.emailsSent ? "success" : "info"),
-        fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
-          ? actionToast("Shopify fulfilment on publish", `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success")
+        fulfilOnPublish
+          ? actionToast(fulfilmentToastTitle, `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success")
           : actionToast("Shopify fulfilment", "Will run when each delivery is completed", "info"),
         ...errors.map((error) => actionToast("Publish detail", error, "critical")),
       ];
@@ -402,11 +428,11 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
           <BlockStack gap="250">
             <DriverSelect route={route} drivers={drivers} />
             {isDraft ? (
-              <InlineStack gap="200" wrap><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
+              <InlineStack gap="200" wrap><Button url={`/app/routes/${route.id}`}>Edit draft drops</Button><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
             ) : canDeleteRoute ? (
-              <InlineStack gap="200" wrap blockAlign="center"><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /></InlineStack>
+              <InlineStack gap="200" wrap blockAlign="center"><Button url={`/app/routes/${route.id}`}>Open route</Button><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /></InlineStack>
             ) : (
-              <InlineStack gap="200" wrap blockAlign="center"><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text></InlineStack>
+              <InlineStack gap="200" wrap blockAlign="center"><Button url={`/app/routes/${route.id}`}>Open route</Button><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<Text as="p" variant="bodySm" tone="subdued">This route is currently out for delivery, so delete is locked.</Text></InlineStack>
             )}
           </BlockStack>
         </Box>
