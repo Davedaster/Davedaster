@@ -319,7 +319,7 @@ function DeleteRouteForm({ route, intent, label, confirmLabel }: { route: RouteL
     <Form method="post" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.stopPropagation(); if (!window.confirm(confirmDelete(route.name, confirmLabel))) event.preventDefault(); }}>
       <input type="hidden" name="intent" value={intent} />
       <input type="hidden" name="routeId" value={route.id} />
-      <button type="submit" onClick={(event) => event.stopPropagation()} style={{ background: "#d82c0d", border: "1px solid #d82c0d", borderRadius: 8, color: "#ffffff", fontSize: 13, fontWeight: 600, minHeight: 32, padding: "6px 12px" }}>{label}</button>
+      <button type="submit" onClick={(event) => event.stopPropagation()} style={{ background: "#d82c0d", border: "1px solid #d82c0d", borderRadius: 8, color: "#ffffff", cursor: "pointer", fontSize: 13, fontWeight: 600, minHeight: 32, padding: "6px 12px" }}>{label}</button>
     </Form>
   );
 }
