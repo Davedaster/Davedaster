@@ -530,9 +530,8 @@ export default function DriverRouteDetails() {
     .filter((stop) => stop.status === "PENDING")
     .sort((a, b) => a.orderIndex - b.orderIndex);
   const remainingRouteUrl = buildGoogleMapsRouteUrl(pendingRouteStops);
-  const nextPendingOrderIndex = pendingStops
-    ? Math.min(...route.stops.filter((stop) => stop.status === "PENDING").map((stop) => stop.orderIndex))
-    : null;
+  const currentPendingStop = pendingRouteStops[0] || null;
+  const nextPendingStop = pendingRouteStops[1] || null;
   const routeComplete = totalStops > 0 && pendingStops === 0;
 
   return (
@@ -606,7 +605,8 @@ export default function DriverRouteDetails() {
               const isFinalised = stop.status === "DELIVERED" || stop.status === "FAILED";
               const proofPhotos = stop.deliveryGroup?.proofPhotos || [];
               const orderLinks = stop.deliveryGroup?.orders || [];
-              const isNextPendingStop = routeStarted && stop.status === "PENDING" && stop.orderIndex === nextPendingOrderIndex;
+              const isCurrentPendingStop = routeStarted && stop.status === "PENDING" && currentPendingStop?.id === stop.id;
+              const isNextPendingStop = routeStarted && stop.status === "PENDING" && nextPendingStop?.id === stop.id;
               const deliveryNote = stop.deliveryGroup?.deliveryNote?.trim();
               const safePlaceNote = stop.deliveryGroup?.safePlaceNote?.trim();
 
@@ -616,8 +616,9 @@ export default function DriverRouteDetails() {
                     <InlineStack align="space-between" blockAlign="start">
                       <BlockStack gap="100">
                         <InlineStack gap="200" blockAlign="center">
-                          <Text as="h3" variant="headingMd">Stop {stop.orderIndex}</Text>
-                          {isNextPendingStop ? <Badge tone="success">NEXT DROP</Badge> : null}
+                          <Text as="h3" variant="headingMd">Drop {stop.orderIndex}</Text>
+                          {isCurrentPendingStop ? <Badge tone="success">Current</Badge> : null}
+                          {isNextPendingStop ? <Badge tone="info">Next</Badge> : null}
                         </InlineStack>
                         <Text as="p" variant="bodySm" tone="subdued">Orders: {orders}</Text>
                       </BlockStack>
@@ -626,11 +627,19 @@ export default function DriverRouteDetails() {
                     <Divider />
                     <Box>
                       <BlockStack gap="200">
-                        {isNextPendingStop ? (
+                        {isCurrentPendingStop ? (
                           <Box background="bg-surface-success" padding="300" borderRadius="300">
                             <BlockStack gap="100">
+                              <Text as="p" variant="bodyMd" fontWeight="bold">This is the current delivery</Text>
+                              <Text as="p" variant="bodySm">Open navigation now, then complete the POD once the delivery is finished.</Text>
+                            </BlockStack>
+                          </Box>
+                        ) : null}
+                        {isNextPendingStop ? (
+                          <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                            <BlockStack gap="100">
                               <Text as="p" variant="bodyMd" fontWeight="bold">This is the next delivery</Text>
-                              <Text as="p" variant="bodySm">Open navigation before leaving, then complete the POD once the delivery is finished.</Text>
+                              <Text as="p" variant="bodySm">This will become Current when the delivery above is completed or marked failed.</Text>
                             </BlockStack>
                           </Box>
                         ) : null}
