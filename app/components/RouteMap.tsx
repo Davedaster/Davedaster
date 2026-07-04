@@ -206,9 +206,30 @@ function cleanTooltipLine(line: string) {
   return line.replace(TRAFFIC_MARKER_PATTERN, "").trim();
 }
 
+function fulfilmentDateLineHtml(line: string, tone: TooltipTone) {
+  const cleanLine = cleanTooltipLine(line);
+  const fulfilByMatch = cleanLine.match(FULFIL_BY_PATTERN);
+
+  if (!fulfilByMatch) {
+    return null;
+  }
+
+  const dateText = fulfilByMatch[1];
+  const labelText = cleanLine.slice(0, fulfilByMatch.index).concat(cleanLine.slice(fulfilByMatch.index, fulfilByMatch.index + fulfilByMatch[0].length).replace(dateText, ""));
+
+  return `<div class="bpd-tooltip-line">${escapeHtml(labelText)}<span class="bpd-tooltip-date bpd-tooltip-date--${tone}">${escapeHtml(dateText)}</span></div>`;
+}
+
 function tooltipLineHtml(line: string, index: number) {
   if (index === 0) {
     return `<div class="bpd-tooltip-heading">${escapeHtml(line)}</div>`;
+  }
+
+  const fulfilmentTone = fulfilmentToneFromLine(line);
+  const fulfilmentHtml = fulfilmentTone ? fulfilmentDateLineHtml(line, fulfilmentTone) : null;
+
+  if (fulfilmentHtml) {
+    return fulfilmentHtml;
   }
 
   const tone = tooltipToneForLine(line);
@@ -271,6 +292,10 @@ function styles() {
     .bpd-tooltip-line--success { color: #15803d; font-weight: 800; }
     .bpd-tooltip-line--warning { color: #ea580c; font-weight: 800; }
     .bpd-tooltip-line--critical { color: #b42318; font-weight: 800; }
+    .bpd-tooltip-date { font-weight: 800; }
+    .bpd-tooltip-date--success { color: #15803d; }
+    .bpd-tooltip-date--warning { color: #ea580c; }
+    .bpd-tooltip-date--critical { color: #b42318; }
   `;
 }
 
