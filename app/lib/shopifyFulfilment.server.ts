@@ -322,7 +322,6 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
       const fulfillmentId = createPayload.data?.fulfillmentCreate?.fulfillment?.id;
       if (fulfillmentId) {
         fulfillmentIds.push(fulfillmentId);
-        await createDeliveredFulfillmentEvent(admin, fulfillmentId);
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Unknown Shopify fulfilment error");
@@ -343,6 +342,10 @@ export async function fulfilShopifyOrder(admin: ShopifyAdmin, shopifyOrderId: st
 
 export async function markShopifyOrderDelivered(admin: ShopifyAdmin, shopifyOrderId: string) {
   const fulfilmentResult = await fulfilShopifyOrder(admin, shopifyOrderId);
+
+  for (const fulfillmentId of fulfilmentResult.fulfillmentIds || []) {
+    await createDeliveredFulfillmentEvent(admin, fulfillmentId);
+  }
 
   if (isShopifyOrderId(shopifyOrderId)) {
     await tagOrderDelivered(admin, shopifyOrderId);
@@ -381,7 +384,7 @@ export async function fulfilRouteOrders(admin: ShopifyAdmin, routeId: string) {
   for (const stop of route.stops) {
     for (const order of stop.deliveryGroup?.orders || []) {
       try {
-        const result = await markShopifyOrderDelivered(admin, order.shopifyOrderId);
+        const result = await fulfilShopifyOrder(admin, order.shopifyOrderId);
 
         if (result.fulfilled) {
           fulfilled += 1;
