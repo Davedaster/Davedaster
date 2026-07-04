@@ -89,12 +89,6 @@ async function deleteRouteAndUnusedDeliveryGroups(routeId: string) {
       });
 
       if (remainingStops === 0) {
-        await tx.proofPhoto.deleteMany({
-          where: {
-            deliveryGroupId,
-          },
-        });
-
         await tx.orderStop.deleteMany({
           where: {
             deliveryGroupId,
