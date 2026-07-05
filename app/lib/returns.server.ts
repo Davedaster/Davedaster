@@ -85,6 +85,35 @@ function parseReturnLines(itemsText: string): ReturnLineInput[] {
     .filter((line) => line.itemName);
 }
 
+function linesSummary(lines: Array<{ itemName: string; quantityExpected: number }>) {
+  return lines.map((line) => `${line.quantityExpected} x ${line.itemName}`).join(", ");
+}
+
+function assignmentHistoryDetails(ticket: { reference: string; orderNumber: string | null; customerName: string; postcode: string | null }) {
+  return `${ticket.reference} · ${ticket.orderNumber || "No order number"} · ${ticket.customerName} · ${ticket.postcode || "No postcode"}`;
+}
+
+export async function listDraftRoutesForReturnAssignment() {
+  return prisma.route.findMany({
+    where: {
+      status: "DRAFT",
+    },
+    orderBy: [
+      { date: "asc" },
+      { createdAt: "desc" },
+    ],
+    include: {
+      driver: true,
+      stops: {
+        orderBy: {
+          orderIndex: "asc",
+        },
+      },
+    },
+    take: 50,
+  });
+}
+
 export async function listReturnAssignableStops() {
   const routes = await prisma.route.findMany({
     where: {
@@ -182,6 +211,130 @@ export async function createReturnTicket(input: ReturnTicketInput) {
       route: true,
       stop: true,
     },
+  });
+}
+
+export async function assignReturnTicketToDraftRoute(ticketId: string, routeId: string) {
+  if (!ticketId || !routeId) {
+    throw new Error("Choose a return collection and a draft route.");
+  }
+
+  const [route, ticket] = await Promise.all([
+    prisma.route.findUnique({
+      where: {
+        id: routeId,
+      },
+      include: {
+        stops: {
+          orderBy: {
+            orderIndex: "asc",
+          },
+        },
+      },
+    }),
+    prisma.returnTicket.findUnique({
+      where: {
+        id: ticketId,
+      },
+      include: {
+        lines: {
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
+    }),
+  ]);
+
+  if (!route) {
+    throw new Error("Draft route not found.");
+  }
+
+  if (route.status !== "DRAFT") {
+    throw new Error("Return collections can only be assigned to draft routes.");
+  }
+
+  if (!ticket) {
+    throw new Error("Return collection not found.");
+  }
+
+  if (ticket.status !== "OPEN") {
+    throw new Error("Only open return collections can be assigned to a draft route.");
+  }
+
+  if (ticket.stopId || ticket.routeId) {
+    throw new Error("This return collection is already assigned to a route.");
+  }
+
+  const nextOrderIndex = route.stops.reduce((max, stop) => Math.max(max, stop.orderIndex), 0) + 1;
+  const summary = linesSummary(ticket.lines);
+  const postcode = ticket.postcode || extractPostcode(ticket.address);
+
+  return prisma.$transaction(async (tx) => {
+    const deliveryGroup = await tx.deliveryGroup.create({
+      data: {
+        address: ticket.address,
+        formattedAddress: ticket.address,
+        postcode: postcode || null,
+        latitude: ticket.latitude,
+        longitude: ticket.longitude,
+        addressStatus: ticket.latitude !== null && ticket.longitude !== null ? "READY" : "NEEDS_LOCATION_CHECK",
+        addressSource: ticket.latitude !== null && ticket.longitude !== null ? "getaddress" : "none",
+        addressConfidence: ticket.latitude !== null && ticket.longitude !== null ? "HIGH" : "LOW",
+        manualAddress: ticket.address,
+        useManualAddress: true,
+        orders: {
+          create: {
+            shopifyOrderId: `return:${ticket.id}`,
+            shopifyOrderNumber: ticket.orderNumber || ticket.reference,
+            orderSource: "return",
+            customerName: ticket.customerName,
+            customerEmail: ticket.customerEmail,
+            customerPhone: ticket.customerPhone,
+            postcode: postcode || null,
+            lineItemSummary: summary,
+          },
+        },
+      },
+    });
+
+    const stop = await tx.stop.create({
+      data: {
+        routeId: route.id,
+        orderIndex: nextOrderIndex,
+        isLocked: false,
+        deliveryGroupId: deliveryGroup.id,
+      },
+    });
+
+    await tx.returnTicket.update({
+      where: {
+        id: ticket.id,
+      },
+      data: {
+        status: "ASSIGNED",
+        routeId: route.id,
+        stopId: stop.id,
+      },
+    });
+
+    await tx.route.update({
+      where: {
+        id: route.id,
+      },
+      data: {
+        totalMileage: null,
+        totalDuration: null,
+        history: {
+          create: {
+            action: "Return collection assigned",
+            details: assignmentHistoryDetails(ticket),
+          },
+        },
+      },
+    });
+
+    return stop;
   });
 }
 
