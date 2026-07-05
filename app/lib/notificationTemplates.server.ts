@@ -93,12 +93,12 @@ function collectionShell(title: string, intro: string, highlight: string, extra 
   <div style="max-width:620px;margin:0 auto;">
     {% if company.logo_url %}<div style="text-align:center;margin:0 0 22px;"><img src="{{ company.logo_url }}" alt="{{ company.name }}" style="display:inline-block;max-height:54px;max-width:220px;object-fit:contain;"></div>{% endif %}
     <div style="background:#ffffff;border-radius:26px;padding:30px;box-shadow:0 16px 44px rgba(16,24,40,.07);">
-      <p style="margin:0 0 12px;color:{{ company.accent_colour }};font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">Collection update</p>
+      <p style="margin:0 0 12px;color:{{ company.accent_colour }};font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">Return update</p>
       <h1 style="margin:0;color:#323841;font-size:30px;line-height:1.12;letter-spacing:-.35px;font-weight:700;">${title}</h1>
       <p style="margin:18px 0 0;color:#667085;font-size:15px;line-height:1.6;">Hi {{ customer.name }},</p>
       <p style="margin:8px 0 0;color:#667085;font-size:15px;line-height:1.6;">${intro}</p>
       <div style="margin:22px 0 0;padding:16px 0;border-top:1px solid #edf1f5;border-bottom:1px solid #edf1f5;">
-        <p style="margin:0 0 5px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Estimated collection</p>
+        <p style="margin:0 0 5px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Estimated return</p>
         <p style="margin:0;color:#323841;font-size:25px;line-height:1.18;font-weight:700;">${highlight}</p>
         <p style="margin:7px 0 0;color:#667085;font-size:13px;line-height:1.4;">Return order {{ order.number }} · {{ delivery.date }}</p>
       </div>
@@ -112,11 +112,11 @@ function collectionShell(title: string, intro: string, highlight: string, extra 
       </div>
       {% endif %}
       <div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;">
-        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Items to collect</p>
+        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Items to return</p>
         <p style="margin:0;color:#323841;font-size:15px;line-height:1.55;font-weight:600;">{{ order.number }}{% if order.items_summary %} · {{ order.items_summary }}{% endif %}</p>
       </div>
       ${extra}
-      {% if tracking.url %}<p style="margin:24px 0 0;"><a href="{{ tracking.url }}" style="display:inline-block;background:{{ company.accent_colour }};color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-weight:700;">Track your collection</a></p>{% endif %}
+      {% if tracking.url %}<p style="margin:24px 0 0;"><a href="{{ tracking.url }}" style="display:inline-block;background:{{ company.accent_colour }};color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-weight:700;">Track your return</a></p>{% endif %}
     </div>
     <p style="margin:18px 0 0;text-align:center;color:#667085;font-size:13px;line-height:1.5;">Need help? Call {{ company.phone }} or email {{ company.email }}.</p>
   </div>
@@ -124,7 +124,7 @@ function collectionShell(title: string, intro: string, highlight: string, extra 
 }
 
 const proofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Delivery photo</p><img src="{{ proof.photo_url }}" alt="Delivery photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer signature</p><img src="{{ proof.signature_url }}" alt="Customer signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
-const collectionProofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Collection photo</p><img src="{{ proof.photo_url }}" alt="Collection photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer collection signature</p><img src="{{ proof.signature_url }}" alt="Customer collection signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
+const collectionProofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Return photo</p><img src="{{ proof.photo_url }}" alt="Return photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer return signature</p><img src="{{ proof.signature_url }}" alt="Customer return signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
 const safePlaceDeliveryCompleteSmsBody = "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}";
 
 const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
@@ -173,31 +173,31 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
 const collectionDefaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
   bookedSlot: {
     ...defaults.bookedSlot,
-    emailSubject: "Your return collection, {{ order.number }}",
-    emailHtml: collectionShell("Your return collection is planned", "Your return collection has been booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return collection for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    emailSubject: "Your return, {{ order.number }}",
+    emailHtml: collectionShell("Your return is planned", "Your return has been booked for the slot below.", "{{ delivery.eta_slot }}"),
+    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
   },
   outForDelivery: {
     ...defaults.outForDelivery,
-    emailSubject: "Your return collection is out today, {{ order.number }}",
-    emailHtml: collectionShell("Your return collection is out today", "Your return collection is now with our driver and is booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your return collection is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    emailSubject: "Your return is out today, {{ order.number }}",
+    emailHtml: collectionShell("Your return is out today", "Your return is now with our driver and is booked for the slot below.", "{{ delivery.eta_slot }}"),
+    smsBody: "Hi {{ customer.name }}, your return is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
   },
   nextDropTracking: {
     ...defaults.nextDropTracking,
-    emailSubject: "You are next for collection, {{ order.number }}",
-    emailHtml: collectionShell("You are next for collection", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to collect your return next.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next stop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to collect your return next. Track here: {{ tracking.url }}",
+    emailSubject: "You are next for your return, {{ order.number }}",
+    emailHtml: collectionShell("You are next for your return", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next stop.</p>"),
+    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return. Track here: {{ tracking.url }}",
   },
   delayUpdate: {
     ...defaults.delayUpdate,
-    smsBody: "Hi {{ customer.name }}, sorry, your collection is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, sorry, your return is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
   },
   deliveryComplete: {
     ...defaults.deliveryComplete,
-    emailSubject: "Your return collection has been completed, {{ order.number }}",
-    emailHtml: collectionShell("Your return collection is complete", "Your return items have been collected. They will be checked before any refund, replacement or further action is confirmed.", "Collected today", collectionProofImagesHtml),
-    smsBody: "Hi {{ customer.name }}, your return collection for {{ order.number }} has been completed. The items will be checked before any refund, replacement or further action is confirmed. View proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    emailSubject: "Your return has been completed, {{ order.number }}",
+    emailHtml: collectionShell("Your return is complete", "Your returned items will be checked before any refund, replacement or further action is confirmed.", "Returned today", collectionProofImagesHtml),
+    smsBody: "Hi {{ customer.name }}, your return for {{ order.number }} has been completed. The items will be checked before any refund, replacement or further action is confirmed. View proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
 };
 
@@ -280,7 +280,7 @@ function displayName(name?: string | null) {
 }
 
 function formatDate(value?: Date | string | null, serviceType: NotificationServiceType = "delivery") {
-  if (!value) return serviceType === "collection" ? "your collection day" : "your delivery day";
+  if (!value) return serviceType === "collection" ? "your return day" : "your delivery day";
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long" }).format(new Date(value));
 }
 
@@ -290,7 +290,7 @@ function formatTime(value?: Date | string | null) {
 }
 
 function formatSlot(estimatedArrival?: Date | string | null, slotMinutes = 60, serviceType: NotificationServiceType = "delivery") {
-  if (!estimatedArrival) return serviceType === "collection" ? "your booked collection slot" : "your booked delivery slot";
+  if (!estimatedArrival) return serviceType === "collection" ? "your booked return slot" : "your booked delivery slot";
   const start = new Date(estimatedArrival);
   const end = new Date(start.getTime() + slotMinutes * 60 * 1000);
   return formatEtaSlot(start, end);
@@ -341,12 +341,12 @@ function serviceContext(serviceType: NotificationServiceType) {
     type: serviceType,
     is_collection: isCollection,
     is_delivery: !isCollection,
-    name: isCollection ? "collection" : "delivery",
-    title: isCollection ? "Collection" : "Delivery",
-    verb: isCollection ? "collect" : "deliver",
-    past_tense: isCollection ? "collected" : "delivered",
-    proof_name: isCollection ? "Proof of collection" : "Proof of delivery",
-    tracking_label: isCollection ? "Track your collection" : "Track your delivery",
+    name: isCollection ? "return" : "delivery",
+    title: isCollection ? "Return" : "Delivery",
+    verb: isCollection ? "return" : "deliver",
+    past_tense: isCollection ? "returned" : "delivered",
+    proof_name: isCollection ? "Proof of return" : "Proof of delivery",
+    tracking_label: isCollection ? "Track your return" : "Track your delivery",
   };
 }
 
