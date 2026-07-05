@@ -17,6 +17,7 @@ import {
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 
+import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { assignReturnTicketToDraftRoute, listDraftRoutesForReturnAssignment, searchReturnTickets } from "../lib/returns.server";
 import { createReturnCollectionFromShopifyOrder, findShopifyOrderForReturn } from "../lib/returnCollections.server";
@@ -94,6 +95,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
+  if (intent === "cancelReturn") {
+    try {
+      const result = await prisma.returnTicket.updateMany({
+        where: {
+          id: String(formData.get("ticketId") || ""),
+          status: "OPEN",
+          routeId: null,
+          stopId: null,
+        },
+        data: {
+          status: "CANCELLED",
+        },
+      });
+
+      if (!result.count) {
+        throw new Error("Only open, unassigned returns can be deleted.");
+      }
+
+      return redirect("/app/returns?deleted=1");
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Return could not be deleted." }, { status: 400 });
+    }
+  }
+
   const orderNumber = String(formData.get("orderNumber") || "").trim();
   const selectedLines = parseSelectedLines(formData.get("selectedLinesJson"));
 
@@ -102,7 +127,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (!selectedLines.length) {
-    return json({ ok: false, error: "Choose at least one item and quantity to collect." }, { status: 400 });
+    return json({ ok: false, error: "Choose at least one item and quantity to return." }, { status: 400 });
   }
 
   try {
@@ -223,6 +248,24 @@ function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRow
   );
 }
 
+function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
+  if (ticket.status !== "OPEN" || ticket.routeId || ticket.stopId) {
+    return <Text as="span" tone="subdued">Locked</Text>;
+  }
+
+  return (
+    <Form method="post" onSubmit={(event) => {
+      if (!window.confirm("Delete this return? This will remove it from the active return list and planning map.")) {
+        event.preventDefault();
+      }
+    }}>
+      <input type="hidden" name="intent" value="cancelReturn" />
+      <input type="hidden" name="ticketId" value={ticket.id} />
+      <Button submit size="slim" tone="critical">Delete</Button>
+    </Form>
+  );
+}
+
 export default function ReturnsPage() {
   const { tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -275,6 +318,7 @@ export default function ReturnsPage() {
     ticket.postcode || "No postcode",
     ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
     <AssignmentControl ticket={ticket} draftRoutes={draftRoutes} />,
+    <DeleteReturnControl ticket={ticket} />,
     ticket.returnRequestedAt ? formatDate(ticket.returnRequestedAt) : formatDate(ticket.createdAt),
   ]);
 
@@ -403,8 +447,8 @@ export default function ReturnsPage() {
 
           <LegacyCard title="Active returns">
             <DataTable
-              columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route action", "Requested"]}
+              columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text", "text"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route action", "Delete", "Requested"]}
               rows={activeTicketRows}
             />
           </LegacyCard>
