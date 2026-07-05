@@ -103,6 +103,10 @@ function assignmentHistoryDetails(ticket: { reference: string; orderNumber: stri
   return `${ticket.reference} · ${ticket.orderNumber || "No order number"} · ${ticket.customerName} · ${ticket.postcode || "No postcode"}`;
 }
 
+function returnTicketIdFromPlanningOrderId(value: string) {
+  return value.startsWith("return:") ? value.slice("return:".length) : "";
+}
+
 async function getReturnTicketsForPlanning() {
   return prisma.returnTicket.findMany({
     where: {
@@ -169,6 +173,64 @@ async function returnTicketToPlanningOrder(ticket: ReturnTicketWithLines): Promi
 export async function listOpenReturnPlanningOrders() {
   const tickets = await getReturnTicketsForPlanning();
   return Promise.all(tickets.map(returnTicketToPlanningOrder));
+}
+
+export async function linkPlannedReturnTicketsToRoute(routeId: string) {
+  const route = await prisma.route.findUnique({
+    where: {
+      id: routeId,
+    },
+    include: {
+      stops: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!route) {
+    throw new Error("Route not found for return linking.");
+  }
+
+  const returnStops = route.stops.flatMap((stop) => {
+    const returnOrders = stop.deliveryGroup?.orders.filter((order) => order.orderSource === "return" || order.shopifyOrderId.startsWith("return:")) || [];
+    return returnOrders.map((order) => ({ stop, order, ticketId: returnTicketIdFromPlanningOrderId(order.shopifyOrderId) })).filter((item) => item.ticketId);
+  });
+
+  if (!returnStops.length) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const item of returnStops) {
+      await tx.returnTicket.updateMany({
+        where: {
+          id: item.ticketId,
+          status: "OPEN",
+          routeId: null,
+          stopId: null,
+        },
+        data: {
+          status: "ASSIGNED",
+          routeId: route.id,
+          stopId: item.stop.id,
+        },
+      });
+    }
+
+    await tx.routeHistory.create({
+      data: {
+        routeId: route.id,
+        action: "Return collections linked",
+        details: `${returnStops.length} return collection${returnStops.length === 1 ? "" : "s"} linked to this draft route`,
+      },
+    });
+  });
 }
 
 export async function listDraftRoutesForReturnAssignment() {
