@@ -764,7 +764,7 @@ function StructuredAddressFields({
   onChange: (address: StructuredAddress) => void;
 }) {
   const setField = (field: keyof StructuredAddress) => (value: string) => {
-    onChange({ ...address, [field] });
+    onChange({ ...address, [field]: value });
   };
 
   return (
