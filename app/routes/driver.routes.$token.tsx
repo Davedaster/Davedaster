@@ -9,8 +9,10 @@ import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { buildWazeUrl } from "../lib/waze";
 import {
   canStartDriverRoute,
+  completeCollectionStopFromToken,
   completeDriverStopFromToken,
   getDriverRouteByToken,
+  markCollectionStopMissedFromToken,
   markDriverStopMissedFromToken,
   startDriverRouteFromToken,
 } from "../lib/driverRouteAccess.server";
@@ -21,6 +23,16 @@ import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
 
 const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
 const DRIVER_ROUTE_REFRESH_MS = 15000;
+const COLLECTION_COLOUR = "#b42318";
+
+type StopWithReturnTickets = {
+  returnTickets?: Array<{
+    lines?: Array<{
+      itemName?: string | null;
+      quantityExpected?: number | null;
+    }>;
+  }>;
+};
 
 function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
   if (!value) return true;
@@ -40,6 +52,18 @@ async function tryGetOfflineShopifyAdmin() {
   } catch {
     return null;
   }
+}
+
+async function proofPhotoUrlsFromForm(formData: FormData, stopId: string) {
+  const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
+  const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
+  const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
+
+  for (const proofPhotoFile of proofPhotoFiles) {
+    proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
+  }
+
+  return proofPhotoUrls;
 }
 
 export const loader = async ({ params }: LoaderFunctionArgs) => {
@@ -101,16 +125,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     if (intent === "completeStop") {
-      const proofPhotoFiles = formData.getAll("proofPhotoFiles").filter((file): file is File => file instanceof File && file.size > 0);
-      const fallbackProofPhotoUrl = String(formData.get("proofPhotoUrl") || "").trim();
-      const proofPhotoUrls = fallbackProofPhotoUrl ? [fallbackProofPhotoUrl] : [];
+      const proofPhotoUrls = await proofPhotoUrlsFromForm(formData, stopId);
       const podLatValue = numberFromFormValue(formData.get("podLat"));
       const podLngValue = numberFromFormValue(formData.get("podLng"));
       const admin = await tryGetOfflineShopifyAdmin();
-
-      for (const proofPhotoFile of proofPhotoFiles) {
-        proofPhotoUrls.push(await uploadProofPhoto(proofPhotoFile, stopId));
-      }
 
       await completeDriverStopFromToken({
         token,
@@ -130,12 +148,39 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return redirect(`/driver/routes/${token}#next-stop`);
     }
 
+    if (intent === "completeCollectionStop") {
+      const proofPhotoUrls = await proofPhotoUrlsFromForm(formData, stopId);
+
+      await completeCollectionStopFromToken({
+        token,
+        stopId,
+        proofPhotoUrls,
+        driverNote: String(formData.get("driverNote") || "").trim(),
+        safePlaceNote: String(formData.get("safePlaceNote") || "").trim(),
+        leftInSafePlace: String(formData.get("leftInSafePlace") || "") === "true",
+        customerSignature: String(formData.get("collectionSignature") || "").trim(),
+      });
+
+      return redirect(`/driver/routes/${token}#next-stop`);
+    }
+
     if (intent === "missedStop") {
       const admin = await getOfflineShopifyAdmin();
       await markDriverStopMissedFromToken({
         token,
         stopId,
         admin,
+        reason: String(formData.get("failedReason") || "").trim(),
+        note: String(formData.get("failedNote") || "").trim(),
+      });
+
+      return redirect(`/driver/routes/${token}#next-stop`);
+    }
+
+    if (intent === "missedCollectionStop") {
+      await markCollectionStopMissedFromToken({
+        token,
+        stopId,
         reason: String(formData.get("failedReason") || "").trim(),
         note: String(formData.get("failedNote") || "").trim(),
       });
@@ -187,6 +232,20 @@ function statusLabel(status: string) {
 
 function splitLineItems(summary?: string | null) {
   return (summary || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function isCollectionStop(stop: StopWithReturnTickets) {
+  return Boolean(stop.returnTickets?.length);
+}
+
+function returnCollectionItemLines(stop: StopWithReturnTickets) {
+  return (stop.returnTickets || []).flatMap((ticket) => (ticket.lines || []).map((line) => {
+    const quantity = Number(line.quantityExpected || 1);
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+    const itemName = line.itemName?.trim() || "Return item";
+
+    return `${safeQuantity} × ${itemName}`;
+  }));
 }
 
 function removeUkTrunkZero(digits: string) {
@@ -302,10 +361,11 @@ function StartRouteForm({ canStart, routeDate }: { canStart: boolean; routeDate:
   );
 }
 
-function SignatureModal({ customerName, disabled, onSave, onClose }: { customerName: string; disabled: boolean; onSave: (image: string) => void; onClose: () => void }) {
+function SignatureModal({ customerName, disabled, onSave, onClose, title = "Customer signature", disclaimer }: { customerName: string; disabled: boolean; onSave: (image: string) => void; onClose: () => void; title?: string; disclaimer?: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [hasSignature, setHasSignature] = useState(false);
+  const defaultDisclaimer = `By signing, I, ${customerName || "the customer"}, confirm that the items received today match my order and have been received in good condition.`;
 
   function getCanvasPoint(event: PointerEvent<HTMLCanvasElement>) {
     const canvas = event.currentTarget;
@@ -360,10 +420,10 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.92)", zIndex: 9999, padding: "max(8px, env(safe-area-inset-top)) 10px max(8px, env(safe-area-inset-bottom))", display: "grid", alignItems: "start", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
       <div style={{ background: "#ffffff", borderRadius: 22, padding: 12, display: "grid", gap: 8, maxWidth: 900, margin: "0 auto", width: "100%", maxHeight: "calc(100dvh - 16px)", overflowY: "auto", WebkitOverflowScrolling: "touch", boxSizing: "border-box" }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>Customer signature</h2>
+          <h2 style={{ margin: 0, fontSize: "clamp(20px, 5vw, 28px)" }}>{title}</h2>
           <p style={{ margin: "4px 0 0", color: "#667085", fontWeight: 700, fontSize: "clamp(13px, 3.8vw, 17px)", lineHeight: 1.25 }}>Ask the customer to sign in the white box.</p>
         </div>
-        <p style={{ margin: 0, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, fontWeight: 800, lineHeight: 1.3, fontSize: "clamp(13px, 3.8vw, 18px)" }}>By signing, I, {customerName || "the customer"}, confirm that the items received today match my order and have been received in good condition.</p>
+        <p style={{ margin: 0, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 14, padding: 10, fontWeight: 800, lineHeight: 1.3, fontSize: "clamp(13px, 3.8vw, 18px)" }}>{disclaimer || defaultDisclaimer}</p>
         <canvas ref={canvasRef} width={900} height={360} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ width: "100%", height: "clamp(170px, 34dvh, 300px)", border: "2px solid #111827", borderRadius: 16, background: "#ffffff", touchAction: "none", boxSizing: "border-box" }} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, position: "sticky", bottom: 0, background: "#ffffff", paddingTop: 8 }}>
           <button type="button" onClick={clearSignature} style={secondaryButtonStyle()}>Clear</button>
@@ -373,6 +433,14 @@ function SignatureModal({ customerName, disabled, onSave, onClose }: { customerN
       </div>
     </div>
   );
+}
+
+function ProofPhotoInput({ label, disabled, onChange }: { label: string; disabled: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
+  return <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{label}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={disabled} onChange={onChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>;
+}
+
+function ProofPreview({ src, alt }: { src: string; alt: string }) {
+  return src ? <img src={src} alt={alt} style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null;
 }
 
 function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, proofPhotoStorageEnabled, customerSafePlaceNote }: { stopId: string; customerName: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean; customerSafePlaceNote?: string | null }) {
@@ -445,17 +513,9 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
           <input type="hidden" name="podTicked" value={deliveryMode === "customer" && podImage ? "true" : "false"} />
           <input type="hidden" name="podLat" value={podLat} />
           <input type="hidden" name="podLng" value={podLng} />
-
-          <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{deliveryMode === "safe" ? "Safe place photo 1" : "Proof photo"}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 1)} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
-          {proofPreviewOne ? <img src={proofPreviewOne} alt="Proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
-
-          {deliveryMode === "safe" ? (
-            <>
-              <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>Safe place photo 2<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 2)} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>
-              {proofPreviewTwo ? <img src={proofPreviewTwo} alt="Second proof preview" style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null}
-            </>
-          ) : null}
-
+          <ProofPhotoInput label={deliveryMode === "safe" ? "Safe place photo 1" : "Proof photo"} disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 1)} />
+          <ProofPreview src={proofPreviewOne} alt="Proof preview" />
+          {deliveryMode === "safe" ? <><ProofPhotoInput label="Safe place photo 2" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 2)} /><ProofPreview src={proofPreviewTwo} alt="Second proof preview" /></> : null}
           {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /> : null}
           {deliveryMode === "customer" ? <div style={{ display: "grid", gap: 8, maxWidth: "100%", overflow: "hidden" }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(podImage ? "#16a34a" : "#323841")}>{podImage ? "Signature added" : "Get customer signature"}</button>{podImage ? <img src={podImage} alt="Customer signature" style={{ width: "100%", maxWidth: "100%", maxHeight: 110, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd", boxSizing: "border-box" }} /> : null}{signatureOpen ? <SignatureModal customerName={customerName} disabled={updatesDisabled} onSave={setPodImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
           {deliveryMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Safe place note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Behind side gate, under covered porch" style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label> : null}
@@ -466,6 +526,75 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
       ) : null}
 
       {deliveryMode === "missed" ? <Form method="post" style={{ display: "grid", gap: 12, border: "1px solid #fecdca", borderRadius: 18, padding: 12, background: "#fff7f5", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}><input type="hidden" name="intent" value="missedStop" /><input type="hidden" name="stopId" value={stopId} /><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Reason<select name="failedReason" value={failedReason} onChange={(event) => setFailedReason(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }}><option>No answer</option><option>Access issue</option><option>Customer unavailable</option><option>Wrong address</option><option>Customer refused</option><option>Other</option></select></label><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Note optional<textarea name="failedNote" rows={2} value={failedNote} onChange={(event) => setFailedNote(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label><button type="submit" style={{ width: "100%", ...buttonStyle("#b42318") }}>Mark missed</button></Form> : null}
+    </div>
+  );
+}
+
+function CollectionStopActions({ stopId, customerName, isDisabled, routeStarted, proofPhotoStorageEnabled }: { stopId: string; customerName: string; isDisabled: boolean; routeStarted: boolean; proofPhotoStorageEnabled: boolean }) {
+  const [collectionMode, setCollectionMode] = useState<"customer" | "safe" | "missed" | null>(null);
+  const [proofPhotoOneSelected, setProofPhotoOneSelected] = useState(false);
+  const [proofPhotoTwoSelected, setProofPhotoTwoSelected] = useState(false);
+  const [proofPreviewOne, setProofPreviewOne] = useState("");
+  const [proofPreviewTwo, setProofPreviewTwo] = useState("");
+  const [proofPhotoUrl, setProofPhotoUrl] = useState("");
+  const [safePlaceNote, setSafePlaceNote] = useState("");
+  const [driverNote, setDriverNote] = useState("");
+  const [signatureImage, setSignatureImage] = useState("");
+  const [signatureOpen, setSignatureOpen] = useState(false);
+  const [failedReason, setFailedReason] = useState("No answer");
+  const [failedNote, setFailedNote] = useState("");
+  const updatesDisabled = isDisabled || !routeStarted;
+  const proofPhotoCount = (proofPhotoOneSelected ? 1 : 0) + (proofPhotoTwoSelected ? 1 : 0) + (proofPhotoUrl.trim() ? 1 : 0);
+  const canCompleteCustomer = !updatesDisabled && collectionMode === "customer" && proofPhotoCount >= 1 && signatureImage.length > 0;
+  const canCompleteSafePlace = !updatesDisabled && collectionMode === "safe" && proofPhotoCount >= 2 && safePlaceNote.trim().length > 0;
+  const signatureDisclaimer = `I, ${customerName || "the customer"}, confirm that Bathroom Panels Direct has collected the return items listed above. I understand these items will be checked after collection before any refund, replacement or further action is confirmed.`;
+
+  function handleProofPhotoChange(event: ChangeEvent<HTMLInputElement>, slot: 1 | 2) {
+    const file = event.currentTarget.files?.[0];
+    const nextPreview = file ? URL.createObjectURL(file) : "";
+
+    if (slot === 1) {
+      if (proofPreviewOne) URL.revokeObjectURL(proofPreviewOne);
+      setProofPhotoOneSelected(Boolean(file));
+      setProofPreviewOne(nextPreview);
+      return;
+    }
+
+    if (proofPreviewTwo) URL.revokeObjectURL(proofPreviewTwo);
+    setProofPhotoTwoSelected(Boolean(file));
+    setProofPreviewTwo(nextPreview);
+  }
+
+  if (!routeStarted) return <p style={{ margin: "12px 0 0", color: "#667085", fontWeight: 800 }}>Start the route before completing collections.</p>;
+  if (updatesDisabled) return <p style={{ margin: "12px 0 0", color: "#667085", fontWeight: 800 }}>Only the next active collection can be updated.</p>;
+
+  return (
+    <div style={{ marginTop: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
+      <button type="button" onClick={() => setCollectionMode("customer")} style={{ width: "100%", ...buttonStyle(collectionMode === "customer" ? "#16a34a" : COLLECTION_COLOUR) }}>Customer present</button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, minWidth: 0 }}>
+        <button type="button" onClick={() => setCollectionMode("safe")} style={buttonStyle(collectionMode === "safe" ? "#f97316" : "#fff7ed", collectionMode === "safe" ? "#ffffff" : "#c2410c")}>Customer not in</button>
+        <button type="button" onClick={() => setCollectionMode("missed")} style={buttonStyle(collectionMode === "missed" ? COLLECTION_COLOUR : "#fef3f2", collectionMode === "missed" ? "#ffffff" : COLLECTION_COLOUR)}>Could not collect</button>
+      </div>
+
+      {collectionMode === "customer" || collectionMode === "safe" ? (
+        <Form method="post" encType="multipart/form-data" style={{ display: "grid", gap: 12, border: "1px solid #e5e7eb", borderRadius: 18, padding: 12, background: "#f8fafc", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
+          <input type="hidden" name="intent" value="completeCollectionStop" />
+          <input type="hidden" name="stopId" value={stopId} />
+          <input type="hidden" name="leftInSafePlace" value={collectionMode === "safe" ? "true" : "false"} />
+          <input type="hidden" name="collectionSignature" value={signatureImage} />
+          <ProofPhotoInput label={collectionMode === "safe" ? "Collection photo 1" : "Collection proof photo"} disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 1)} />
+          <ProofPreview src={proofPreviewOne} alt="Collection proof preview" />
+          {collectionMode === "safe" ? <><ProofPhotoInput label="Collection photo 2" disabled={!proofPhotoStorageEnabled} onChange={(event) => handleProofPhotoChange(event, 2)} /><ProofPreview src={proofPreviewTwo} alt="Second collection proof preview" /></> : null}
+          {!proofPhotoStorageEnabled ? <input name="proofPhotoUrl" type="url" placeholder="Paste proof photo link" value={proofPhotoUrl} onChange={(event) => setProofPhotoUrl(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /> : null}
+          {collectionMode === "customer" ? <div style={{ display: "grid", gap: 8, maxWidth: "100%", overflow: "hidden" }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(signatureImage ? "#16a34a" : "#323841")}>{signatureImage ? "Collection signature added" : "Get collection signature"}</button>{signatureImage ? <img src={signatureImage} alt="Collection signature" style={{ width: "100%", maxWidth: "100%", maxHeight: 110, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd", boxSizing: "border-box" }} /> : null}{signatureOpen ? <SignatureModal title="Collection signature" customerName={customerName} disabled={updatesDisabled} disclaimer={signatureDisclaimer} onSave={setSignatureImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
+          {collectionMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Collection note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Collected from porch where customer left items" style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label> : null}
+          <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Driver note optional<textarea name="driverNote" rows={2} value={driverNote} onChange={(event) => setDriverNote(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label>
+          <button type="submit" disabled={collectionMode === "customer" ? !canCompleteCustomer : !canCompleteSafePlace} style={{ width: "100%", ...buttonStyle((collectionMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#16a34a" : "#d0d5dd", (collectionMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#ffffff" : "#667085") }}>Complete collection</button>
+          <p style={{ margin: 0, color: "#667085", fontWeight: 700, fontSize: 13 }}>{collectionMode === "customer" ? "Needs 1 photo and customer signature." : "Needs 2 photos and a collection note."}</p>
+        </Form>
+      ) : null}
+
+      {collectionMode === "missed" ? <Form method="post" style={{ display: "grid", gap: 12, border: "1px solid #fecdca", borderRadius: 18, padding: 12, background: "#fff7f5", maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}><input type="hidden" name="intent" value="missedCollectionStop" /><input type="hidden" name="stopId" value={stopId} /><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Reason<select name="failedReason" value={failedReason} onChange={(event) => setFailedReason(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }}><option>No answer</option><option>Access issue</option><option>Customer unavailable</option><option>Items not ready</option><option>Customer refused</option><option>Other</option></select></label><label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Note optional<textarea name="failedNote" rows={2} value={failedNote} onChange={(event) => setFailedNote(event.currentTarget.value)} style={{ width: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label><button type="submit" style={{ width: "100%", ...buttonStyle(COLLECTION_COLOUR) }}>Mark could not collect</button></Form> : null}
     </div>
   );
 }
@@ -483,7 +612,7 @@ function SafePlaceRequestCard({ note }: { note?: string | null }) {
 
 function ProofCard({ proofPhotos }: { proofPhotos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!proofPhotos.length) return null;
-  return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Delivery card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><a href={proofPhotoSrc(photo.url)} target="_blank" rel="noreferrer"><img src={proofPhotoSrc(photo.url)} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /></a><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
+  return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Proof card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><a href={proofPhotoSrc(photo.url)} target="_blank" rel="noreferrer"><img src={proofPhotoSrc(photo.url)} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /></a><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
 }
 
 export default function DriverRoutePage() {
@@ -497,7 +626,7 @@ export default function DriverRoutePage() {
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
   const completedStops = deliveredStops + failedStops;
-  const mapPoints = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number").map((stop) => ({ id: stop.id, label: String(stop.orderIndex), title: `Drop ${stop.orderIndex} · ${stop.deliveryGroup?.postcode || "No postcode"}`, latitude: stop.deliveryGroup?.latitude ?? null, longitude: stop.deliveryGroup?.longitude ?? null, selected: nextStop?.id === stop.id, status: stop.status }));
+  const mapPoints = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number").map((stop) => ({ id: stop.id, label: String(stop.orderIndex), title: `Drop ${stop.orderIndex}${isCollectionStop(stop) ? " · Collection" : ""} · ${stop.deliveryGroup?.postcode || "No postcode"}`, latitude: stop.deliveryGroup?.latitude ?? null, longitude: stop.deliveryGroup?.longitude ?? null, selected: nextStop?.id === stop.id, status: stop.status }));
 
   useEffect(() => {
     if (!routeStarted) return;
@@ -534,9 +663,12 @@ export default function DriverRoutePage() {
 
         <section style={{ display: "grid", gap: 14 }}>{route.stops.map((stop) => {
           const group = stop.deliveryGroup;
+          const collectionStop = isCollectionStop(stop);
           const customerName = group?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
           const orders = group?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
-          const lineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
+          const deliveryLineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
+          const collectionLineItems = returnCollectionItemLines(stop);
+          const lineItems = collectionStop && collectionLineItems.length ? collectionLineItems : deliveryLineItems;
           const phone = group?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || "";
           const cleanPhone = tidyPhone(phone);
           const address = cleanDeliveryAddress(group?.formattedAddress || group?.address || "No address");
@@ -547,21 +679,27 @@ export default function DriverRoutePage() {
           const proofPhotos = group?.proofPhotos || [];
           const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
           const customerSafePlaceNote = group?.safePlaceNote || "";
+          const stopBorder = isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : collectionStop ? `3px solid ${COLLECTION_COLOUR}` : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb";
+          const stopHeaderBackground = isDelivered ? "#16a34a" : isFailed ? "#b42318" : collectionStop ? COLLECTION_COLOUR : isNextStop ? "#509AE6" : "#f8fafc";
+          const stopHeaderText = isDelivered || isFailed || collectionStop || isNextStop ? "#ffffff" : "#323841";
+          const itemTitle = collectionStop ? "Items to collect" : "Items to deliver";
+          const emptyItemText = collectionStop ? "No return item details stored for this collection." : "No item details stored for this order.";
 
-          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)", maxWidth: "100%", boxSizing: "border-box" }}>
-            <div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
+          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: stopBorder, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)", maxWidth: "100%", boxSizing: "border-box" }}>
+            <div style={{ background: stopHeaderBackground, color: stopHeaderText, padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{collectionStop ? " · Collection" : ""}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
               <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div>
             </div>
             <div style={{ padding: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
-              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
+              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>{collectionStop ? "Return order" : "Order"} {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
               <SafePlaceRequestCard note={customerSafePlaceNote} />
-              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items to deliver</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>No item details stored for this order.</p>}</div>
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>{collectionStop ? "Collection address" : "Address"}</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>{itemTitle}</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>{emptyItemText}</p>}</div>
               <ProofCard proofPhotos={proofPhotos} />
-              {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>✓ Delivery complete</p> : null}
-              {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>Delivery marked missed</p> : null}
-              {!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} customerSafePlaceNote={customerSafePlaceNote} /> : null}
+              {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>{collectionStop ? "✓ Collection complete" : "✓ Delivery complete"}</p> : null}
+              {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>{collectionStop ? "Collection could not be completed" : "Delivery marked missed"}</p> : null}
+              {collectionStop && !isDelivered && !isFailed ? <CollectionStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} /> : null}
+              {!collectionStop && !isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} customerSafePlaceNote={customerSafePlaceNote} /> : null}
             </div>
           </article>;
         })}</section>

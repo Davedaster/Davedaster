@@ -2,7 +2,7 @@ import prisma from "../db.server";
 import { getAppCredentials } from "./appCredentials.server";
 import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { sendEmailWithResend, sendSmsWithTwilio, isResendEnabled, isTwilioEnabled } from "./notificationSenders.server";
-import { buildBookedSlotMessage, buildDelayMessage, buildNextDropTrackingMessage, buildOutForDeliveryMessage, type NotificationChannel, type NotificationMessage } from "./notificationTemplates.server";
+import { buildBookedSlotMessage, buildDelayMessage, buildNextDropTrackingMessage, buildOutForDeliveryMessage, type NotificationChannel, type NotificationMessage, type NotificationTemplateInput } from "./notificationTemplates.server";
 
 type SendRouteNotificationsResult = {
   smsSent: number;
@@ -91,6 +91,18 @@ async function getRouteForNotifications(routeId: string) {
       history: true,
       stops: {
         include: {
+          returnTickets: {
+            include: {
+              lines: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           deliveryGroup: {
             include: {
               orders: true,
@@ -105,7 +117,7 @@ async function getRouteForNotifications(routeId: string) {
   });
 }
 
-async function buildManualNotificationMessage(templateId: ManualRouteNotificationTemplateId, input: Record<string, unknown>, channel: NotificationChannel): Promise<NotificationMessage> {
+async function buildManualNotificationMessage(templateId: ManualRouteNotificationTemplateId, input: NotificationTemplateInput, channel: NotificationChannel): Promise<NotificationMessage> {
   if (templateId === "outForDelivery") {
     return buildOutForDeliveryMessage(input, channel);
   }
@@ -117,13 +129,28 @@ async function buildManualNotificationMessage(templateId: ManualRouteNotificatio
   return buildDelayMessage(input, channel);
 }
 
-async function buildMessageInput(route: RouteForNotifications, stop: StopForNotifications, order: OrderForNotifications, credentials: Awaited<ReturnType<typeof getAppCredentials>>, delayMinutes?: number | null) {
+function isCollectionStop(stop: StopForNotifications) {
+  return Boolean(stop.returnTickets?.length);
+}
+
+function collectionItemsSummary(stop: StopForNotifications) {
+  const itemLines = (stop.returnTickets || []).flatMap((ticket) => ticket.lines.map((line) => {
+    const quantity = Number(line.quantityExpected || 1);
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+    return `${safeQuantity} × ${line.itemName}`;
+  }));
+
+  return itemLines.join(", ");
+}
+
+async function buildMessageInput(route: RouteForNotifications, stop: StopForNotifications, order: OrderForNotifications, credentials: Awaited<ReturnType<typeof getAppCredentials>>, delayMinutes?: number | null): Promise<NotificationTemplateInput> {
   const trackingCode = await ensureCustomerTrackingCode(order.id);
+  const isCollection = isCollectionStop(stop);
 
   return {
     customerName: order.customerName,
     orderNumber: order.shopifyOrderNumber,
-    itemsSummary: order.lineItemSummary,
+    itemsSummary: isCollection ? collectionItemsSummary(stop) || order.lineItemSummary : order.lineItemSummary,
     routeName: route.name,
     driverName: route.driver?.name,
     driverPhotoUrl: route.driver?.photoUrl,
@@ -134,6 +161,7 @@ async function buildMessageInput(route: RouteForNotifications, stop: StopForNoti
     slotMinutes: route.customerSlotMinutes,
     trackingUrl: buildShortCustomerTrackingUrl(getPublicAppBaseUrl(credentials.shopPublicUrl), trackingCode),
     delayMinutes,
+    serviceType: isCollection ? "collection" : "delivery",
   };
 }
 

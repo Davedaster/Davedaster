@@ -25,6 +25,10 @@ type ReturnLineInput = {
   quantityExpected: number;
 };
 
+type ReturnTicketForRows = Awaited<ReturnType<typeof searchReturnTickets>>[number];
+
+const ARCHIVE_STATUSES = new Set(["COLLECTED", "COULD_NOT_COLLECT", "CANCELLED"]);
+
 function parseSelectedLines(value: FormDataEntryValue | null): ReturnLineInput[] {
   if (typeof value !== "string" || !value.trim()) {
     return [];
@@ -123,6 +127,51 @@ function formatTicketLine(quantity: number, itemName: string) {
   return `${quantity} x ${itemName}`;
 }
 
+function formatCollectedLine(line: ReturnTicketForRows["lines"][number]) {
+  const collected = Number(line.quantityCollected || 0);
+  return collected > 0
+    ? `${collected} / ${line.quantityExpected} x ${line.itemName}`
+    : `${line.quantityExpected} x ${line.itemName}`;
+}
+
+function isArchivedTicket(ticket: ReturnTicketForRows) {
+  return ARCHIVE_STATUSES.has(ticket.status);
+}
+
+function proofPhotoSrc(value?: string | null) {
+  if (!value) return "";
+  if (value.startsWith("http") || value.startsWith("data:image/")) return value;
+  return `/driver/routes/proof-of-delivery/${encodeURIComponent(value.replace(/^proof-of-delivery\//, ""))}`;
+}
+
+function ProofLink({ value, label }: { value?: string | null; label: string }) {
+  const href = proofPhotoSrc(value);
+
+  if (!href) {
+    return <Text as="span" tone="subdued">No {label.toLowerCase()}</Text>;
+  }
+
+  return <a href={href} target="_blank" rel="noreferrer">View {label.toLowerCase()}</a>;
+}
+
+function noteText(ticket: ReturnTicketForRows) {
+  return ticket.driverNote || ticket.notes || "No notes";
+}
+
+function ReturnsPageSummary({ tickets }: { tickets: ReturnTicketForRows[] }) {
+  const activeCount = tickets.filter((ticket) => !isArchivedTicket(ticket)).length;
+  const collectedCount = tickets.filter((ticket) => ticket.status === "COLLECTED").length;
+  const failedCount = tickets.filter((ticket) => ticket.status === "COULD_NOT_COLLECT").length;
+
+  return (
+    <InlineStack gap="300">
+      <Badge tone="info">{activeCount} active</Badge>
+      <Badge tone="success">{collectedCount} collected</Badge>
+      <Badge tone="critical">{failedCount} not collected</Badge>
+    </InlineStack>
+  );
+}
+
 export default function ReturnsPage() {
   const { tickets, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -164,7 +213,10 @@ export default function ReturnsPage() {
     }));
   };
 
-  const ticketRows = tickets.map((ticket) => [
+  const activeTickets = tickets.filter((ticket) => !isArchivedTicket(ticket));
+  const archivedTickets = tickets.filter(isArchivedTicket);
+
+  const activeTicketRows = activeTickets.map((ticket) => [
     ticket.reference,
     <Badge tone={statusTone(ticket.status)}>{ticket.status}</Badge>,
     ticket.orderNumber || "No order number",
@@ -172,7 +224,21 @@ export default function ReturnsPage() {
     ticket.postcode || "No postcode",
     ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
     ticket.route ? ticket.route.name : "Not assigned",
-    ticket.collectedAt ? formatDate(ticket.collectedAt) : "Pending",
+    ticket.returnRequestedAt ? formatDate(ticket.returnRequestedAt) : formatDate(ticket.createdAt),
+  ]);
+
+  const archiveRows = archivedTickets.map((ticket) => [
+    ticket.reference,
+    <Badge tone={statusTone(ticket.status)}>{ticket.status}</Badge>,
+    ticket.orderNumber || "No order number",
+    ticket.customerName,
+    ticket.lines.map(formatCollectedLine).join(", "),
+    ticket.collectedAt ? formatDate(ticket.collectedAt) : formatDate(ticket.updatedAt),
+    <BlockStack gap="100">
+      <ProofLink value={ticket.collectionPhotoUrl} label="Photo" />
+      <ProofLink value={ticket.customerSignature} label="Signature" />
+    </BlockStack>,
+    noteText(ticket),
   ]);
 
   return (
@@ -261,7 +327,10 @@ export default function ReturnsPage() {
         <Layout.Section>
           <LegacyCard sectioned>
             <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">Search return collections</Text>
+              <InlineStack align="space-between" blockAlign="center" gap="300">
+                <Text as="h2" variant="headingMd">Search return collections</Text>
+                <ReturnsPageSummary tickets={tickets} />
+              </InlineStack>
               <Form method="get">
                 <InlineStack gap="200" blockAlign="end">
                   <TextField
@@ -278,11 +347,19 @@ export default function ReturnsPage() {
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Return collections">
+          <LegacyCard title="Active return collections">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route", "Collected"]}
-              rows={ticketRows}
+              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route", "Requested"]}
+              rows={activeTicketRows}
+            />
+          </LegacyCard>
+
+          <LegacyCard title="Collection archive">
+            <DataTable
+              columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Collected items", "Completed", "Proof", "Notes"]}
+              rows={archiveRows}
             />
           </LegacyCard>
         </Layout.Section>

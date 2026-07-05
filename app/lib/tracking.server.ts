@@ -39,6 +39,13 @@ function isReceiverMark(label?: string | null) {
   return (label || "").toLowerCase().startsWith("receiver mark");
 }
 
+function returnCollectionItems(returnTickets: Array<{ lines: Array<{ itemName: string; quantityExpected: number; quantityCollected: number }> }>) {
+  return returnTickets.flatMap((ticket) => ticket.lines.map((line) => {
+    const collectedQuantity = line.quantityCollected || line.quantityExpected || 1;
+    return `${collectedQuantity} × ${line.itemName}`;
+  }));
+}
+
 export async function getCustomerTracking(routeId: string, shopifyOrderId: string) {
   const route = await prisma.route.findUnique({
     where: { id: routeId },
@@ -46,6 +53,18 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
       driver: true,
       stops: {
         include: {
+          returnTickets: {
+            include: {
+              lines: {
+                orderBy: {
+                  createdAt: "asc",
+                },
+              },
+            },
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
           deliveryGroup: {
             include: {
               orders: true,
@@ -115,8 +134,15 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
     label: receiverMark.label,
     createdAt: receiverMark.createdAt,
   } : null;
+  const returnTickets = stop.returnTickets || [];
+  const isCollection = returnTickets.length > 0;
+  const primaryReturnTicket = returnTickets[0] || null;
+  const collectionPhotoUrl = primaryReturnTicket?.collectionPhotoUrl
+    ? await createSignedProofPhotoUrl(primaryReturnTicket.collectionPhotoUrl)
+    : null;
 
   return {
+    serviceType: isCollection ? "collection" as const : "delivery" as const,
     route: {
       id: route.id,
       name: route.name,
@@ -146,6 +172,14 @@ export async function getCustomerTracking(routeId: string, shopifyOrderId: strin
         receiverMark: signedReceiverMark,
       },
     },
+    collection: isCollection ? {
+      status: primaryReturnTicket?.status || null,
+      collectedAt: primaryReturnTicket?.collectedAt || null,
+      proofPhotoUrl: collectionPhotoUrl,
+      customerSignature: primaryReturnTicket?.customerSignature || null,
+      driverNote: primaryReturnTicket?.driverNote || null,
+      items: returnCollectionItems(returnTickets),
+    } : null,
     order: {
       shopifyOrderNumber: order.shopifyOrderNumber,
       items: splitLineItems(order.lineItemSummary),
