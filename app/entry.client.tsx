@@ -80,19 +80,48 @@ function findRouteDetailLine() {
 }
 
 function findOptimisationBadge() {
-  return findSummaryElement((text) => text === "Optimised" || text === "⚡ Optimised" || text === "Not optimised");
+  return findSummaryElement((text) => text === "Optimised" || text === "⚡ Optimised" || text === "⚡︎ Optimised" || text === "Not optimised");
 }
 
 function currentRouteIsOptimised() {
   const badgeText = cleanText(findOptimisationBadge() || document.createElement("span"));
 
-  return badgeText === "Optimised" || badgeText === "⚡ Optimised";
+  return badgeText === "Optimised" || badgeText === "⚡ Optimised" || badgeText === "⚡︎ Optimised";
 }
 
 function setText(element: HTMLElement | null, value: string) {
   if (element && cleanText(element) !== value) {
     element.textContent = value;
   }
+}
+
+function styleOptimisationBadge(badge: HTMLElement | null) {
+  if (!badge) {
+    return;
+  }
+
+  const optimised = currentRouteIsOptimised();
+
+  if (optimised) {
+    setText(badge, "⚡︎ Optimised");
+    badge.style.background = "#c8102e";
+    badge.style.border = "1px solid rgba(120, 0, 0, 0.35)";
+    badge.style.color = "#ffffff";
+    badge.style.fontWeight = "800";
+    badge.style.padding = "3px 10px";
+    badge.style.borderRadius = "999px";
+    badge.style.boxShadow = "inset 0 -1px 0 rgba(0,0,0,0.25)";
+    return;
+  }
+
+  setText(badge, "Not optimised");
+  badge.style.background = "#f2f4f7";
+  badge.style.border = "1px solid #d0d5dd";
+  badge.style.color = "#344054";
+  badge.style.fontWeight = "700";
+  badge.style.padding = "2px 8px";
+  badge.style.borderRadius = "999px";
+  badge.style.boxShadow = "none";
 }
 
 function hideElement(element: HTMLElement | null) {
@@ -117,11 +146,7 @@ function simplifyExistingRouteSummary() {
   }
 
   hideElement(routeDetailLine);
-
-  const badge = findOptimisationBadge();
-  if (badge && cleanText(badge) === "⚡ Optimised") {
-    setText(badge, "Optimised");
-  }
+  styleOptimisationBadge(findOptimisationBadge());
 }
 
 async function updateRouteSummaryFromResponse(response: Response, requestUrl: string) {
@@ -151,6 +176,7 @@ async function updateRouteSummaryFromResponse(response: Response, requestUrl: st
     setText(findSummaryElement((text) => text.startsWith("Miles:")), `Miles: ${distanceMiles.toFixed(1)} mi`);
     setText(findSummaryElement((text) => text.startsWith("Complete route time:") || text.startsWith("Finish ETA:")), `Finish ETA: ${finishEta}`);
     setText(findOptimisationBadge(), "Not optimised");
+    styleOptimisationBadge(findOptimisationBadge());
     hideElement(findRouteDetailLine());
   } catch {
     simplifyExistingRouteSummary();
