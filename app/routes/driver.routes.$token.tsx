@@ -21,6 +21,16 @@ import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
 
 const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
 const DRIVER_ROUTE_REFRESH_MS = 15000;
+const COLLECTION_COLOUR = "#b42318";
+
+type StopWithReturnTickets = {
+  returnTickets?: Array<{
+    lines?: Array<{
+      itemName?: string | null;
+      quantityExpected?: number | null;
+    }>;
+  }>;
+};
 
 function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
   if (!value) return true;
@@ -187,6 +197,20 @@ function statusLabel(status: string) {
 
 function splitLineItems(summary?: string | null) {
   return (summary || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function isCollectionStop(stop: StopWithReturnTickets) {
+  return Boolean(stop.returnTickets?.length);
+}
+
+function returnCollectionItemLines(stop: StopWithReturnTickets) {
+  return (stop.returnTickets || []).flatMap((ticket) => (ticket.lines || []).map((line) => {
+    const quantity = Number(line.quantityExpected || 1);
+    const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+    const itemName = line.itemName?.trim() || "Return item";
+
+    return `${safeQuantity} × ${itemName}`;
+  }));
 }
 
 function removeUkTrunkZero(digits: string) {
@@ -497,7 +521,7 @@ export default function DriverRoutePage() {
   const deliveredStops = route.stops.filter((stop) => stop.status === "DELIVERED").length;
   const failedStops = route.stops.filter((stop) => stop.status === "FAILED").length;
   const completedStops = deliveredStops + failedStops;
-  const mapPoints = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number").map((stop) => ({ id: stop.id, label: String(stop.orderIndex), title: `Drop ${stop.orderIndex} · ${stop.deliveryGroup?.postcode || "No postcode"}`, latitude: stop.deliveryGroup?.latitude ?? null, longitude: stop.deliveryGroup?.longitude ?? null, selected: nextStop?.id === stop.id, status: stop.status }));
+  const mapPoints = route.stops.filter((stop) => typeof stop.deliveryGroup?.latitude === "number" && typeof stop.deliveryGroup?.longitude === "number").map((stop) => ({ id: stop.id, label: String(stop.orderIndex), title: `Drop ${stop.orderIndex}${isCollectionStop(stop) ? " · Collection" : ""} · ${stop.deliveryGroup?.postcode || "No postcode"}`, latitude: stop.deliveryGroup?.latitude ?? null, longitude: stop.deliveryGroup?.longitude ?? null, selected: nextStop?.id === stop.id, status: stop.status }));
 
   useEffect(() => {
     if (!routeStarted) return;
@@ -534,9 +558,12 @@ export default function DriverRoutePage() {
 
         <section style={{ display: "grid", gap: 14 }}>{route.stops.map((stop) => {
           const group = stop.deliveryGroup;
+          const collectionStop = isCollectionStop(stop);
           const customerName = group?.orders.map((order) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
           const orders = group?.orders.map((order) => order.shopifyOrderNumber).join(", ") || "No linked orders";
-          const lineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
+          const deliveryLineItems = group?.orders.flatMap((order) => splitLineItems(order.lineItemSummary)) || [];
+          const collectionLineItems = returnCollectionItemLines(stop);
+          const lineItems = collectionStop && collectionLineItems.length ? collectionLineItems : deliveryLineItems;
           const phone = group?.orders.map((order) => order.customerPhone).filter(Boolean)[0] || "";
           const cleanPhone = tidyPhone(phone);
           const address = cleanDeliveryAddress(group?.formattedAddress || group?.address || "No address");
@@ -547,21 +574,27 @@ export default function DriverRoutePage() {
           const proofPhotos = group?.proofPhotos || [];
           const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
           const customerSafePlaceNote = group?.safePlaceNote || "";
+          const stopBorder = isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : collectionStop ? `3px solid ${COLLECTION_COLOUR}` : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb";
+          const stopHeaderBackground = isDelivered ? "#16a34a" : isFailed ? "#b42318" : collectionStop ? COLLECTION_COLOUR : isNextStop ? "#509AE6" : "#f8fafc";
+          const stopHeaderText = isDelivered || isFailed || collectionStop || isNextStop ? "#ffffff" : "#323841";
+          const itemTitle = collectionStop ? "Items to collect" : "Items to deliver";
+          const emptyItemText = collectionStop ? "No return item details stored for this collection." : "No item details stored for this order.";
 
-          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb", borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)", maxWidth: "100%", boxSizing: "border-box" }}>
-            <div style={{ background: isDelivered ? "#16a34a" : isFailed ? "#b42318" : isNextStop ? "#509AE6" : "#f8fafc", color: isDelivered || isFailed || isNextStop ? "#ffffff" : "#323841", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
+          return <article id={isNextStop ? "next-stop" : undefined} key={stop.id} style={{ background: "#ffffff", border: stopBorder, borderRadius: 24, overflow: "hidden", boxShadow: "0 10px 28px rgba(50,56,65,0.1)", maxWidth: "100%", boxSizing: "border-box" }}>
+            <div style={{ background: stopHeaderBackground, color: stopHeaderText, padding: 16, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div><h2 style={{ margin: 0, fontSize: 26 }}>Drop {stop.orderIndex}{collectionStop ? " · Collection" : ""}{isNextStop ? " · NEXT" : ""}</h2><p style={{ margin: "6px 0 0", fontWeight: 800 }}>{formatSlot(stop.estimatedArrival)}</p></div>
               <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div>
             </div>
             <div style={{ padding: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
-              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>Order {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
+              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>{collectionStop ? "Return order" : "Order"} {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
               <SafePlaceRequestCard note={customerSafePlaceNote} />
-              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>Address</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items to deliver</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>No item details stored for this order.</p>}</div>
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>{collectionStop ? "Collection address" : "Address"}</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>{itemTitle}</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>{emptyItemText}</p>}</div>
               <ProofCard proofPhotos={proofPhotos} />
-              {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>✓ Delivery complete</p> : null}
-              {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>Delivery marked missed</p> : null}
-              {!isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} customerSafePlaceNote={customerSafePlaceNote} /> : null}
+              {isDelivered ? <p style={{ margin: 0, color: "#16a34a", fontWeight: 900, fontSize: 18 }}>{collectionStop ? "✓ Collection complete" : "✓ Delivery complete"}</p> : null}
+              {isFailed ? <p style={{ margin: 0, color: "#b42318", fontWeight: 900, fontSize: 18 }}>{collectionStop ? "Collection could not be completed" : "Delivery marked missed"}</p> : null}
+              {collectionStop && !isDelivered && !isFailed ? <p style={{ margin: 0, color: COLLECTION_COLOUR, fontWeight: 900, fontSize: 16 }}>Collection completion controls will be added in the next step. Do not complete this as a delivery.</p> : null}
+              {!collectionStop && !isDelivered && !isFailed ? <DriverStopActions stopId={stop.id} customerName={customerName} isDisabled={actionDisabled} routeStarted={routeStarted} proofPhotoStorageEnabled={proofPhotoStorageEnabled} customerSafePlaceNote={customerSafePlaceNote} /> : null}
             </div>
           </article>;
         })}</section>
