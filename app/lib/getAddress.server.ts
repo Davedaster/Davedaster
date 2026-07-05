@@ -60,6 +60,10 @@ type GetAddressFindPayload = {
   addresses?: Array<string | GetAddressExpandedAddress>;
 };
 
+const TOMTOM_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+let tomTomPausedUntil = 0;
+let tomTomQueue: Promise<void> = Promise.resolve();
+
 function normalisePostcode(postcode: string | null | undefined) {
   const compact = (postcode || "").replace(/\s+/g, "").trim().toUpperCase();
 
@@ -78,13 +82,20 @@ function addUniqueQuery(queries: string[], query: string) {
   }
 }
 
+function hasUnitedKingdomSuffix(value: string) {
+  return /\b(united kingdom|great britain|uk)\b/i.test(value);
+}
+
 function buildSearchQueries(postcode: string, searchText: string) {
   const queries: string[] = [];
   const cleanedSearchText = searchText.trim();
 
   if (cleanedSearchText) {
     addUniqueQuery(queries, cleanedSearchText);
-    addUniqueQuery(queries, `${cleanedSearchText}, United Kingdom`);
+
+    if (!hasUnitedKingdomSuffix(cleanedSearchText)) {
+      addUniqueQuery(queries, `${cleanedSearchText}, United Kingdom`);
+    }
   }
 
   if (postcode) {
@@ -145,81 +156,117 @@ function coordinate(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-async function lookupTomTom(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
-  const credentials = await getAppCredentials();
-  const tomTomKey = credentials.tomtomApiKey;
+async function runQueuedTomTomLookup<T>(callback: () => Promise<T>): Promise<T> {
+  const previousQueue = tomTomQueue;
+  let releaseQueue: () => void = () => {};
 
-  if (!tomTomKey) {
-    return null;
-  }
-
-  const params = new URLSearchParams({
-    key: tomTomKey,
-    countrySet: "GB",
-    limit: "1",
-    language: "en-GB",
+  tomTomQueue = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
   });
-  const url = `https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?${params.toString()}`;
+
+  await previousQueue.catch(() => undefined);
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      console.warn("TomTom lookup failed", {
-        query,
-        status: response.status,
-        statusText: response.statusText,
-        body: body.slice(0, 500),
-      });
-
-      return null;
-    }
-
-    const payload = await response.json() as TomTomSearchPayload;
-    const bestMatch = payload.results?.[0];
-
-    if (!bestMatch) {
-      console.warn("TomTom lookup returned no matches", {
-        query,
-        resultCount: payload.results?.length || 0,
-      });
-
-      return null;
-    }
-
-    const latitude = bestMatch.position?.lat;
-    const longitude = bestMatch.position?.lon;
-
-    if (typeof latitude !== "number" || typeof longitude !== "number") {
-      console.warn("TomTom lookup returned no coordinates", {
-        query,
-        resultCount: payload.results?.length || 0,
-      });
-
-      return null;
-    }
-
-    return {
-      formattedAddress: bestMatch.address?.freeformAddress || searchText || postcode,
-      postcode: normalisePostcode(bestMatch.address?.postalCode || postcode),
-      latitude,
-      longitude,
-      confidence: "HIGH",
-      source: "getaddress",
-    };
-  } catch (error) {
-    console.warn("TomTom lookup crashed", {
-      query,
-      message: error instanceof Error ? error.message : String(error),
-    });
-
-    return null;
+    return await callback();
+  } finally {
+    releaseQueue();
   }
+}
+
+async function lookupTomTom(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
+  return runQueuedTomTomLookup(async () => {
+    const credentials = await getAppCredentials();
+    const tomTomKey = credentials.tomtomApiKey;
+
+    if (!tomTomKey) {
+      return null;
+    }
+
+    if (Date.now() < tomTomPausedUntil) {
+      return null;
+    }
+
+    const params = new URLSearchParams({
+      key: tomTomKey,
+      countrySet: "GB",
+      limit: "1",
+      language: "en-GB",
+    });
+    const url = `https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?${params.toString()}`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+
+        if (response.status === 429) {
+          tomTomPausedUntil = Math.max(tomTomPausedUntil, Date.now() + TOMTOM_RATE_LIMIT_COOLDOWN_MS);
+          console.warn("TomTom rate limit reached. Pausing TomTom lookups temporarily.", {
+            query,
+            status: response.status,
+            statusText: response.statusText,
+            pausedUntil: new Date(tomTomPausedUntil).toISOString(),
+          });
+
+          return null;
+        }
+
+        console.warn("TomTom lookup failed", {
+          query,
+          status: response.status,
+          statusText: response.statusText,
+          body: body.slice(0, 500),
+        });
+
+        return null;
+      }
+
+      const payload = await response.json() as TomTomSearchPayload;
+      const bestMatch = payload.results?.[0];
+
+      if (!bestMatch) {
+        console.warn("TomTom lookup returned no matches", {
+          query,
+          resultCount: payload.results?.length || 0,
+        });
+
+        return null;
+      }
+
+      const latitude = bestMatch.position?.lat;
+      const longitude = bestMatch.position?.lon;
+
+      if (typeof latitude !== "number" || typeof longitude !== "number") {
+        console.warn("TomTom lookup returned no coordinates", {
+          query,
+          resultCount: payload.results?.length || 0,
+        });
+
+        return null;
+      }
+
+      return {
+        formattedAddress: bestMatch.address?.freeformAddress || searchText || postcode,
+        postcode: normalisePostcode(bestMatch.address?.postalCode || postcode),
+        latitude,
+        longitude,
+        confidence: "HIGH",
+        source: "getaddress",
+      };
+    } catch (error) {
+      console.warn("TomTom lookup crashed", {
+        query,
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+      return null;
+    }
+  });
 }
 
 async function lookupOpenStreetMap(query: string, postcode: string, searchText: string): Promise<AddressLookupResult | null> {
