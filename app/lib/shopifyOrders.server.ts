@@ -99,7 +99,7 @@ export type DeliveryOrder = {
   hasManualOverride: boolean;
   manualAddress: string | null;
   manualAddressNotes: string | null;
-  orderSource?: "shopify" | "manual";
+  orderSource?: "shopify" | "manual" | "return";
   routeAllocation?: RouteAllocation | null;
   isRedelivery?: boolean;
   redeliveryReason?: string | null;
@@ -126,7 +126,6 @@ function shippingTitle(order: ShopifyOrderNode) {
 
 function isPickupOrCollectionOrder(order: ShopifyOrderNode) {
   const title = normalise(shippingTitle(order));
-
   return (
     !order.shippingAddress ||
     title.includes("pickup") ||

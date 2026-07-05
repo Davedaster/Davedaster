@@ -13,11 +13,12 @@ import {
   InlineStack,
   Badge,
   Box,
+  Select,
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 
 import { authenticate } from "../shopify.server";
-import { searchReturnTickets } from "../lib/returns.server";
+import { assignReturnTicketToDraftRoute, listDraftRoutesForReturnAssignment, searchReturnTickets } from "../lib/returns.server";
 import { createReturnCollectionFromShopifyOrder, findShopifyOrderForReturn } from "../lib/returnCollections.server";
 
 type ReturnLineInput = {
@@ -26,6 +27,7 @@ type ReturnLineInput = {
 };
 
 type ReturnTicketForRows = Awaited<ReturnType<typeof searchReturnTickets>>[number];
+type DraftRouteForAssignment = Awaited<ReturnType<typeof listDraftRoutesForReturnAssignment>>[number];
 
 const ARCHIVE_STATUSES = new Set(["COLLECTED", "COULD_NOT_COLLECT", "CANCELLED"]);
 
@@ -65,22 +67,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const query = url.searchParams.get("q") || "";
   const orderNumber = url.searchParams.get("orderNumber") || "";
-  const [tickets, returnOrder] = await Promise.all([
+  const [tickets, draftRoutes, returnOrder] = await Promise.all([
     searchReturnTickets(query),
+    listDraftRoutesForReturnAssignment(),
     orderNumber.trim() ? findShopifyOrderForReturn(admin, orderNumber) : Promise.resolve(null),
   ]);
 
-  return json({ tickets, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
+  return json({ tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+
+  if (intent === "assignReturnToRoute") {
+    try {
+      await assignReturnTicketToDraftRoute(
+        String(formData.get("ticketId") || ""),
+        String(formData.get("routeId") || ""),
+      );
+
+      return redirect("/app/returns?assigned=1");
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Return could not be assigned." }, { status: 400 });
+    }
+  }
+
   const orderNumber = String(formData.get("orderNumber") || "").trim();
   const selectedLines = parseSelectedLines(formData.get("selectedLinesJson"));
 
   if (!orderNumber) {
-    return json({ ok: false, error: "Load a Shopify order before creating the return collection." }, { status: 400 });
+    return json({ ok: false, error: "Load a Shopify order before creating the return." }, { status: 400 });
   }
 
   if (!selectedLines.length) {
@@ -97,7 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return redirect("/app/returns?created=1");
   } catch (error) {
-    return json({ ok: false, error: error instanceof Error ? error.message : "Return collection could not be created." }, { status: 400 });
+    return json({ ok: false, error: error instanceof Error ? error.message : "Return could not be created." }, { status: 400 });
   }
 };
 
@@ -166,14 +184,47 @@ function ReturnsPageSummary({ tickets }: { tickets: ReturnTicketForRows[] }) {
   return (
     <InlineStack gap="300">
       <Badge tone="info">{activeCount} active</Badge>
-      <Badge tone="success">{collectedCount} collected</Badge>
-      <Badge tone="critical">{failedCount} not collected</Badge>
+      <Badge tone="success">{collectedCount} returned</Badge>
+      <Badge tone="critical">{failedCount} not returned</Badge>
     </InlineStack>
   );
 }
 
+function routeLabel(route: DraftRouteForAssignment) {
+  const date = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" }).format(new Date(route.date));
+  return `${route.name} · ${date} · ${route.stops.length} stops`;
+}
+
+function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRows; draftRoutes: DraftRouteForAssignment[] }) {
+  const [routeId, setRouteId] = useState("");
+  const options = [
+    { label: draftRoutes.length ? "Choose draft route" : "No draft routes available", value: "" },
+    ...draftRoutes.map((route) => ({ label: routeLabel(route), value: route.id })),
+  ];
+
+  if (ticket.status !== "OPEN") {
+    return <Text as="span" tone="subdued">{ticket.route ? ticket.route.name : "Not assignable"}</Text>;
+  }
+
+  if (ticket.route) {
+    return <Text as="span">{ticket.route.name}</Text>;
+  }
+
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value="assignReturnToRoute" />
+      <input type="hidden" name="ticketId" value={ticket.id} />
+      <input type="hidden" name="routeId" value={routeId} />
+      <BlockStack gap="150">
+        <Select label="Draft route" labelHidden options={options} value={routeId} onChange={setRouteId} />
+        <Button submit size="slim" disabled={!routeId}>Assign</Button>
+      </BlockStack>
+    </Form>
+  );
+}
+
 export default function ReturnsPage() {
-  const { tickets, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
+  const { tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState(query);
@@ -223,7 +274,7 @@ export default function ReturnsPage() {
     ticket.customerName,
     ticket.postcode || "No postcode",
     ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
-    ticket.route ? ticket.route.name : "Not assigned",
+    <AssignmentControl ticket={ticket} draftRoutes={draftRoutes} />,
     ticket.returnRequestedAt ? formatDate(ticket.returnRequestedAt) : formatDate(ticket.createdAt),
   ]);
 
@@ -242,10 +293,10 @@ export default function ReturnsPage() {
   ]);
 
   return (
-    <Page title="Returns & Collections" subtitle="Load a Shopify order, choose what is coming back and create a return collection" fullWidth>
+    <Page title="Returns" subtitle="Load a Shopify order, choose what is coming back and create a return" fullWidth>
       <Layout>
         <Layout.Section variant="oneThird">
-          <LegacyCard sectioned title="Create return collection">
+          <LegacyCard sectioned title="Create return">
             <BlockStack gap="400">
               {actionData && "error" in actionData ? (
                 <Text as="p" tone="critical">{actionData.error}</Text>
@@ -260,7 +311,7 @@ export default function ReturnsPage() {
                     onChange={setLookupOrderNumber}
                     autoComplete="off"
                     placeholder="Example, #1234"
-                    helpText="This can find fulfilled Shopify orders so return collections still show in the app."
+                    helpText="This can find fulfilled Shopify orders so returns still show in the app."
                   />
                   <Button submit>Load customer order</Button>
                 </BlockStack>
@@ -287,7 +338,7 @@ export default function ReturnsPage() {
                     </Box>
 
                     <BlockStack gap="200">
-                      <Text as="h3" variant="headingSm">Items to collect</Text>
+                      <Text as="h3" variant="headingSm">Items to return</Text>
                       {returnOrder.lineItems.map((line) => {
                         const quantity = quantitiesByItemId[line.id] ?? 0;
                         const maxQuantity = Math.max(0, line.quantity);
@@ -316,7 +367,7 @@ export default function ReturnsPage() {
                     </BlockStack>
 
                     <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
-                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return collection</Button>
+                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return</Button>
                   </BlockStack>
                 </Form>
               ) : null}
@@ -328,9 +379,12 @@ export default function ReturnsPage() {
           <LegacyCard sectioned>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center" gap="300">
-                <Text as="h2" variant="headingMd">Search return collections</Text>
+                <Text as="h2" variant="headingMd">Search returns</Text>
                 <ReturnsPageSummary tickets={tickets} />
               </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Open returns can be assigned to draft routes from this page. They will appear on the driver route as return stops.
+              </Text>
               <Form method="get">
                 <InlineStack gap="200" blockAlign="end">
                   <TextField
@@ -347,18 +401,18 @@ export default function ReturnsPage() {
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Active return collections">
+          <LegacyCard title="Active returns">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route", "Requested"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route action", "Requested"]}
               rows={activeTicketRows}
             />
           </LegacyCard>
 
-          <LegacyCard title="Collection archive">
+          <LegacyCard title="Return archive">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Collected items", "Completed", "Proof", "Notes"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Returned items", "Completed", "Proof", "Notes"]}
               rows={archiveRows}
             />
           </LegacyCard>
