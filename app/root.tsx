@@ -54,6 +54,21 @@ const planningPanelStyles = `
     color: #667085 !important;
   }
 
+  .bpd-return-planning-row {
+    background: #fff7f5 !important;
+    border-left: 4px solid #b42318 !important;
+  }
+
+  .bpd-return-planning-row,
+  .bpd-return-planning-row * {
+    color: #b42318 !important;
+  }
+
+  .bpd-return-planning-row svg {
+    color: #b42318 !important;
+    fill: #b42318 !important;
+  }
+
   .bpd-driver-status-pill {
     display: inline-flex;
     align-items: center;
@@ -430,6 +445,44 @@ const planningPanelScript = `
       });
     };
 
+    const getPlanningReturnRows = () => {
+      const selectedInput = document.querySelector('input[name="selectedOrderIds"]');
+      if (!(selectedInput instanceof HTMLInputElement)) return [];
+      const selectedIds = selectedInput.value.split(',').map((id) => id.trim()).filter(Boolean);
+      if (!selectedIds.length) return [];
+
+      const rows = Array.from(document.querySelectorAll('span'))
+        .filter((span) => /ETA:\s*\d{2}:\d{2}/.test(span.textContent || ''))
+        .map((span) => {
+          let current = span.parentElement;
+          for (let depth = 0; current && depth < 8; depth += 1) {
+            const text = current.textContent || '';
+            if (text.includes('ETA:') && current.querySelector('button')) return current;
+            current = current.parentElement;
+          }
+          return null;
+        })
+        .filter((row, index, allRows) => row instanceof HTMLElement && allRows.indexOf(row) === index);
+
+      return rows.map((row, index) => ({ row, id: selectedIds[index] || '' })).filter((entry) => entry.row instanceof HTMLElement);
+    };
+
+    const markReturnPlanningRows = () => {
+      if (!window.location.pathname.startsWith('/app')) return;
+      getPlanningReturnRows().forEach(({ row, id }) => {
+        if (!(row instanceof HTMLElement)) return;
+        if (id.startsWith('return:')) {
+          row.classList.add('bpd-return-planning-row');
+          row.dataset.bpdReturnPlanningRow = 'true';
+          return;
+        }
+        if (row.dataset.bpdReturnPlanningRow === 'true') {
+          row.classList.remove('bpd-return-planning-row');
+          delete row.dataset.bpdReturnPlanningRow;
+        }
+      });
+    };
+
     const watchDraftRouteEditorLinks = () => {
       document.addEventListener('click', (event) => {
         const target = event.target;
@@ -459,6 +512,7 @@ const planningPanelScript = `
       }
 
       syncDraftRouteAddForm();
+      markReturnPlanningRows();
       updateFulfilmentTooltipColours();
       tidyCustomerTracking();
       tidyDriverRouteCards();
@@ -486,6 +540,7 @@ const planningPanelScript = `
     document.addEventListener('change', (event) => {
       const target = event.target;
       if (target instanceof HTMLSelectElement) window.requestAnimationFrame(syncDraftRouteAddForm);
+      window.requestAnimationFrame(markReturnPlanningRows);
     }, true);
     document.addEventListener('submit', (event) => {
       const target = event.target;
