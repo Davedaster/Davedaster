@@ -134,7 +134,7 @@ model OrderStop {
   deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
   shopifyOrderId    String
   shopifyOrderNumber String
-  orderSource       String   @default("shopify") // shopify, manual
+  orderSource       String   @default("shopify") // shopify, manual, return
   customerName      String?
   customerEmail     String?
   customerPhone     String?
@@ -148,22 +148,29 @@ model OrderStop {
 model ReturnTicket {
   id                String   @id @default(cuid())
   reference         String   @unique
-  status            String   @default("OPEN") // OPEN, COLLECTED, CANCELLED
+  status            String   @default("OPEN") // OPEN, ASSIGNED, OUT_FOR_COLLECTION, COLLECTED, COULD_NOT_COLLECT, CANCELLED
   routeId           String?
   route             Route?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
   stopId            String?
   stop              Stop?    @relation(fields: [stopId], references: [id], onDelete: SetNull)
+  originalOrderId   String?
+  originalOrderCreatedAt DateTime?
+  returnRequestedAt DateTime @default(now())
   orderNumber       String?
   customerName      String
   customerEmail     String?
   customerPhone     String?
   address           String
   postcode          String?
+  latitude          Float?
+  longitude         Float?
   notes             String?
   searchText        String
   collectionPhotoUrl String?
   customerSignature String?
   driverNote        String?
+  collectionProofToken String? @unique
+  collectionCompletedSmsSentAt DateTime?
   collectedAt       DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -177,6 +184,7 @@ model ReturnTicketLine {
   itemName          String
   quantityExpected  Int      @default(1)
   quantityCollected Int      @default(0)
+  isExtraItem       Boolean  @default(false)
   conditionNote     String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
