@@ -13,11 +13,12 @@ import {
   InlineStack,
   Badge,
   Box,
+  Select,
 } from "@shopify/polaris";
 import { useEffect, useMemo, useState } from "react";
 
 import { authenticate } from "../shopify.server";
-import { searchReturnTickets } from "../lib/returns.server";
+import { assignReturnTicketToDraftRoute, listDraftRoutesForReturnAssignment, searchReturnTickets } from "../lib/returns.server";
 import { createReturnCollectionFromShopifyOrder, findShopifyOrderForReturn } from "../lib/returnCollections.server";
 
 type ReturnLineInput = {
@@ -26,6 +27,7 @@ type ReturnLineInput = {
 };
 
 type ReturnTicketForRows = Awaited<ReturnType<typeof searchReturnTickets>>[number];
+type DraftRouteForAssignment = Awaited<ReturnType<typeof listDraftRoutesForReturnAssignment>>[number];
 
 const ARCHIVE_STATUSES = new Set(["COLLECTED", "COULD_NOT_COLLECT", "CANCELLED"]);
 
@@ -65,17 +67,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const query = url.searchParams.get("q") || "";
   const orderNumber = url.searchParams.get("orderNumber") || "";
-  const [tickets, returnOrder] = await Promise.all([
+  const [tickets, draftRoutes, returnOrder] = await Promise.all([
     searchReturnTickets(query),
+    listDraftRoutesForReturnAssignment(),
     orderNumber.trim() ? findShopifyOrderForReturn(admin, orderNumber) : Promise.resolve(null),
   ]);
 
-  return json({ tickets, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
+  return json({ tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const intent = String(formData.get("intent") || "");
+
+  if (intent === "assignReturnToRoute") {
+    try {
+      await assignReturnTicketToDraftRoute(
+        String(formData.get("ticketId") || ""),
+        String(formData.get("routeId") || ""),
+      );
+
+      return redirect("/app/returns?assigned=1");
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Return collection could not be assigned." }, { status: 400 });
+    }
+  }
+
   const orderNumber = String(formData.get("orderNumber") || "").trim();
   const selectedLines = parseSelectedLines(formData.get("selectedLinesJson"));
 
@@ -172,8 +190,41 @@ function ReturnsPageSummary({ tickets }: { tickets: ReturnTicketForRows[] }) {
   );
 }
 
+function routeLabel(route: DraftRouteForAssignment) {
+  const date = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short" }).format(new Date(route.date));
+  return `${route.name} · ${date} · ${route.stops.length} stops`;
+}
+
+function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRows; draftRoutes: DraftRouteForAssignment[] }) {
+  const [routeId, setRouteId] = useState("");
+  const options = [
+    { label: draftRoutes.length ? "Choose draft route" : "No draft routes available", value: "" },
+    ...draftRoutes.map((route) => ({ label: routeLabel(route), value: route.id })),
+  ];
+
+  if (ticket.status !== "OPEN") {
+    return <Text as="span" tone="subdued">{ticket.route ? ticket.route.name : "Not assignable"}</Text>;
+  }
+
+  if (ticket.route) {
+    return <Text as="span">{ticket.route.name}</Text>;
+  }
+
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value="assignReturnToRoute" />
+      <input type="hidden" name="ticketId" value={ticket.id} />
+      <input type="hidden" name="routeId" value={routeId} />
+      <BlockStack gap="150">
+        <Select label="Draft route" labelHidden options={options} value={routeId} onChange={setRouteId} />
+        <Button submit size="slim" disabled={!routeId}>Assign</Button>
+      </BlockStack>
+    </Form>
+  );
+}
+
 export default function ReturnsPage() {
-  const { tickets, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
+  const { tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState(query);
@@ -223,7 +274,7 @@ export default function ReturnsPage() {
     ticket.customerName,
     ticket.postcode || "No postcode",
     ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
-    ticket.route ? ticket.route.name : "Not assigned",
+    <AssignmentControl ticket={ticket} draftRoutes={draftRoutes} />,
     ticket.returnRequestedAt ? formatDate(ticket.returnRequestedAt) : formatDate(ticket.createdAt),
   ]);
 
@@ -331,6 +382,9 @@ export default function ReturnsPage() {
                 <Text as="h2" variant="headingMd">Search return collections</Text>
                 <ReturnsPageSummary tickets={tickets} />
               </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Open return collections can be assigned to draft routes from this page. They will appear on the driver route as collection stops.
+              </Text>
               <Form method="get">
                 <InlineStack gap="200" blockAlign="end">
                   <TextField
@@ -350,7 +404,7 @@ export default function ReturnsPage() {
           <LegacyCard title="Active return collections">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route", "Requested"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route action", "Requested"]}
               rows={activeTicketRows}
             />
           </LegacyCard>
