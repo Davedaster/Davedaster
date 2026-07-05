@@ -134,8 +134,26 @@ function removeSeparateLiveRouteCard() {
   document.getElementById("bpd-live-route-summary")?.remove();
 }
 
+function simplifyPlanningMapHeader() {
+  const pageHeading = Array.from(document.querySelectorAll<HTMLElement>("h1"))
+    .find((element) => cleanText(element) === "Orders Map");
+  setText(pageHeading || null, "Planning Map");
+
+  const fleetHeading = Array.from(document.querySelectorAll<HTMLElement>("h2"))
+    .find((element) => cleanText(element) === "Ready for own fleet delivery");
+  hideElement(fleetHeading || null);
+  hideElement(fleetHeading?.nextElementSibling instanceof HTMLElement ? fleetHeading.nextElementSibling : null);
+
+  const stopsBadge = routeSummaryTextElements().find((element) => /^\d+ stops$/.test(cleanText(element)));
+  if (stopsBadge) {
+    const count = cleanText(stopsBadge).replace(" stops", "");
+    setText(stopsBadge, `${count} orders`);
+  }
+}
+
 function simplifyExistingRouteSummary() {
   removeSeparateLiveRouteCard();
+  simplifyPlanningMapHeader();
 
   const routeDetailLine = findRouteDetailLine();
   const etaMatch = cleanText(routeDetailLine || document.createElement("p")).match(/Finish ETA:\s*([0-9]{2}:[0-9]{2})/);
