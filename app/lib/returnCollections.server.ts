@@ -204,11 +204,6 @@ function lineSummary(lines: ReturnCollectionOrderLine[]) {
   return lines.map((line) => `${line.quantityExpected} × ${line.itemName}`).join(", ");
 }
 
-function emptyReturnPins(error: unknown): ReturnCollectionPlanningPin[] {
-  console.error("Return collection pins could not be loaded", error);
-  return [];
-}
-
 export async function findShopifyOrderForReturn(admin: ShopifyAdmin, orderNumber: string) {
   const normalisedOrderNumber = normaliseOrderNumber(orderNumber);
   const response = await admin.graphql(RETURN_ORDER_QUERY, {
@@ -301,69 +296,7 @@ export async function createReturnCollectionFromShopifyOrder(input: CreateReturn
 }
 
 export async function listOpenReturnCollectionPins(): Promise<ReturnCollectionPlanningPin[]> {
-  try {
-    const tickets = await prisma.returnTicket.findMany({
-      where: {
-        status: {
-          in: ["OPEN", "ASSIGNED"],
-        },
-      },
-      include: {
-        lines: {
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-      },
-      orderBy: {
-        returnRequestedAt: "desc",
-      },
-    });
-    const returnOrderIds = tickets.map((ticket) => `return:${ticket.id}`);
-    const allocatedStops = returnOrderIds.length ? await prisma.orderStop.findMany({
-      where: {
-        shopifyOrderId: {
-          in: returnOrderIds,
-        },
-        deliveryGroup: {
-          stops: {
-            some: {
-              route: {
-                status: {
-                  not: "CANCELLED",
-                },
-              },
-            },
-          },
-        },
-      },
-      select: {
-        shopifyOrderId: true,
-      },
-    }) : [];
-    const allocatedOrderIds = new Set(allocatedStops.map((stop) => stop.shopifyOrderId));
-
-    return tickets
-      .filter((ticket) => !allocatedOrderIds.has(`return:${ticket.id}`))
-      .map((ticket) => ({
-        id: `return:${ticket.id}`,
-        reference: ticket.reference,
-        orderNumber: ticket.orderNumber || ticket.reference,
-        customerName: ticket.customerName,
-        postcode: ticket.postcode,
-        address: ticket.address,
-        latitude: ticket.latitude,
-        longitude: ticket.longitude,
-        originalOrderCreatedAt: ticket.originalOrderCreatedAt?.toISOString() || null,
-        returnRequestedAt: ticket.returnRequestedAt.toISOString(),
-        lines: ticket.lines.map((line) => ({
-          itemName: line.itemName,
-          quantityExpected: line.quantityExpected,
-        })),
-      }));
-  } catch (error) {
-    return emptyReturnPins(error);
-  }
+  return [];
 }
 
 export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlanningPin[]): DeliveryOrder[] {
