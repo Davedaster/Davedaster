@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
 import { getActiveRouteAllocations, type RouteAllocation } from "./routeAllocations.server";
+import { singleFlight } from "./singleFlight.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -226,6 +227,10 @@ function extractPostcode(value: string) {
   return match?.[0]?.toUpperCase() || "";
 }
 
+function lookupKey(prefix: string, postcode: string | null | undefined, address: string) {
+  return `${prefix}:${postcode || ""}:${address.replace(/\s+/g, " ").trim().toLowerCase()}`;
+}
+
 function manualOrderReference(input: ManualDeliveryOrderInput) {
   const suppliedId = input.id?.trim();
 
@@ -336,7 +341,13 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
   const shippingMethod = shippingTitle(order);
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const addressSummary = formatAddress(order);
-  const lookup = hasDeliveryAddress && !override ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary) : null;
+  const postcode = order.shippingAddress?.zip || null;
+  const lookup = hasDeliveryAddress && !override
+    ? await singleFlight(
+      lookupKey("shopify-order-address", postcode, addressSummary),
+      () => lookupAddress(postcode, addressSummary),
+    )
+    : null;
   const lookupHasCoordinates = Boolean(lookup?.latitude && lookup?.longitude);
 
   const deliveryOrder: DeliveryOrder = {
@@ -375,7 +386,11 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
 export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Promise<DeliveryOrder> {
   const customerName = input.customerName.trim() || "Manual customer";
   const addressSummary = input.address.trim();
-  const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
+  const postcode = extractPostcode(addressSummary);
+  const lookup = await singleFlight(
+    lookupKey("manual-order-address", postcode, addressSummary),
+    () => lookupAddress(postcode, addressSummary),
+  );
   const reference = manualOrderReference(input);
   const lineItemLines = normaliseStoredLineItemLines(input.lineItemSummary);
   const lineItemSummary = lineItemLines.join(", ");
@@ -390,7 +405,7 @@ export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Pr
     shippingMethod: "Manual route entry",
     fulfilmentStatus: "unfulfilled",
     financialStatus: "manual",
-    postcode: lookup.postcode || extractPostcode(addressSummary) || null,
+    postcode: lookup.postcode || postcode || null,
     addressSummary,
     formattedAddress: lookup.formattedAddress || addressSummary,
     hasDeliveryAddress: Boolean(addressSummary),
