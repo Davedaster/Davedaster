@@ -3,6 +3,7 @@ import prisma from "../db.server";
 import { getAddressOverridesByOrderId } from "./addressOverrides.server";
 import { lookupAddress } from "./getAddress.server";
 import { getActiveRouteAllocations, type RouteAllocation } from "./routeAllocations.server";
+import { listOpenReturnCollectionPins, returnCollectionPinsToDeliveryOrders } from "./returnCollections.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -300,9 +301,10 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
   }
 
   const visibleOrders = allOrders.filter(shouldShowOnDeliveryMap);
-  const [overridesByOrderId, allocationsByOrderId] = await Promise.all([
+  const [overridesByOrderId, allocationsByOrderId, returnCollectionPins] = await Promise.all([
     getAddressOverridesByOrderId(visibleOrders.map((order) => order.id)),
     getActiveRouteAllocations(visibleOrders.map((order) => order.id)),
+    listOpenReturnCollectionPins(),
   ]);
 
   const orders = await Promise.all(visibleOrders.map((order) => toDeliveryOrder(
@@ -310,8 +312,9 @@ export async function getDeliveryOrders(admin: ShopifyAdmin) {
     overridesByOrderId.get(order.id) || null,
     allocationsByOrderId.get(order.id) || null,
   )));
+  const returnCollectionOrders = returnCollectionPinsToDeliveryOrders(returnCollectionPins);
 
-  return orders.filter((order) => !order.routeAllocation);
+  return [...orders.filter((order) => !order.routeAllocation), ...returnCollectionOrders];
 }
 
 export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Promise<DeliveryOrder> {
