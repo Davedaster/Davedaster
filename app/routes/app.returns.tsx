@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -10,47 +10,81 @@ import {
   TextField,
   Button,
   DataTable,
-  Select,
   InlineStack,
   Badge,
+  Box,
 } from "@shopify/polaris";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { authenticate } from "../shopify.server";
-import { createReturnTicket, listReturnAssignableStops, searchReturnTickets } from "../lib/returns.server";
+import { searchReturnTickets } from "../lib/returns.server";
+import { createReturnCollectionFromShopifyOrder, findShopifyOrderForReturn } from "../lib/returnCollections.server";
+
+type ReturnLineInput = {
+  itemName: string;
+  quantityExpected: number;
+};
+
+function parseReturnLines(value: string): ReturnLineInput[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const quantityMatch = line.match(/^(\d+)\s*(?:x|×)?\s*(.+)$/i);
+
+      if (!quantityMatch) {
+        return { itemName: line, quantityExpected: 1 };
+      }
+
+      return {
+        quantityExpected: Math.max(1, Math.round(Number(quantityMatch[1]) || 1)),
+        itemName: quantityMatch[2].trim(),
+      };
+    })
+    .filter((line) => line.itemName);
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const query = url.searchParams.get("q") || "";
-  const [tickets, assignableStops] = await Promise.all([
+  const orderNumber = url.searchParams.get("orderNumber") || "";
+  const [tickets, returnOrder] = await Promise.all([
     searchReturnTickets(query),
-    listReturnAssignableStops(),
+    orderNumber.trim() ? findShopifyOrderForReturn(admin, orderNumber) : Promise.resolve(null),
   ]);
 
-  return json({ tickets, assignableStops, query });
+  return json({ tickets, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
+  const orderNumber = String(formData.get("orderNumber") || "").trim();
+  const itemsText = String(formData.get("itemsText") || "").trim();
+
+  if (!orderNumber) {
+    return json({ ok: false, error: "Load a Shopify order before creating the return collection." }, { status: 400 });
+  }
+
+  const selectedLines = parseReturnLines(itemsText);
+
+  if (!selectedLines.length) {
+    return json({ ok: false, error: "Add at least one item and quantity to collect." }, { status: 400 });
+  }
 
   try {
-    await createReturnTicket({
-      stopId: String(formData.get("stopId") || "").trim() || null,
-      orderNumber: String(formData.get("orderNumber") || "").trim(),
-      customerName: String(formData.get("customerName") || "").trim(),
-      customerEmail: String(formData.get("customerEmail") || "").trim(),
-      customerPhone: String(formData.get("customerPhone") || "").trim(),
-      address: String(formData.get("address") || "").trim(),
-      postcode: String(formData.get("postcode") || "").trim(),
+    await createReturnCollectionFromShopifyOrder({
+      admin,
+      orderNumber,
+      selectedLines,
       notes: String(formData.get("notes") || "").trim(),
-      itemsText: String(formData.get("itemsText") || "").trim(),
     });
 
-    return redirect("/app/returns");
+    return redirect("/app/returns?created=1");
   } catch (error) {
-    return json({ ok: false, error: error instanceof Error ? error.message : "Return ticket could not be created." }, { status: 400 });
+    return json({ ok: false, error: error instanceof Error ? error.message : "Return collection could not be created." }, { status: 400 });
   }
 };
 
@@ -62,6 +96,7 @@ function formatDate(value: string | Date | null) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
+    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
@@ -69,44 +104,37 @@ function formatDate(value: string | Date | null) {
 
 function statusTone(status: string) {
   if (status === "OPEN") return "attention" as const;
+  if (status === "ASSIGNED" || status === "OUT_FOR_COLLECTION") return "info" as const;
   if (status === "COLLECTED") return "success" as const;
+  if (status === "COULD_NOT_COLLECT" || status === "CANCELLED") return "critical" as const;
   return "info" as const;
 }
 
+function formatTicketLine(quantity: number, itemName: string) {
+  return `${quantity} x ${itemName}`;
+}
+
 export default function ReturnsPage() {
-  const { tickets, assignableStops, query } = useLoaderData<typeof loader>();
+  const { tickets, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const [selectedStopId, setSelectedStopId] = useState("");
-  const [orderNumber, setOrderNumber] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [address, setAddress] = useState("");
-  const [postcode, setPostcode] = useState("");
+  const navigation = useNavigation();
+  const [searchQuery, setSearchQuery] = useState(query);
+  const [lookupOrderNumber, setLookupOrderNumber] = useState(orderNumber);
   const [itemsText, setItemsText] = useState("");
   const [notes, setNotes] = useState("");
-  const [searchQuery, setSearchQuery] = useState(query);
+  const isCreating = navigation.state !== "idle";
 
-  const stopOptions = useMemo(() => [
-    { label: "Not assigned to a route stop yet", value: "" },
-    ...assignableStops.map((stop) => ({ label: stop.label, value: stop.value })),
-  ], [assignableStops]);
-
-  const onSelectStop = (value: string) => {
-    setSelectedStopId(value);
-    const selected = assignableStops.find((stop) => stop.value === value);
-
-    if (!selected) {
-      return;
+  const suggestedItemsText = useMemo(() => {
+    if (!returnOrder) {
+      return "";
     }
 
-    setOrderNumber(selected.orderNumber || "");
-    setCustomerName(selected.customerName || "");
-    setCustomerEmail(selected.customerEmail || "");
-    setCustomerPhone(selected.customerPhone || "");
-    setAddress(selected.address || "");
-    setPostcode(selected.postcode || "");
-  };
+    return returnOrder.lineItems.map((line) => formatTicketLine(line.quantity, line.title)).join("\n");
+  }, [returnOrder]);
+
+  useEffect(() => {
+    setItemsText(suggestedItemsText);
+  }, [suggestedItemsText]);
 
   const ticketRows = tickets.map((ticket) => [
     ticket.reference,
@@ -114,55 +142,85 @@ export default function ReturnsPage() {
     ticket.orderNumber || "No order number",
     ticket.customerName,
     ticket.postcode || "No postcode",
-    ticket.lines.map((line) => `${line.quantityExpected} x ${line.itemName}`).join(", "),
+    ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
     ticket.route ? ticket.route.name : "Not assigned",
     ticket.collectedAt ? formatDate(ticket.collectedAt) : "Pending",
   ]);
 
   return (
-    <Page title="Returns & Collections" subtitle="Create return tickets and search by order number, customer name or address" fullWidth>
+    <Page title="Returns & Collections" subtitle="Load a Shopify order, choose what is coming back and create a return collection" fullWidth>
       <Layout>
         <Layout.Section variant="oneThird">
-          <LegacyCard sectioned title="Create return ticket">
-            <Form method="post">
-              <BlockStack gap="300">
-                {actionData && "error" in actionData ? (
-                  <Text as="p" tone="critical">{actionData.error}</Text>
-                ) : null}
+          <LegacyCard sectioned title="Create return collection">
+            <BlockStack gap="400">
+              {actionData && "error" in actionData ? (
+                <Text as="p" tone="critical">{actionData.error}</Text>
+              ) : null}
 
-                <Select
-                  label="Attach to delivery stop, optional"
-                  name="stopId"
-                  options={stopOptions}
-                  value={selectedStopId}
-                  onChange={onSelectStop}
-                />
-                <TextField label="Order number" name="orderNumber" value={orderNumber} onChange={setOrderNumber} autoComplete="off" />
-                <TextField label="Customer name" name="customerName" value={customerName} onChange={setCustomerName} autoComplete="off" />
-                <TextField label="Customer email" name="customerEmail" type="email" value={customerEmail} onChange={setCustomerEmail} autoComplete="off" />
-                <TextField label="Customer phone" name="customerPhone" value={customerPhone} onChange={setCustomerPhone} autoComplete="off" />
-                <TextField label="Collection address" name="address" value={address} onChange={setAddress} autoComplete="off" multiline={3} />
-                <TextField label="Postcode" name="postcode" value={postcode} onChange={setPostcode} autoComplete="off" />
-                <TextField
-                  label="Items to collect"
-                  name="itemsText"
-                  value={itemsText}
-                  onChange={setItemsText}
-                  autoComplete="off"
-                  multiline={5}
-                  helpText="One item per line, for example: 2 x Grey Marble panels"
-                />
-                <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
-                <Button submit variant="primary">Create return ticket</Button>
-              </BlockStack>
-            </Form>
+              <Form method="get">
+                <BlockStack gap="200">
+                  <TextField
+                    label="Shopify order number"
+                    name="orderNumber"
+                    value={lookupOrderNumber}
+                    onChange={setLookupOrderNumber}
+                    autoComplete="off"
+                    placeholder="Example, #1234"
+                    helpText="This can find fulfilled Shopify orders so return collections still show in the app."
+                  />
+                  <Button submit>Load customer order</Button>
+                </BlockStack>
+              </Form>
+
+              {orderLookupAttempted && !returnOrder ? (
+                <Box background="bg-surface-warning" padding="300" borderRadius="300">
+                  <Text as="p" tone="critical">No Shopify order was found for {orderNumber}.</Text>
+                </Box>
+              ) : null}
+
+              {returnOrder ? (
+                <Form method="post">
+                  <input type="hidden" name="orderNumber" value={returnOrder.name} />
+                  <BlockStack gap="300">
+                    <Box background="bg-surface-secondary" padding="300" borderRadius="300">
+                      <BlockStack gap="100">
+                        <Text as="h3" variant="headingSm">{returnOrder.name} · {returnOrder.customerName}</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">Original order: {formatDate(returnOrder.createdAt)}</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">Postcode: {returnOrder.postcode || "No postcode"}</Text>
+                      </BlockStack>
+                    </Box>
+
+                    <BlockStack gap="100">
+                      <Text as="h3" variant="headingSm">Original order items</Text>
+                      {returnOrder.lineItems.map((line) => (
+                        <Text key={line.id} as="p" variant="bodySm" tone="subdued">
+                          {formatTicketLine(line.quantity, line.title)}{line.sku ? ` · ${line.sku}` : ""}
+                        </Text>
+                      ))}
+                    </BlockStack>
+
+                    <TextField
+                      label="Items to collect"
+                      name="itemsText"
+                      value={itemsText}
+                      onChange={setItemsText}
+                      autoComplete="off"
+                      multiline={5}
+                      helpText="Edit the quantities here. The driver can add extra items later from the phone proof screen."
+                    />
+                    <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
+                    <Button submit variant="primary" loading={isCreating} disabled={!itemsText.trim()}>Create return collection</Button>
+                  </BlockStack>
+                </Form>
+              ) : null}
+            </BlockStack>
           </LegacyCard>
         </Layout.Section>
 
         <Layout.Section>
           <LegacyCard sectioned>
             <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">Search return tickets</Text>
+              <Text as="h2" variant="headingMd">Search return collections</Text>
               <Form method="get">
                 <InlineStack gap="200" blockAlign="end">
                   <TextField
@@ -179,7 +237,7 @@ export default function ReturnsPage() {
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Return tickets">
+          <LegacyCard title="Return collections">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
               headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route", "Collected"]}
