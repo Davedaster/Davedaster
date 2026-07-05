@@ -336,8 +336,7 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
   const shippingMethod = shippingTitle(order);
   const hasDeliveryAddress = Boolean(order.shippingAddress);
   const addressSummary = formatAddress(order);
-  const lookup = hasDeliveryAddress && !override ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary) : null;
-  const lookupHasCoordinates = Boolean(lookup?.latitude && lookup?.longitude);
+  const lookupHasCoordinates = false;
 
   const deliveryOrder: DeliveryOrder = {
     id: order.id,
@@ -351,14 +350,14 @@ export async function toDeliveryOrder(order: ShopifyOrderNode, override?: Addres
     financialStatus: order.displayFinancialStatus,
     postcode: order.shippingAddress?.zip || null,
     addressSummary,
-    formattedAddress: lookup?.formattedAddress || null,
+    formattedAddress: null,
     hasDeliveryAddress,
     hasPanel,
     isSampleOnly,
     addressStatus: !hasDeliveryAddress ? "NEEDS_ADDRESS" : lookupHasCoordinates ? "READY" : "NEEDS_LOCATION_CHECK",
-    addressConfidence: lookupHasCoordinates ? "HIGH" : lookup?.confidence || "LOW",
-    latitude: lookup?.latitude || null,
-    longitude: lookup?.longitude || null,
+    addressConfidence: "LOW",
+    latitude: null,
+    longitude: null,
     lineItemSummary: itemLines.join(", "),
     lineItemLines: itemLines,
     fulfilByDate: null,
