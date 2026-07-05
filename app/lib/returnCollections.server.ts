@@ -204,10 +204,6 @@ function lineSummary(lines: ReturnCollectionOrderLine[]) {
   return lines.map((line) => `${line.quantityExpected} × ${line.itemName}`).join(", ");
 }
 
-function returnTicketIdFromPlanningOrderId(orderId: string) {
-  return orderId.startsWith("return:") ? orderId.replace("return:", "") : null;
-}
-
 export async function findShopifyOrderForReturn(admin: ShopifyAdmin, orderNumber: string) {
   const normalisedOrderNumber = normaliseOrderNumber(orderNumber);
   const response = await admin.graphql(RETURN_ORDER_QUERY, {
@@ -305,11 +301,6 @@ export async function listOpenReturnCollectionPins(): Promise<ReturnCollectionPl
       status: {
         in: ["OPEN", "ASSIGNED"],
       },
-      OR: [
-        { routeId: null, stopId: null },
-        { stopId: null },
-        { route: { status: "CANCELLED" } },
-      ],
     },
     include: {
       lines: {
@@ -322,23 +313,48 @@ export async function listOpenReturnCollectionPins(): Promise<ReturnCollectionPl
       returnRequestedAt: "desc",
     },
   });
+  const returnOrderIds = tickets.map((ticket) => `return:${ticket.id}`);
+  const allocatedStops = returnOrderIds.length ? await prisma.orderStop.findMany({
+    where: {
+      shopifyOrderId: {
+        in: returnOrderIds,
+      },
+      deliveryGroup: {
+        stops: {
+          some: {
+            route: {
+              status: {
+                not: "CANCELLED",
+              },
+            },
+          },
+        },
+      },
+    },
+    select: {
+      shopifyOrderId: true,
+    },
+  }) : [];
+  const allocatedOrderIds = new Set(allocatedStops.map((stop) => stop.shopifyOrderId));
 
-  return tickets.map((ticket) => ({
-    id: `return:${ticket.id}`,
-    reference: ticket.reference,
-    orderNumber: ticket.orderNumber || ticket.reference,
-    customerName: ticket.customerName,
-    postcode: ticket.postcode,
-    address: ticket.address,
-    latitude: ticket.latitude,
-    longitude: ticket.longitude,
-    originalOrderCreatedAt: ticket.originalOrderCreatedAt?.toISOString() || null,
-    returnRequestedAt: ticket.returnRequestedAt.toISOString(),
-    lines: ticket.lines.map((line) => ({
-      itemName: line.itemName,
-      quantityExpected: line.quantityExpected,
-    })),
-  }));
+  return tickets
+    .filter((ticket) => !allocatedOrderIds.has(`return:${ticket.id}`))
+    .map((ticket) => ({
+      id: `return:${ticket.id}`,
+      reference: ticket.reference,
+      orderNumber: ticket.orderNumber || ticket.reference,
+      customerName: ticket.customerName,
+      postcode: ticket.postcode,
+      address: ticket.address,
+      latitude: ticket.latitude,
+      longitude: ticket.longitude,
+      originalOrderCreatedAt: ticket.originalOrderCreatedAt?.toISOString() || null,
+      returnRequestedAt: ticket.returnRequestedAt.toISOString(),
+      lines: ticket.lines.map((line) => ({
+        itemName: line.itemName,
+        quantityExpected: line.quantityExpected,
+      })),
+    }));
 }
 
 export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlanningPin[]): DeliveryOrder[] {
@@ -368,7 +384,7 @@ export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlann
       longitude: pin.longitude,
       lineItemSummary: lineSummary(pin.lines),
       lineItemLines,
-      fulfilByDate: null,
+      fulfilByDate: pin.returnRequestedAt,
       hasManualOverride: true,
       manualAddress: pin.address,
       manualAddressNotes: "Return collection created from the Returns page",
@@ -377,58 +393,6 @@ export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlann
       returnRequestedAt: pin.returnRequestedAt,
     };
   });
-}
-
-export async function markReturnCollectionsAssignedToRoute(routeId: string, selectedOrderIds: string[]) {
-  const selectedReturnTicketIds = selectedOrderIds
-    .map(returnTicketIdFromPlanningOrderId)
-    .filter((id): id is string => Boolean(id));
-
-  if (!selectedReturnTicketIds.length) {
-    return;
-  }
-
-  const route = await prisma.route.findUnique({
-    where: { id: routeId },
-    include: {
-      stops: {
-        include: {
-          deliveryGroup: {
-            include: {
-              orders: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!route) {
-    return;
-  }
-
-  for (const stop of route.stops) {
-    const returnOrder = stop.deliveryGroup?.orders.find((order) => selectedOrderIds.includes(order.shopifyOrderId));
-    const ticketId = returnTicketIdFromPlanningOrderId(returnOrder?.shopifyOrderId || "");
-
-    if (!ticketId || !selectedReturnTicketIds.includes(ticketId)) {
-      continue;
-    }
-
-    await prisma.returnTicket.updateMany({
-      where: {
-        id: ticketId,
-        status: {
-          in: ["OPEN", "ASSIGNED"],
-        },
-      },
-      data: {
-        routeId,
-        stopId: stop.id,
-        status: "ASSIGNED",
-      },
-    });
-  }
 }
 
 export async function listCollectedReturnArchive(query = "") {
