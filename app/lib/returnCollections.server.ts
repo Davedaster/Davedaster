@@ -204,6 +204,10 @@ function lineSummary(lines: ReturnCollectionOrderLine[]) {
   return lines.map((line) => `${line.quantityExpected} × ${line.itemName}`).join(", ");
 }
 
+function returnTicketIdFromPlanningOrderId(orderId: string) {
+  return orderId.startsWith("return:") ? orderId.replace("return:", "") : null;
+}
+
 export async function findShopifyOrderForReturn(admin: ShopifyAdmin, orderNumber: string) {
   const normalisedOrderNumber = normaliseOrderNumber(orderNumber);
   const response = await admin.graphql(RETURN_ORDER_QUERY, {
@@ -368,10 +372,63 @@ export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlann
       hasManualOverride: true,
       manualAddress: pin.address,
       manualAddressNotes: "Return collection created from the Returns page",
-      orderSource: "return",
+      orderSource: "manual",
+      isReturnCollection: true,
       returnRequestedAt: pin.returnRequestedAt,
     };
   });
+}
+
+export async function markReturnCollectionsAssignedToRoute(routeId: string, selectedOrderIds: string[]) {
+  const selectedReturnTicketIds = selectedOrderIds
+    .map(returnTicketIdFromPlanningOrderId)
+    .filter((id): id is string => Boolean(id));
+
+  if (!selectedReturnTicketIds.length) {
+    return;
+  }
+
+  const route = await prisma.route.findUnique({
+    where: { id: routeId },
+    include: {
+      stops: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!route) {
+    return;
+  }
+
+  for (const stop of route.stops) {
+    const returnOrder = stop.deliveryGroup?.orders.find((order) => selectedOrderIds.includes(order.shopifyOrderId));
+    const ticketId = returnTicketIdFromPlanningOrderId(returnOrder?.shopifyOrderId || "");
+
+    if (!ticketId || !selectedReturnTicketIds.includes(ticketId)) {
+      continue;
+    }
+
+    await prisma.returnTicket.updateMany({
+      where: {
+        id: ticketId,
+        status: {
+          in: ["OPEN", "ASSIGNED"],
+        },
+      },
+      data: {
+        routeId,
+        stopId: stop.id,
+        status: "ASSIGNED",
+      },
+    });
+  }
 }
 
 export async function listCollectedReturnArchive(query = "") {
