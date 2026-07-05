@@ -47,6 +47,7 @@ import { lookupAddress } from "../lib/getAddress.server";
 import { assignDriverToRoute, createRouteDraft } from "../lib/routeDrafts.server";
 import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
+import { linkPlannedReturnTicketsToRoute, listOpenReturnPlanningOrders } from "../lib/returns.server";
 import { authenticate } from "../shopify.server";
 import { getDeliveryOrders, toManualDeliveryOrder, type DeliveryOrder, type ManualDeliveryOrderInput } from "../lib/shopifyOrders.server";
 
@@ -127,10 +128,20 @@ async function addFulfilByDates(orders: DeliveryOrder[], fulfilmentWindowDays: n
   }));
 }
 
+async function listReturnPlanningOrdersSafely() {
+  try {
+    return await listOpenReturnPlanningOrders();
+  } catch (error) {
+    console.warn("Return planning orders could not be loaded", error);
+    return [];
+  }
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const [orders, drivers, defaults, credentials] = await Promise.all([
+  const [orders, returnPlanningOrders, drivers, defaults, credentials] = await Promise.all([
     getDeliveryOrders(admin),
+    listReturnPlanningOrdersSafely(),
     listActiveDrivers(),
     getRoutePlanningDefaults(),
     getAppCredentials(),
@@ -148,13 +159,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   );
 
   return json({
-  orders: ordersWithFulfilByDates,
-  drivers,
-  addressLookupEnabled: hasGetAddressCredentials(credentials),
-  routexlEnabled: hasRouteXLCredentials(credentials),
-  tomtomApiKey: credentials.tomtomApiKey,
-  defaults: mergedDefaults,
-});
+    orders: [...ordersWithFulfilByDates, ...returnPlanningOrders],
+    drivers,
+    addressLookupEnabled: hasGetAddressCredentials(credentials),
+    routexlEnabled: hasRouteXLCredentials(credentials),
+    tomtomApiKey: credentials.tomtomApiKey,
+    defaults: mergedDefaults,
+  });
 };
 
 function parseManualOrders(value: FormDataEntryValue | null): ManualPlanningOrder[] {
@@ -260,11 +271,12 @@ function routeArrivalToMinutes(value: number | null | undefined) {
 }
 
 async function getSelectedPlanningOrders(admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"], selectedOrderIds: string[], manualOrders: ManualPlanningOrder[]) {
-  const [shopifyOrders, manualDeliveryOrders] = await Promise.all([
+  const [shopifyOrders, returnPlanningOrders, manualDeliveryOrders] = await Promise.all([
     getDeliveryOrders(admin),
+    listReturnPlanningOrdersSafely(),
     Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
   ]);
-  const ordersById = new Map([...shopifyOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
+  const ordersById = new Map([...shopifyOrders, ...returnPlanningOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
 
   return selectedOrderIds
     .map((id) => ordersById.get(id))
@@ -385,6 +397,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await assignDriverToRoute(draftRoute.id, driverId);
   }
 
+  await linkPlannedReturnTicketsToRoute(draftRoute.id);
+
   return redirect("/app/routes");
 };
 
@@ -491,6 +505,10 @@ function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
 }
 
 function addressLabel(order: DeliveryOrder) {
+  if (order.orderSource === "return") {
+    return "Return";
+  }
+
   if (order.orderSource === "manual") {
     return "Manual order";
   }
@@ -593,13 +611,14 @@ function orderItemLines(order: DeliveryOrder) {
 }
 
 function orderMapTooltip(order: DeliveryOrder, heading: string, fulfilmentWindowDays: number) {
+  const isReturn = order.orderSource === "return";
   const fulfilmentDot = fulfilmentHoverDot(order.fulfilByDate, fulfilmentWindowDays);
 
   return {
     tooltipTitle: heading,
     tooltipLines: [
-      `Ordered: ${formatOrderDate(order.createdAt)}`,
-      `${fulfilmentDot} Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
+      `${isReturn ? "Return requested" : "Ordered"}: ${formatOrderDate(order.createdAt)}`,
+      isReturn ? "Type: Return" : `${fulfilmentDot} Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
       `Postcode: ${order.postcode || "No postcode"}`,
       "Items:",
       ...orderItemLines(order),
@@ -659,11 +678,12 @@ function DeliveryMap({
   const unselectedPoints = ordersWithCoordinates
     .filter((order) => !routeStopSet.has(order.id))
     .map((order) => {
+      const isReturn = order.orderSource === "return";
       const heading = `${order.name} · ${order.customerName}`;
 
       return {
         id: order.id,
-        label: order.name.replace("#", ""),
+        label: isReturn ? "RET" : order.name.replace("#", ""),
         title: `${heading} · ${order.postcode || "No postcode"}`,
         latitude: order.latitude,
         longitude: order.longitude,
@@ -697,7 +717,7 @@ function DeliveryMap({
             {ordersWithoutCoordinates.map((order) => (
               <InlineStack key={order.id} align="space-between">
                 <Text as="span" variant="bodySm">{order.name} · {order.customerName} · {order.postcode || "No postcode"}</Text>
-                <Badge tone={order.orderSource === "manual" ? "info" : "warning"}>{addressLabel(order)}</Badge>
+                <Badge tone={order.orderSource === "return" ? "critical" : order.orderSource === "manual" ? "info" : "warning"}>{addressLabel(order)}</Badge>
               </InlineStack>
             ))}
           </BlockStack>
@@ -744,7 +764,7 @@ function StructuredAddressFields({
   onChange: (address: StructuredAddress) => void;
 }) {
   const setField = (field: keyof StructuredAddress) => (value: string) => {
-    onChange({ ...address, [field]: value });
+    onChange({ ...address, [field] });
   };
 
   return (
@@ -1008,18 +1028,18 @@ export default function OrdersMap() {
               <InlineStack align="space-between">
                 <BlockStack gap="100">
                   <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Click delivery pins to build a route, then select a driver, optimise and save the draft.</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">Click delivery or return pins to build a route, then select a driver, optimise and save the draft.</Text>
                   {!addressLookupEnabled ? <Text as="p" variant="bodySm" tone="critical">Address lookup credentials are not set up. Add them in Settings before testing new manual or custom addresses.</Text> : null}
                   {!routexlEnabled ? <Text as="p" variant="bodySm" tone="critical">RouteXL is not enabled yet. Add RouteXL credentials before using live planning optimisation.</Text> : null}
                   {actionData && "error" in actionData ? <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text> : null}
                 </BlockStack>
-                <Badge tone="info">{allOrders.length} orders</Badge>
+                <Badge tone="info">{allOrders.length} stops</Badge>
               </InlineStack>
             </Box>
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
               {allOrders.length === 0 ? (
-                <EmptyState heading="No matching delivery orders found" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>No orders matched the current delivery filters.</p></EmptyState>
+                <EmptyState heading="No matching delivery or return stops found" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>No stops matched the current planning filters.</p></EmptyState>
               ) : (
                 <DeliveryMap
                   orders={allOrders}
@@ -1034,7 +1054,7 @@ export default function OrdersMap() {
                   returnToBase={returnToBase}
                   fulfilmentWindowDays={fulfilmentWindowDays}
                   onToggleOrder={toggleOrder}
-                   tomtomApiKey={tomtomApiKey}
+                  tomtomApiKey={tomtomApiKey}
                 />
               )}
             </Box>
