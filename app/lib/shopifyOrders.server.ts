@@ -99,14 +99,12 @@ export type DeliveryOrder = {
   hasManualOverride: boolean;
   manualAddress: string | null;
   manualAddressNotes: string | null;
-  orderSource?: "shopify" | "manual" | "return";
-  isReturnCollection?: boolean;
+  orderSource?: "shopify" | "manual";
   routeAllocation?: RouteAllocation | null;
   isRedelivery?: boolean;
   redeliveryReason?: string | null;
   redeliveryRouteName?: string | null;
   redeliveryAttemptedAt?: string | null;
-  returnRequestedAt?: string | null;
 };
 
 export type ManualDeliveryOrderInput = {
@@ -122,234 +120,525 @@ function normalise(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
 
-function customerName(order: ShopifyOrderNode) {
-  const firstName = order.customer?.firstName || "";
-  const lastName = order.customer?.lastName || "";
-  const fromCustomer = `${firstName} ${lastName}`.trim();
-  const fromAddress = order.shippingAddress?.name || "";
-
-  return fromCustomer || fromAddress || "Customer";
+function shippingTitle(order: ShopifyOrderNode) {
+  return order.shippingLines.edges.map((edge) => edge.node.title).join(", ");
 }
 
-function shippingMethod(order: ShopifyOrderNode) {
-  return order.shippingLines.edges.map((edge) => edge.node.title).filter(Boolean).join(", ") || "No shipping method";
+function isPickupOrCollectionOrder(order: ShopifyOrderNode) {
+  const title = normalise(shippingTitle(order));
+
+  return (
+    !order.shippingAddress ||
+    title.includes("pickup") ||
+    title.includes("pick up") ||
+    title.includes("collection") ||
+    title.includes("click and collect") ||
+    title.includes("collect in store") ||
+    title.includes("customer collect")
+  );
 }
 
-function formatAddress(order: ShopifyOrderNode) {
-  const address = order.shippingAddress;
-  if (!address) return "No delivery address";
-  return [address.address1, address.address2, address.city, address.province, address.zip, address.country]
-    .filter(Boolean)
-    .join(", ");
+function isFulfilled(order: ShopifyOrderNode) {
+  return normalise(order.displayFulfillmentStatus) === "fulfilled";
 }
 
-function hasDeliveryAddress(order: ShopifyOrderNode) {
-  const address = order.shippingAddress;
-  return Boolean(address?.address1 && address?.city && address?.zip);
+function isFullyRefunded(order: ShopifyOrderNode) {
+  return normalise(order.displayFinancialStatus) === "refunded";
+}
+
+function isSampleLineItem(item: ShopifyLineItem) {
+  const title = normalise(item.title);
+  const sku = normalise(item.sku);
+  const productType = normalise(item.product?.productType);
+  const tags = item.product?.tags.map(normalise) || [];
+
+  return (
+    productType === "pvc panel sample" ||
+    productType.includes("sample") ||
+    title.includes("sample") ||
+    sku.includes("samp") ||
+    tags.includes("sample")
+  );
+}
+
+function isPanelLineItem(item: ShopifyLineItem) {
+  return normalise(item.product?.productType) === "pvc panel" && !isSampleLineItem(item);
 }
 
 function lineItems(order: ShopifyOrderNode) {
   return order.lineItems.edges.map((edge) => edge.node);
 }
 
-function lineItemSummary(order: ShopifyOrderNode) {
-  return lineItems(order)
-    .map((item) => `${item.quantity} × ${item.title}${item.sku ? ` (${item.sku})` : ""}`)
+function quantityLine(quantity: number, title: string) {
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+  return `${safeQuantity} × ${title}`;
+}
+
+function normaliseStoredLineItemLine(line: string) {
+  const cleanLine = line.replace(/\s+/g, " ").trim();
+
+  if (!cleanLine) {
+    return "";
+  }
+
+  const leadingQuantity = cleanLine.match(/^(\d+)(?:\s*[x×]\s+)(.+)$/i);
+  if (leadingQuantity) {
+    return quantityLine(Number(leadingQuantity[1]), leadingQuantity[2].trim());
+  }
+
+  const trailingQuantity = cleanLine.match(/^(.+?)(?:\s+[x×]\s*)(\d+)$/i);
+  if (trailingQuantity) {
+    return quantityLine(Number(trailingQuantity[2]), trailingQuantity[1].trim());
+  }
+
+  return quantityLine(1, cleanLine);
+}
+
+function normaliseStoredLineItemLines(summary: string) {
+  return summary
+    .split(/,|\n/)
+    .map(normaliseStoredLineItemLine)
+    .filter(Boolean);
+}
+
+function lineItemLines(items: ShopifyLineItem[]) {
+  return items.map((item) => quantityLine(Number(item.quantity || 1), item.title));
+}
+
+function getCustomerName(order: ShopifyOrderNode) {
+  const firstName = order.customer?.firstName || "";
+  const lastName = order.customer?.lastName || "";
+  const fromCustomer = `${firstName} ${lastName}`.trim();
+  const fromAddress = order.shippingAddress?.name || "";
+  return fromCustomer || fromAddress || "Customer";
+}
+
+function formatAddress(order: ShopifyOrderNode) {
+  const address = order.shippingAddress;
+  if (!address) return "No delivery address";
+
+  return [address.address1, address.address2, address.city, address.province, address.zip, address.country]
+    .filter(Boolean)
     .join(", ");
 }
 
-function lineItemLines(order: ShopifyOrderNode) {
-  return lineItems(order).map((item) => `${item.quantity} × ${item.title}${item.sku ? ` (${item.sku})` : ""}`);
+function extractPostcode(value: string) {
+  const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
+  return match?.[0]?.toUpperCase() || "";
 }
 
-function hasPanel(order: ShopifyOrderNode) {
-  return lineItems(order).some((item) => {
-    const productType = normalise(item.product?.productType);
-    const title = normalise(item.title);
-    const tags = (item.product?.tags || []).map(normalise);
+function manualOrderReference(input: ManualDeliveryOrderInput) {
+  const suppliedId = input.id?.trim();
 
-    return productType.includes("panel") || title.includes("panel") || tags.some((tag) => tag.includes("panel"));
-  });
-}
-
-function isSampleOnly(order: ShopifyOrderNode) {
-  const items = lineItems(order);
-
-  if (!items.length) {
-    return false;
+  if (suppliedId) {
+    return suppliedId.startsWith("manual:") ? suppliedId : `manual:${suppliedId}`;
   }
 
-  return items.every((item) => {
-    const title = normalise(item.title);
-    const productType = normalise(item.product?.productType);
-    const tags = (item.product?.tags || []).map(normalise);
+  const seed = `${input.customerName}-${input.address}-${input.lineItemSummary}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 44) || "order";
 
-    return title.includes("sample") || productType.includes("sample") || tags.some((tag) => tag.includes("sample"));
-  });
+  return `manual:${seed}-${Date.now()}`;
 }
 
-function isCollectionOrder(order: ShopifyOrderNode) {
-  const shipping = normalise(shippingMethod(order));
-  return shipping.includes("collection") || shipping.includes("pickup") || shipping.includes("pick up");
+function manualOrderNumber(reference: string) {
+  return reference.replace("manual:", "MANUAL-").toUpperCase();
 }
 
-function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
-  if (order.cancelledAt) return false;
-  if (order.displayFulfillmentStatus === "FULFILLED") return false;
-  if (order.displayFinancialStatus === "REFUNDED" || order.displayFinancialStatus === "VOIDED") return false;
-  if (!hasPanel(order)) return false;
-  if (isSampleOnly(order)) return false;
-  if (isCollectionOrder(order)) return false;
-  return true;
+function allocationLine(allocation: RouteAllocation) {
+  return `Already allocated to ${allocation.routeName}${allocation.driverName ? ` with ${allocation.driverName}` : ""}`;
 }
 
-function overrideAddressSummary(override: AddressOverride) {
-  return override.manualAddress;
+function redeliveryLine(reason?: string | null) {
+  return `🔴 Redeliver${reason ? `, ${reason}` : ""}`;
 }
 
-function addressStatus(order: ShopifyOrderNode, override: AddressOverride | null): DeliveryOrder["addressStatus"] {
-  if (override?.latitude && override.longitude) return "READY";
-  if (override?.manualAddress) return "NEEDS_LOCATION_CHECK";
-  if (!hasDeliveryAddress(order)) return "NEEDS_ADDRESS";
-  return "NEEDS_LOCATION_CHECK";
-}
-
-function addressConfidence(latitude: number | null, longitude: number | null): DeliveryOrder["addressConfidence"] {
-  return typeof latitude === "number" && typeof longitude === "number" ? "HIGH" : "LOW";
-}
-
-async function toDeliveryOrder(order: ShopifyOrderNode, override: AddressOverride | null, routeAllocation: RouteAllocation | null): Promise<DeliveryOrder> {
-  const addressSummary = override ? overrideAddressSummary(override) : formatAddress(order);
-  const postcode = override?.postcode || order.shippingAddress?.zip || null;
-  const lookup = !override && hasDeliveryAddress(order) ? await lookupAddress(postcode, addressSummary) : null;
-  const latitude = override?.latitude ?? lookup?.latitude ?? null;
-  const longitude = override?.longitude ?? lookup?.longitude ?? null;
-  const formattedAddress = override?.manualAddress || lookup?.formattedAddress || addressSummary;
-  const sourceAddressStatus = addressStatus(order, override);
-  const status = typeof latitude === "number" && typeof longitude === "number" ? "READY" : sourceAddressStatus;
+function applyRouteAllocation(order: DeliveryOrder, allocation: RouteAllocation | undefined): DeliveryOrder {
+  if (!allocation) return order;
 
   return {
-    id: order.id,
-    name: order.name,
-    createdAt: order.createdAt,
-    customerName: customerName(order),
-    email: order.email || order.customer?.email || null,
-    phone: order.phone || order.shippingAddress?.phone || order.customer?.phone || null,
-    shippingMethod: shippingMethod(order),
-    fulfilmentStatus: order.displayFulfillmentStatus,
-    financialStatus: order.displayFinancialStatus,
-    postcode,
-    addressSummary,
-    formattedAddress,
-    hasDeliveryAddress: hasDeliveryAddress(order),
-    hasPanel: hasPanel(order),
-    isSampleOnly: isSampleOnly(order),
-    addressStatus: status,
-    addressConfidence: addressConfidence(latitude, longitude),
-    latitude,
-    longitude,
-    lineItemSummary: lineItemSummary(order),
-    lineItemLines: lineItemLines(order),
-    hasManualOverride: Boolean(override),
-    manualAddress: override?.manualAddress || null,
-    manualAddressNotes: override?.notes || null,
-    orderSource: "shopify",
-    routeAllocation,
+    ...order,
+    routeAllocation: allocation,
+    lineItemLines: [allocationLine(allocation), ...order.lineItemLines],
   };
 }
 
-export async function getDeliveryOrders(admin: ShopifyAdmin) {
-  const allOrders: ShopifyOrderNode[] = [];
-  let cursor: string | null = null;
-  let hasNextPage = true;
+function applyRedeliveryFlag(order: DeliveryOrder, redelivery: DeliveryOrder | undefined): DeliveryOrder {
+  if (!redelivery) return order;
 
-  while (hasNextPage) {
-    const response = await admin.graphql(`#graphql
-      query DeliveryOrders($cursor: String) {
-        orders(first: 50, after: $cursor, sortKey: CREATED_AT, reverse: true) {
-          pageInfo { hasNextPage endCursor }
-          edges {
-            node {
-              id
-              name
-              createdAt
-              cancelledAt
-              displayFulfillmentStatus
-              displayFinancialStatus
-              email
-              phone
-              customer { firstName lastName email phone }
-              shippingAddress { name address1 address2 city province zip country phone }
-              shippingLines(first: 5) { edges { node { title } } }
-              lineItems(first: 100) { edges { node { title quantity sku product { productType tags } } } }
+  const redeliveryMarker = redeliveryLine(redelivery.redeliveryReason);
+  const lineItemLines = order.lineItemLines.some((line) => line.includes("Redeliver"))
+    ? order.lineItemLines
+    : [redeliveryMarker, ...order.lineItemLines];
+
+  return {
+    ...order,
+    isRedelivery: true,
+    redeliveryReason: redelivery.redeliveryReason,
+    redeliveryRouteName: redelivery.redeliveryRouteName,
+    redeliveryAttemptedAt: redelivery.redeliveryAttemptedAt,
+    lineItemLines,
+  };
+}
+
+function applyOverride(order: DeliveryOrder, override: AddressOverride | undefined): DeliveryOrder {
+  if (!override) return order;
+
+  return {
+    ...order,
+    postcode: override.postcode || order.postcode,
+    addressSummary: override.manualAddress,
+    formattedAddress: override.manualAddress,
+    addressStatus: override.latitude && override.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: override.latitude && override.longitude ? "HIGH" : "LOW",
+    latitude: override.latitude,
+    longitude: override.longitude,
+    hasManualOverride: true,
+    manualAddress: override.manualAddress,
+    manualAddressNotes: override.notes,
+  };
+}
+
+function failedDeliveryReason(note?: string | null) {
+  const cleanNote = (note || "").trim();
+  const prefix = "Failed delivery,";
+
+  if (!cleanNote) {
+    return "Missed delivery";
+  }
+
+  if (!cleanNote.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return cleanNote;
+  }
+
+  return cleanNote.slice(prefix.length).trim().split(".")[0]?.trim() || "Missed delivery";
+}
+
+export function shouldShowOnDeliveryMap(order: ShopifyOrderNode) {
+  const items = lineItems(order);
+  const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
+
+  if (order.cancelledAt) return false;
+  if (isFullyRefunded(order)) return false;
+  if (isFulfilled(order)) return false;
+  if (isSampleOnly) return false;
+  if (isPickupOrCollectionOrder(order)) return false;
+
+  return true;
+}
+
+export async function toDeliveryOrder(order: ShopifyOrderNode, override?: AddressOverride): Promise<DeliveryOrder> {
+  const items = lineItems(order);
+  const itemLines = lineItemLines(items);
+  const hasPanel = items.some(isPanelLineItem);
+  const isSampleOnly = items.length > 0 && items.every(isSampleLineItem);
+  const shippingMethod = shippingTitle(order);
+  const hasDeliveryAddress = Boolean(order.shippingAddress);
+  const addressSummary = formatAddress(order);
+  const lookup = hasDeliveryAddress && !override ? await lookupAddress(order.shippingAddress?.zip || null, addressSummary) : null;
+  const lookupHasCoordinates = Boolean(lookup?.latitude && lookup?.longitude);
+
+  const deliveryOrder: DeliveryOrder = {
+    id: order.id,
+    name: order.name,
+    createdAt: order.createdAt,
+    customerName: getCustomerName(order),
+    email: order.email || order.customer?.email || null,
+    phone: order.phone || order.shippingAddress?.phone || order.customer?.phone || null,
+    shippingMethod,
+    fulfilmentStatus: order.displayFulfillmentStatus,
+    financialStatus: order.displayFinancialStatus,
+    postcode: order.shippingAddress?.zip || null,
+    addressSummary,
+    formattedAddress: lookup?.formattedAddress || null,
+    hasDeliveryAddress,
+    hasPanel,
+    isSampleOnly,
+    addressStatus: !hasDeliveryAddress ? "NEEDS_ADDRESS" : lookupHasCoordinates ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: lookupHasCoordinates ? "HIGH" : lookup?.confidence || "LOW",
+    latitude: lookup?.latitude || null,
+    longitude: lookup?.longitude || null,
+    lineItemSummary: itemLines.join(", "),
+    lineItemLines: itemLines,
+    fulfilByDate: null,
+    hasManualOverride: false,
+    manualAddress: null,
+    manualAddressNotes: null,
+    orderSource: "shopify",
+    routeAllocation: null,
+  };
+
+  return applyOverride(deliveryOrder, override);
+}
+
+export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Promise<DeliveryOrder> {
+  const customerName = input.customerName.trim() || "Manual customer";
+  const addressSummary = input.address.trim();
+  const lookup = await lookupAddress(extractPostcode(addressSummary), addressSummary);
+  const reference = manualOrderReference(input);
+  const lineItemLines = normaliseStoredLineItemLines(input.lineItemSummary);
+  const lineItemSummary = lineItemLines.join(", ");
+
+  return {
+    id: reference,
+    name: manualOrderNumber(reference),
+    createdAt: new Date().toISOString(),
+    customerName,
+    email: input.email?.trim() || null,
+    phone: input.phone?.trim() || null,
+    shippingMethod: "Manual route entry",
+    fulfilmentStatus: "unfulfilled",
+    financialStatus: "manual",
+    postcode: lookup.postcode || extractPostcode(addressSummary) || null,
+    addressSummary,
+    formattedAddress: lookup.formattedAddress || addressSummary,
+    hasDeliveryAddress: Boolean(addressSummary),
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: lookup.latitude && lookup.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: lookup.latitude && lookup.longitude ? "HIGH" : lookup.confidence,
+    latitude: lookup.latitude,
+    longitude: lookup.longitude,
+    lineItemSummary,
+    lineItemLines,
+    fulfilByDate: null,
+    hasManualOverride: true,
+    manualAddress: addressSummary,
+    manualAddressNotes: "Manual order added from the planning map",
+    orderSource: "manual",
+    routeAllocation: null,
+  };
+}
+
+function failedStopForOrderStop(orderStop: Awaited<ReturnType<typeof getFailedRedeliveryOrderStops>>[number]) {
+  return orderStop.deliveryGroup.stops
+    .filter((stop) => stop.status === "FAILED")
+    .sort((a, b) => new Date(b.actualArrival || b.updatedAt).getTime() - new Date(a.actualArrival || a.updatedAt).getTime())[0];
+}
+
+function toRedeliveryOrder(orderStop: Awaited<ReturnType<typeof getFailedRedeliveryOrderStops>>[number]): DeliveryOrder | null {
+  const group = orderStop.deliveryGroup;
+  const failedStop = failedStopForOrderStop(orderStop);
+
+  if (!failedStop) {
+    return null;
+  }
+
+  const reason = failedDeliveryReason(group.deliveryNote || group.safePlaceNote);
+  const lineItemLines = normaliseStoredLineItemLines(orderStop.lineItemSummary || "");
+  const lineItemSummary = lineItemLines.join(", ") || "1 × Redelivery required";
+
+  return {
+    id: orderStop.shopifyOrderId,
+    name: orderStop.shopifyOrderNumber,
+    createdAt: (failedStop.actualArrival || orderStop.createdAt).toISOString(),
+    customerName: orderStop.customerName || "Customer",
+    email: orderStop.customerEmail,
+    phone: orderStop.customerPhone,
+    shippingMethod: "Redelivery required",
+    fulfilmentStatus: "redelivery_required",
+    financialStatus: "paid",
+    postcode: group.postcode || orderStop.postcode,
+    addressSummary: group.formattedAddress || group.manualAddress || group.address,
+    formattedAddress: group.formattedAddress || group.manualAddress || group.address,
+    hasDeliveryAddress: true,
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: group.latitude && group.longitude ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: group.latitude && group.longitude ? "HIGH" : "LOW",
+    latitude: group.latitude,
+    longitude: group.longitude,
+    lineItemSummary,
+    lineItemLines: [redeliveryLine(reason), ...(lineItemLines.length ? lineItemLines : [lineItemSummary])],
+    fulfilByDate: null,
+    hasManualOverride: group.useManualAddress,
+    manualAddress: group.manualAddress,
+    manualAddressNotes: group.useManualAddress ? "Redelivery from missed POD" : null,
+    orderSource: orderStop.orderSource === "manual" ? "manual" : "shopify",
+    routeAllocation: null,
+    isRedelivery: true,
+    redeliveryReason: reason,
+    redeliveryRouteName: failedStop.route.name,
+    redeliveryAttemptedAt: failedStop.actualArrival?.toISOString() || null,
+  };
+}
+
+async function getFailedRedeliveryOrderStops() {
+  return prisma.orderStop.findMany({
+    where: {
+      deliveryGroup: {
+        stops: {
+          some: {
+            status: "FAILED",
+          },
+        },
+      },
+    },
+    include: {
+      deliveryGroup: {
+        include: {
+          stops: {
+            include: {
+              route: true,
+            },
+          },
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  });
+}
+
+async function getFailedRedeliveryOrders() {
+  const failedOrderStops = await getFailedRedeliveryOrderStops();
+  const orderIds = [...new Set(failedOrderStops.map((orderStop) => orderStop.shopifyOrderId))];
+
+  if (!orderIds.length) {
+    return [];
+  }
+
+  const deliveredOrderStops = await prisma.orderStop.findMany({
+    where: {
+      shopifyOrderId: {
+        in: orderIds,
+      },
+      deliveryGroup: {
+        stops: {
+          some: {
+            status: "DELIVERED",
+          },
+        },
+      },
+    },
+    select: {
+      shopifyOrderId: true,
+    },
+  });
+  const deliveredOrderIds = new Set(deliveredOrderStops.map((orderStop) => orderStop.shopifyOrderId));
+  const redeliveryByOrderId = new Map<string, DeliveryOrder>();
+
+  for (const orderStop of failedOrderStops) {
+    if (deliveredOrderIds.has(orderStop.shopifyOrderId)) {
+      continue;
+    }
+
+    const redeliveryOrder = toRedeliveryOrder(orderStop);
+
+    if (redeliveryOrder && !redeliveryByOrderId.has(redeliveryOrder.id)) {
+      redeliveryByOrderId.set(redeliveryOrder.id, redeliveryOrder);
+    }
+  }
+
+  return [...redeliveryByOrderId.values()];
+}
+
+const DELIVERY_ORDERS_QUERY = `#graphql
+  query DeliveryOrders($query: String!, $cursor: String) {
+    orders(first: 100, after: $cursor, sortKey: CREATED_AT, reverse: true, query: $query) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      edges {
+        node {
+          id
+          name
+          createdAt
+          cancelledAt
+          displayFulfillmentStatus
+          displayFinancialStatus
+          email
+          phone
+          customer {
+            firstName
+            lastName
+            email
+            phone
+          }
+          shippingAddress {
+            name
+            address1
+            address2
+            city
+            province
+            zip
+            country
+            phone
+          }
+          shippingLines(first: 5) {
+            edges {
+              node {
+                title
+              }
+            }
+          }
+          lineItems(first: 100) {
+            edges {
+              node {
+                title
+                quantity
+                sku
+                product {
+                  productType
+                  tags
+                }
+              }
             }
           }
         }
       }
-    `, { variables: { cursor } });
-
-    const payload = await response.json() as DeliveryOrdersPayload;
-    if (payload.errors?.length) {
-      throw new Error(payload.errors.map((error) => error.message).join(", "));
     }
-
-    const pageOrders = payload.data?.orders?.edges.map((edge) => edge.node) || [];
-    allOrders.push(...pageOrders);
-    hasNextPage = Boolean(payload.data?.orders?.pageInfo.hasNextPage);
-    cursor = payload.data?.orders?.pageInfo.endCursor || null;
   }
+`;
 
-  const visibleOrders = allOrders.filter(shouldShowOnDeliveryMap);
-  const [overridesByOrderId, allocationsByOrderId] = await Promise.all([
-    getAddressOverridesByOrderId(visibleOrders.map((order) => order.id)),
-    getActiveRouteAllocations(visibleOrders.map((order) => order.id)),
-  ]);
-
-  const orders = await Promise.all(visibleOrders.map((order) => toDeliveryOrder(
-    order,
-    overridesByOrderId.get(order.id) || null,
-    allocationsByOrderId.get(order.id) || null,
-  )));
-
-  return orders.filter((order) => !order.routeAllocation);
+async function fetchDeliveryOrderPage(admin: ShopifyAdmin, query: string, cursor: string | null) {
+  const response = await admin.graphql(DELIVERY_ORDERS_QUERY, { variables: { query, cursor } });
+  const payload = await response.json() as DeliveryOrdersPayload;
+  if (payload.errors?.length) throw new Error(payload.errors.map((error) => error.message).join(", "));
+  return payload.data?.orders;
 }
 
-export async function toManualDeliveryOrder(input: ManualDeliveryOrderInput): Promise<DeliveryOrder> {
-  const address = input.address.trim();
-  const postcodeMatch = address.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
-  const postcode = postcodeMatch?.[0]?.toUpperCase() || null;
-  const lookup = await lookupAddress(postcode, address);
-  const latitude = lookup.latitude;
-  const longitude = lookup.longitude;
-  const formattedAddress = lookup.formattedAddress || address;
-  const hasCoordinates = typeof latitude === "number" && typeof longitude === "number";
+export async function getDeliveryOrders(admin: ShopifyAdmin) {
+  const query = "status:open";
+  const orders: ShopifyOrderNode[] = [];
+  let cursor: string | null = null;
+  let page = 0;
 
-  return {
-    id: input.id || `manual:${Date.now()}`,
-    name: input.id ? input.id.replace("manual:", "MANUAL-").toUpperCase() : "MANUAL",
-    createdAt: new Date().toISOString(),
-    customerName: input.customerName,
-    email: input.email || null,
-    phone: input.phone || null,
-    shippingMethod: "Manual route entry",
-    fulfilmentStatus: "manual",
-    financialStatus: "manual",
-    postcode,
-    addressSummary: address,
-    formattedAddress,
-    hasDeliveryAddress: true,
-    hasPanel: true,
-    isSampleOnly: false,
-    addressStatus: hasCoordinates ? "READY" : "NEEDS_LOCATION_CHECK",
-    addressConfidence: hasCoordinates ? "HIGH" : "LOW",
-    latitude,
-    longitude,
-    lineItemSummary: input.lineItemSummary,
-    lineItemLines: input.lineItemSummary.split("\n").map((line) => line.trim()).filter(Boolean),
-    fulfilByDate: null,
-    hasManualOverride: true,
-    manualAddress: address,
-    manualAddressNotes: "Manual order added from the planning map",
-    orderSource: "manual",
-  };
+  do {
+    const result = await fetchDeliveryOrderPage(admin, query, cursor);
+    if (!result) break;
+    orders.push(...result.edges.map((edge) => edge.node));
+    cursor = result.pageInfo.hasNextPage ? result.pageInfo.endCursor : null;
+    page += 1;
+  } while (cursor && page < 10);
+
+  const filteredOrders = orders.filter(shouldShowOnDeliveryMap);
+  const [overrides, redeliveryOrders] = await Promise.all([
+    getAddressOverridesByOrderId(),
+    getFailedRedeliveryOrders(),
+  ]);
+  const deliveryOrders = await Promise.all(filteredOrders.map((order) => toDeliveryOrder(order, overrides.get(order.id))));
+  const redeliveryOrdersById = new Map(redeliveryOrders.map((order) => [order.id, order]));
+  const mergedOrdersById = new Map<string, DeliveryOrder>();
+
+  for (const order of deliveryOrders) {
+    mergedOrdersById.set(order.id, applyRedeliveryFlag(order, redeliveryOrdersById.get(order.id)));
+  }
+
+  for (const redeliveryOrder of redeliveryOrders) {
+    if (!mergedOrdersById.has(redeliveryOrder.id)) {
+      mergedOrdersById.set(redeliveryOrder.id, redeliveryOrder);
+    }
+  }
+
+  const mergedOrders = [...mergedOrdersById.values()];
+  const allocations = await getActiveRouteAllocations(mergedOrders.map((order) => order.id));
+
+  return mergedOrders
+    .filter((order) => !allocations.has(order.id))
+    .map((order) => applyRouteAllocation(order, allocations.get(order.id)));
 }

@@ -88,10 +88,6 @@ function normalisedPoints(points: RouteMapPoint[]): MappablePoint[] {
   ));
 }
 
-function isReturnCollectionPoint(point: RouteMapPoint) {
-  return point.status === "RETURN_COLLECTION" || point.id.startsWith("return:");
-}
-
 function cleanPinLabel(point: RouteMapPoint, fallback: number) {
   const cleaned = point.label.trim().replace("#", "");
 
@@ -115,17 +111,6 @@ function tooltipLinesForPoint(point: RouteMapPoint) {
     .split("·")
     .map((part) => part.trim())
     .filter(Boolean);
-}
-
-function returnCollectionTooltipLine(point: RouteMapPoint, line: string) {
-  if (!isReturnCollectionPoint(point)) {
-    return line;
-  }
-
-  return line
-    .replace(/^Ordered:/i, "Original order:")
-    .replace(/^[\s🟢🔵🟠🔴⚪]*Fulfil by:/i, "Return requested:")
-    .replace(/^[\s🟢🔵🟠🔴⚪]*Fulfil by/i, "Return requested");
 }
 
 function localDateOnly(date: Date) {
@@ -225,7 +210,7 @@ function tooltipToneForLine(line: string): TooltipTone {
   const lower = line.toLowerCase();
   const fulfilmentTone = fulfilmentToneFromLine(line);
 
-  if (lower.includes("redeliver") || lower.includes("collection") || lower.includes("return requested")) {
+  if (lower.includes("redeliver")) {
     return "critical";
   }
 
@@ -274,7 +259,7 @@ function tooltipLineHtml(line: string, index: number) {
 }
 
 function tooltipHtml(point: RouteMapPoint) {
-  const lines = tooltipLinesForPoint(point).map((line) => returnCollectionTooltipLine(point, line));
+  const lines = tooltipLinesForPoint(point);
   const heading = point.tooltipTitle || lines[0] || point.title || point.label;
   const bodyLines = point.tooltipTitle ? lines : lines.slice(1);
 
@@ -285,10 +270,6 @@ function tooltipHtml(point: RouteMapPoint) {
 }
 
 function markerColour(point: RouteMapPoint) {
-  if (isReturnCollectionPoint(point)) {
-    return "#b42318";
-  }
-
   if (point.status === "DELIVERED" || point.status === "COLLECTED") {
     return "#16a34a";
   }
