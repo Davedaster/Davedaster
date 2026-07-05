@@ -613,16 +613,24 @@ function orderItemLines(order: DeliveryOrder) {
 function orderMapTooltip(order: DeliveryOrder, heading: string, fulfilmentWindowDays: number) {
   const isReturn = order.orderSource === "return";
   const fulfilmentDot = fulfilmentHoverDot(order.fulfilByDate, fulfilmentWindowDays);
-
-  return {
-    tooltipTitle: heading,
-    tooltipLines: [
-      `${isReturn ? "Return requested" : "Ordered"}: ${formatOrderDate(order.createdAt)}`,
-      isReturn ? "Type: Return" : `${fulfilmentDot} Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
+  const tooltipLines = isReturn
+    ? [
+      `Return started: ${formatOrderDate(order.createdAt)}`,
       `Postcode: ${order.postcode || "No postcode"}`,
       "Items:",
       ...orderItemLines(order),
-    ],
+    ]
+    : [
+      `Ordered: ${formatOrderDate(order.createdAt)}`,
+      `${fulfilmentDot} Fulfil by: ${formatOrderDate(order.fulfilByDate)}`,
+      `Postcode: ${order.postcode || "No postcode"}`,
+      "Items:",
+      ...orderItemLines(order),
+    ];
+
+  return {
+    tooltipTitle: heading,
+    tooltipLines,
   };
 }
 
@@ -663,6 +671,7 @@ function DeliveryMap({
     .map((id) => ordersById.get(id))
     .filter((order): order is DeliveryOrder => Boolean(order) && hasCoordinates(order))
     .map((order, index) => {
+      const isReturn = order.orderSource === "return";
       const heading = `${index + 1}. ${order.name} · ${order.customerName}`;
 
       return {
@@ -672,6 +681,7 @@ function DeliveryMap({
         latitude: order.latitude,
         longitude: order.longitude,
         selected: true,
+        status: isReturn ? "FAILED" : undefined,
         ...orderMapTooltip(order, heading, fulfilmentWindowDays),
       };
     });
@@ -683,11 +693,12 @@ function DeliveryMap({
 
       return {
         id: order.id,
-        label: isReturn ? "RET" : order.name.replace("#", ""),
+        label: order.name.replace("#", ""),
         title: `${heading} · ${order.postcode || "No postcode"}`,
         latitude: order.latitude,
         longitude: order.longitude,
         selected: selectedIds.has(order.id),
+        status: isReturn ? "FAILED" : undefined,
         ...orderMapTooltip(order, heading, fulfilmentWindowDays),
       };
     });
