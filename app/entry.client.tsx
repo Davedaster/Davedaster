@@ -119,8 +119,8 @@ function simplifyExistingRouteSummary() {
   hideElement(routeDetailLine);
 
   const badge = findOptimisationBadge();
-  if (badge && cleanText(badge) === "Optimised") {
-    setText(badge, "⚡ Optimised");
+  if (badge && cleanText(badge) === "⚡ Optimised") {
+    setText(badge, "Optimised");
   }
 }
 
