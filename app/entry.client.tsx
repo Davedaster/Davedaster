@@ -23,18 +23,6 @@ type TomTomRoutePayload = {
   }>;
 };
 
-function formatDuration(minutes: number) {
-  const rounded = Math.max(0, Math.round(minutes));
-  const hours = Math.floor(rounded / 60);
-  const mins = rounded % 60;
-
-  if (!hours) {
-    return `${mins} min`;
-  }
-
-  return `${hours} hr ${mins} min`;
-}
-
 function formatEta(startTime: string, offsetMinutes: number) {
   const [hours = "0", minutes = "0"] = startTime.split(":");
   const startMinutes = Number(hours) * 60 + Number(minutes);
@@ -72,48 +60,71 @@ function currentSelectedStopCount() {
   return selectedIds.length;
 }
 
-function liveRouteSummaryCard() {
-  let card = document.getElementById("bpd-live-route-summary");
-
-  if (card) {
-    return card;
-  }
-
-  card = document.createElement("div");
-  card.id = "bpd-live-route-summary";
-  card.setAttribute("aria-live", "polite");
-  card.style.border = "1px solid #d0d5dd";
-  card.style.borderRadius = "12px";
-  card.style.padding = "12px";
-  card.style.marginBottom = "12px";
-  card.style.background = "#f0f8ff";
-  card.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)";
-
-  const routePlanningHeading = Array.from(document.querySelectorAll("h3"))
-    .find((heading) => heading.textContent?.trim() === "Route planning");
-  const routePlanningBlock = routePlanningHeading?.parentElement?.parentElement;
-
-  if (routePlanningBlock?.parentElement) {
-    routePlanningBlock.parentElement.insertBefore(card, routePlanningBlock);
-  } else {
-    document.body.appendChild(card);
-  }
-
-  return card;
+function cleanText(element: Element) {
+  return (element.textContent || "").replace(/\s+/g, " ").trim();
 }
 
-function hideLiveRouteSummaryWhenEmpty() {
-  if (currentSelectedStopCount() > 0) {
-    return;
-  }
+function routeSummaryTextElements() {
+  return Array.from(document.querySelectorAll<HTMLElement>("span,p"));
+}
 
-  const card = document.getElementById("bpd-live-route-summary");
-  if (card) {
-    card.hidden = true;
+function findSummaryElement(predicate: (text: string) => boolean) {
+  return routeSummaryTextElements().find((element) => predicate(cleanText(element))) || null;
+}
+
+function findRouteDetailLine() {
+  return Array.from(document.querySelectorAll<HTMLElement>("p")).find((element) => {
+    const text = cleanText(element);
+    return text.startsWith("Route includes return to base") || text.startsWith("Route ends at");
+  }) || null;
+}
+
+function findOptimisationBadge() {
+  return findSummaryElement((text) => text === "Optimised" || text === "⚡ Optimised" || text === "Not optimised");
+}
+
+function currentRouteIsOptimised() {
+  const badgeText = cleanText(findOptimisationBadge() || document.createElement("span"));
+
+  return badgeText === "Optimised" || badgeText === "⚡ Optimised";
+}
+
+function setText(element: HTMLElement | null, value: string) {
+  if (element && cleanText(element) !== value) {
+    element.textContent = value;
   }
 }
 
-async function updateLiveRouteSummaryFromResponse(response: Response, requestUrl: string) {
+function hideElement(element: HTMLElement | null) {
+  if (element && !element.hidden) {
+    element.hidden = true;
+  }
+}
+
+function removeSeparateLiveRouteCard() {
+  document.getElementById("bpd-live-route-summary")?.remove();
+}
+
+function simplifyExistingRouteSummary() {
+  removeSeparateLiveRouteCard();
+
+  const routeDetailLine = findRouteDetailLine();
+  const etaMatch = cleanText(routeDetailLine || document.createElement("p")).match(/Finish ETA:\s*([0-9]{2}:[0-9]{2})/);
+  const finishEtaElement = findSummaryElement((text) => text.startsWith("Complete route time:") || text.startsWith("Finish ETA:"));
+
+  if (etaMatch?.[1]) {
+    setText(finishEtaElement, `Finish ETA: ${etaMatch[1]}`);
+  }
+
+  hideElement(routeDetailLine);
+
+  const badge = findOptimisationBadge();
+  if (badge && cleanText(badge) === "Optimised") {
+    setText(badge, "⚡ Optimised");
+  }
+}
+
+async function updateRouteSummaryFromResponse(response: Response, requestUrl: string) {
   try {
     const payload = await response.clone().json() as TomTomRoutePayload;
     const summary = payload.routes?.[0]?.summary;
@@ -121,6 +132,13 @@ async function updateLiveRouteSummaryFromResponse(response: Response, requestUrl
     const travelTimeInSeconds = summary?.travelTimeInSeconds;
 
     if (typeof lengthInMeters !== "number" || typeof travelTimeInSeconds !== "number") {
+      simplifyExistingRouteSummary();
+      return;
+    }
+
+    simplifyExistingRouteSummary();
+
+    if (currentRouteIsOptimised()) {
       return;
     }
 
@@ -128,28 +146,45 @@ async function updateLiveRouteSummaryFromResponse(response: Response, requestUrl
     const distanceMiles = (lengthInMeters / 1000) * 0.621371;
     const driveMinutes = travelTimeInSeconds / 60;
     const minutesPerDrop = Number(inputValue("timePerDropMinutes")) || 0;
-    const dropMinutes = routeStopCount * minutesPerDrop;
-    const totalMinutes = driveMinutes + dropMinutes;
-    const plannedStartTime = inputValue("plannedStartTime") || "05:00";
-    const returnToBase = inputValue("returnToBase") === "true";
-    const finishLabel = returnToBase ? "Return to base ETA" : "Finish ETA";
-    const routeLabel = returnToBase ? "Includes return to base" : "Ends at finish point";
-    const card = liveRouteSummaryCard();
+    const finishEta = formatEta(inputValue("plannedStartTime") || "05:00", driveMinutes + (routeStopCount * minutesPerDrop));
 
-    card.hidden = false;
-    card.innerHTML = `
-      <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:6px;">
-        <strong style="font-size:13px; color:#323841;">Live TomTom route estimate</strong>
-        <span style="font-size:12px; font-weight:700; color:#509AE6; background:#ffffff; border:1px solid #bfdbfe; border-radius:999px; padding:3px 8px;">Before RouteXL</span>
-      </div>
-      <div style="font-size:13px; color:#323841; line-height:1.45;">
-        ${routeStopCount} stops · ${distanceMiles.toFixed(1)} mi · ${formatDuration(driveMinutes)} driving<br />
-        ${formatDuration(totalMinutes)} including drops · ${finishLabel}: ${formatEta(plannedStartTime, totalMinutes)}
-      </div>
-      <div style="font-size:12px; color:#667085; margin-top:5px;">${routeLabel}. RouteXL can still optimise the order if needed.</div>
-    `;
+    setText(findSummaryElement((text) => text.startsWith("Miles:")), `Miles: ${distanceMiles.toFixed(1)} mi`);
+    setText(findSummaryElement((text) => text.startsWith("Complete route time:") || text.startsWith("Finish ETA:")), `Finish ETA: ${finishEta}`);
+    setText(findOptimisationBadge(), "Not optimised");
+    hideElement(findRouteDetailLine());
   } catch {
-    // If TomTom changes the response shape, leave the normal route map untouched.
+    simplifyExistingRouteSummary();
+  }
+}
+
+function installRouteSummarySimplifier() {
+  let scheduled = false;
+
+  const schedule = () => {
+    if (scheduled) {
+      return;
+    }
+
+    scheduled = true;
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      simplifyExistingRouteSummary();
+    });
+  };
+
+  const start = () => {
+    simplifyExistingRouteSummary();
+    new MutationObserver(schedule).observe(document.body, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  };
+
+  if (document.body) {
+    start();
+  } else {
+    window.addEventListener("DOMContentLoaded", start, { once: true });
   }
 }
 
@@ -210,7 +245,7 @@ function installTomTomRouteLineCache() {
       trimRouteLineCache();
 
       const response = await responsePromise;
-      updateLiveRouteSummaryFromResponse(response.clone(), request.requestUrl);
+      updateRouteSummaryFromResponse(response.clone(), request.requestUrl);
       waitingRequests.forEach(({ resolve }) => resolve(response.clone()));
     } catch (error) {
       waitingRequests.forEach(({ reject }) => reject(error));
@@ -248,7 +283,7 @@ function installTomTomRouteLineCache() {
 
     if (cachedResponse) {
       const response = await cachedResponse;
-      updateLiveRouteSummaryFromResponse(response.clone(), requestUrl);
+      updateRouteSummaryFromResponse(response.clone(), requestUrl);
       return response.clone();
     }
 
@@ -256,7 +291,7 @@ function installTomTomRouteLineCache() {
   };
 
   window.addEventListener("click", () => {
-    window.setTimeout(hideLiveRouteSummaryWhenEmpty, 150);
+    window.setTimeout(simplifyExistingRouteSummary, 150);
   }, true);
 }
 
@@ -266,6 +301,7 @@ declare global {
   }
 }
 
+installRouteSummarySimplifier();
 installTomTomRouteLineCache();
 
 startTransition(() => {
