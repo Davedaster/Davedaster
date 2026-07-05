@@ -90,7 +90,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       return redirect("/app/returns?assigned=1");
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : "Return collection could not be assigned." }, { status: 400 });
+      return json({ ok: false, error: error instanceof Error ? error.message : "Return could not be assigned." }, { status: 400 });
     }
   }
 
@@ -98,7 +98,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const selectedLines = parseSelectedLines(formData.get("selectedLinesJson"));
 
   if (!orderNumber) {
-    return json({ ok: false, error: "Load a Shopify order before creating the return collection." }, { status: 400 });
+    return json({ ok: false, error: "Load a Shopify order before creating the return." }, { status: 400 });
   }
 
   if (!selectedLines.length) {
@@ -115,7 +115,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return redirect("/app/returns?created=1");
   } catch (error) {
-    return json({ ok: false, error: error instanceof Error ? error.message : "Return collection could not be created." }, { status: 400 });
+    return json({ ok: false, error: error instanceof Error ? error.message : "Return could not be created." }, { status: 400 });
   }
 };
 
@@ -184,8 +184,8 @@ function ReturnsPageSummary({ tickets }: { tickets: ReturnTicketForRows[] }) {
   return (
     <InlineStack gap="300">
       <Badge tone="info">{activeCount} active</Badge>
-      <Badge tone="success">{collectedCount} collected</Badge>
-      <Badge tone="critical">{failedCount} not collected</Badge>
+      <Badge tone="success">{collectedCount} returned</Badge>
+      <Badge tone="critical">{failedCount} not returned</Badge>
     </InlineStack>
   );
 }
@@ -293,10 +293,10 @@ export default function ReturnsPage() {
   ]);
 
   return (
-    <Page title="Returns & Collections" subtitle="Load a Shopify order, choose what is coming back and create a return collection" fullWidth>
+    <Page title="Returns" subtitle="Load a Shopify order, choose what is coming back and create a return" fullWidth>
       <Layout>
         <Layout.Section variant="oneThird">
-          <LegacyCard sectioned title="Create return collection">
+          <LegacyCard sectioned title="Create return">
             <BlockStack gap="400">
               {actionData && "error" in actionData ? (
                 <Text as="p" tone="critical">{actionData.error}</Text>
@@ -311,7 +311,7 @@ export default function ReturnsPage() {
                     onChange={setLookupOrderNumber}
                     autoComplete="off"
                     placeholder="Example, #1234"
-                    helpText="This can find fulfilled Shopify orders so return collections still show in the app."
+                    helpText="This can find fulfilled Shopify orders so returns still show in the app."
                   />
                   <Button submit>Load customer order</Button>
                 </BlockStack>
@@ -338,7 +338,7 @@ export default function ReturnsPage() {
                     </Box>
 
                     <BlockStack gap="200">
-                      <Text as="h3" variant="headingSm">Items to collect</Text>
+                      <Text as="h3" variant="headingSm">Items to return</Text>
                       {returnOrder.lineItems.map((line) => {
                         const quantity = quantitiesByItemId[line.id] ?? 0;
                         const maxQuantity = Math.max(0, line.quantity);
@@ -367,7 +367,7 @@ export default function ReturnsPage() {
                     </BlockStack>
 
                     <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
-                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return collection</Button>
+                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return</Button>
                   </BlockStack>
                 </Form>
               ) : null}
@@ -379,11 +379,11 @@ export default function ReturnsPage() {
           <LegacyCard sectioned>
             <BlockStack gap="300">
               <InlineStack align="space-between" blockAlign="center" gap="300">
-                <Text as="h2" variant="headingMd">Search return collections</Text>
+                <Text as="h2" variant="headingMd">Search returns</Text>
                 <ReturnsPageSummary tickets={tickets} />
               </InlineStack>
               <Text as="p" variant="bodySm" tone="subdued">
-                Open return collections can be assigned to draft routes from this page. They will appear on the driver route as collection stops.
+                Open returns can be assigned to draft routes from this page. They will appear on the driver route as return stops.
               </Text>
               <Form method="get">
                 <InlineStack gap="200" blockAlign="end">
@@ -401,7 +401,7 @@ export default function ReturnsPage() {
             </BlockStack>
           </LegacyCard>
 
-          <LegacyCard title="Active return collections">
+          <LegacyCard title="Active returns">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
               headings={["Ticket", "Status", "Order", "Customer", "Postcode", "Items", "Route action", "Requested"]}
@@ -409,10 +409,10 @@ export default function ReturnsPage() {
             />
           </LegacyCard>
 
-          <LegacyCard title="Collection archive">
+          <LegacyCard title="Return archive">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
-              headings={["Ticket", "Status", "Order", "Customer", "Collected items", "Completed", "Proof", "Notes"]}
+              headings={["Ticket", "Status", "Order", "Customer", "Returned items", "Completed", "Proof", "Notes"]}
               rows={archiveRows}
             />
           </LegacyCard>
