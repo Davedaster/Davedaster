@@ -100,6 +100,7 @@ export type DeliveryOrder = {
   manualAddress: string | null;
   manualAddressNotes: string | null;
   orderSource?: "shopify" | "manual" | "return";
+  isReturnCollection?: boolean;
   routeAllocation?: RouteAllocation | null;
   isRedelivery?: boolean;
   redeliveryReason?: string | null;
