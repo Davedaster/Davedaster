@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+
+import prisma from "../db.server";
 import { getAppCredentials } from "./appCredentials.server";
 
 export type AddressLookupResult = {
@@ -61,6 +64,7 @@ type GetAddressFindPayload = {
 };
 
 const TOMTOM_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+const ADDRESS_LOOKUP_CACHE_PREFIX = "address-lookup-cache:";
 let tomTomPausedUntil = 0;
 let tomTomQueue: Promise<void> = Promise.resolve();
 
@@ -115,6 +119,81 @@ function fallbackAddress(postcode: string, searchText: string): AddressLookupRes
     confidence: "LOW",
     source: "none",
   };
+}
+
+function addressLookupCacheKey(postcode: string, searchText: string) {
+  const fingerprint = createHash("sha256")
+    .update(`${postcode.trim().toUpperCase()}|${searchText.replace(/\s+/g, " ").trim().toLowerCase()}`)
+    .digest("hex")
+    .slice(0, 48);
+
+  return `${ADDRESS_LOOKUP_CACHE_PREFIX}${fingerprint}`;
+}
+
+function isAddressLookupResult(value: unknown): value is AddressLookupResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const result = value as Partial<AddressLookupResult>;
+
+  return (
+    typeof result.formattedAddress === "string" &&
+    typeof result.postcode === "string" &&
+    typeof result.latitude === "number" &&
+    typeof result.longitude === "number" &&
+    (result.confidence === "HIGH" || result.confidence === "LOW") &&
+    (result.source === "getaddress" || result.source === "manual" || result.source === "none")
+  );
+}
+
+async function getCachedAddressLookup(cacheKey: string): Promise<AddressLookupResult | null> {
+  try {
+    const setting = await prisma.setting.findUnique({
+      where: {
+        key: cacheKey,
+      },
+    });
+
+    if (!setting?.value) {
+      return null;
+    }
+
+    const parsed = JSON.parse(setting.value) as unknown;
+
+    return isAddressLookupResult(parsed) ? parsed : null;
+  } catch (error) {
+    console.warn("Address lookup cache read failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return null;
+  }
+}
+
+async function saveCachedAddressLookup(cacheKey: string, result: AddressLookupResult) {
+  if (typeof result.latitude !== "number" || typeof result.longitude !== "number") {
+    return;
+  }
+
+  try {
+    await prisma.setting.upsert({
+      where: {
+        key: cacheKey,
+      },
+      create: {
+        key: cacheKey,
+        value: JSON.stringify(result),
+      },
+      update: {
+        value: JSON.stringify(result),
+      },
+    });
+  } catch (error) {
+    console.warn("Address lookup cache write failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function cleanAddressPart(value: string | null | undefined) {
@@ -380,6 +459,13 @@ export async function findAddressesByPostcode(postcode: string): Promise<Postcod
 
 export async function lookupAddress(postcode: string | null, searchText: string): Promise<AddressLookupResult> {
   const cleanPostcode = normalisePostcode(postcode);
+  const cacheKey = addressLookupCacheKey(cleanPostcode, searchText);
+  const cachedResult = await getCachedAddressLookup(cacheKey);
+
+  if (cachedResult) {
+    return cachedResult;
+  }
+
   const queries = buildSearchQueries(cleanPostcode, searchText);
 
   if (!queries.length) {
@@ -395,6 +481,7 @@ export async function lookupAddress(postcode: string | null, searchText: string)
     const tomTomResult = await lookupTomTom(query, cleanPostcode || postcode || "", searchText);
 
     if (tomTomResult) {
+      await saveCachedAddressLookup(cacheKey, tomTomResult);
       return tomTomResult;
     }
   }
@@ -403,6 +490,7 @@ export async function lookupAddress(postcode: string | null, searchText: string)
     const openStreetMapResult = await lookupOpenStreetMap(query, cleanPostcode || postcode || "", searchText);
 
     if (openStreetMapResult) {
+      await saveCachedAddressLookup(cacheKey, openStreetMapResult);
       return openStreetMapResult;
     }
   }
