@@ -120,7 +120,7 @@ export default function ReturnsPage() {
   ]);
 
   return (
-    <Page title="Returns" subtitle="Create return tickets and search by order number, customer name or address" fullWidth>
+    <Page title="Returns & Collections" subtitle="Create return tickets and search by order number, customer name or address" fullWidth>
       <Layout>
         <Layout.Section variant="oneThird">
           <LegacyCard sectioned title="Create return ticket">
