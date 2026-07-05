@@ -255,13 +255,35 @@ function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
 
   return (
     <Form method="post" onSubmit={(event) => {
-      if (!window.confirm("Delete this return? This will remove it from the active return list and planning map.")) {
+      const confirmed = window.confirm([
+        "Delete this return?",
+        "",
+        "This cannot be undone from the app.",
+        "The return will be cancelled and removed from the active returns list and planning map.",
+        "",
+        "Only continue if you are sure.",
+      ].join("\n"));
+
+      if (!confirmed) {
         event.preventDefault();
       }
     }}>
       <input type="hidden" name="intent" value="cancelReturn" />
       <input type="hidden" name="ticketId" value={ticket.id} />
-      <Button submit size="slim" tone="critical">Delete</Button>
+      <button
+        type="submit"
+        style={{
+          border: "1px solid #b42318",
+          background: "#fff7f5",
+          color: "#b42318",
+          borderRadius: 8,
+          padding: "7px 10px",
+          fontWeight: 800,
+          cursor: "pointer",
+        }}
+      >
+        Delete
+      </button>
     </Form>
   );
 }
