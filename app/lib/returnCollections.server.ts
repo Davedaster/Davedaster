@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import prisma from "../db.server";
 import { lookupAddress } from "./getAddress.server";
+import type { DeliveryOrder } from "./shopifyOrders.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -297,11 +298,9 @@ export async function createReturnCollectionFromShopifyOrder(input: CreateReturn
 export async function listOpenReturnCollectionPins(): Promise<ReturnCollectionPlanningPin[]> {
   const tickets = await prisma.returnTicket.findMany({
     where: {
-      status: "OPEN",
-      OR: [
-        { routeId: null, stopId: null },
-        { route: { status: "CANCELLED" } },
-      ],
+      status: {
+        in: ["OPEN", "ASSIGNED"],
+      },
     },
     include: {
       lines: {
@@ -314,23 +313,86 @@ export async function listOpenReturnCollectionPins(): Promise<ReturnCollectionPl
       returnRequestedAt: "desc",
     },
   });
+  const returnOrderIds = tickets.map((ticket) => `return:${ticket.id}`);
+  const allocatedStops = returnOrderIds.length ? await prisma.orderStop.findMany({
+    where: {
+      shopifyOrderId: {
+        in: returnOrderIds,
+      },
+      deliveryGroup: {
+        stops: {
+          some: {
+            route: {
+              status: {
+                not: "CANCELLED",
+              },
+            },
+          },
+        },
+      },
+    },
+    select: {
+      shopifyOrderId: true,
+    },
+  }) : [];
+  const allocatedOrderIds = new Set(allocatedStops.map((stop) => stop.shopifyOrderId));
 
-  return tickets.map((ticket) => ({
-    id: `return:${ticket.id}`,
-    reference: ticket.reference,
-    orderNumber: ticket.orderNumber || ticket.reference,
-    customerName: ticket.customerName,
-    postcode: ticket.postcode,
-    address: ticket.address,
-    latitude: ticket.latitude,
-    longitude: ticket.longitude,
-    originalOrderCreatedAt: ticket.originalOrderCreatedAt?.toISOString() || null,
-    returnRequestedAt: ticket.returnRequestedAt.toISOString(),
-    lines: ticket.lines.map((line) => ({
-      itemName: line.itemName,
-      quantityExpected: line.quantityExpected,
-    })),
-  }));
+  return tickets
+    .filter((ticket) => !allocatedOrderIds.has(`return:${ticket.id}`))
+    .map((ticket) => ({
+      id: `return:${ticket.id}`,
+      reference: ticket.reference,
+      orderNumber: ticket.orderNumber || ticket.reference,
+      customerName: ticket.customerName,
+      postcode: ticket.postcode,
+      address: ticket.address,
+      latitude: ticket.latitude,
+      longitude: ticket.longitude,
+      originalOrderCreatedAt: ticket.originalOrderCreatedAt?.toISOString() || null,
+      returnRequestedAt: ticket.returnRequestedAt.toISOString(),
+      lines: ticket.lines.map((line) => ({
+        itemName: line.itemName,
+        quantityExpected: line.quantityExpected,
+      })),
+    }));
+}
+
+export function returnCollectionPinsToDeliveryOrders(pins: ReturnCollectionPlanningPin[]): DeliveryOrder[] {
+  return pins.map((pin) => {
+    const lineItemLines = pin.lines.map((line) => `${line.quantityExpected} × ${line.itemName}`);
+    const hasCoordinates = typeof pin.latitude === "number" && typeof pin.longitude === "number";
+
+    return {
+      id: pin.id,
+      name: pin.orderNumber,
+      createdAt: pin.originalOrderCreatedAt || pin.returnRequestedAt,
+      customerName: pin.customerName,
+      email: null,
+      phone: null,
+      shippingMethod: "Return collection",
+      fulfilmentStatus: "return",
+      financialStatus: "return",
+      postcode: pin.postcode,
+      addressSummary: pin.address,
+      formattedAddress: pin.address,
+      hasDeliveryAddress: true,
+      hasPanel: true,
+      isSampleOnly: false,
+      addressStatus: hasCoordinates ? "READY" : "NEEDS_LOCATION_CHECK",
+      addressConfidence: hasCoordinates ? "HIGH" : "LOW",
+      latitude: pin.latitude,
+      longitude: pin.longitude,
+      lineItemSummary: lineSummary(pin.lines),
+      lineItemLines,
+      fulfilByDate: pin.returnRequestedAt,
+      hasManualOverride: true,
+      manualAddress: pin.address,
+      manualAddressNotes: "Return collection created from the Returns page",
+      orderSource: "manual",
+      isReturnCollection: true,
+      returnRequestedAt: pin.returnRequestedAt,
+    };
+  });
 }
 
 export async function listCollectedReturnArchive(query = "") {
