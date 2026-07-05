@@ -738,22 +738,6 @@ function DeliveryMap({
   );
 }
 
-function formatDuration(minutes: number | null) {
-  if (minutes === null || !Number.isFinite(minutes)) {
-    return "Pending";
-  }
-
-  const rounded = Math.round(minutes);
-  const hours = Math.floor(rounded / 60);
-  const mins = rounded % 60;
-
-  if (!hours) {
-    return `${mins} min`;
-  }
-
-  return `${hours} hr ${mins} min`;
-}
-
 function OptimiseRouteButton({ onClick, loading, disabled }: { onClick: () => void; loading: boolean; disabled: boolean }) {
   return (
     <Button onClick={onClick} loading={loading} disabled={disabled} variant="primary" tone="critical">
@@ -846,7 +830,6 @@ export default function OrdersMap() {
   const [manualPhone, setManualPhone] = useState("");
   const [manualItems, setManualItems] = useState("");
   const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
-  const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
 
   const defaultStartAddress = defaults.startAddress;
@@ -889,7 +872,6 @@ export default function OrdersMap() {
 
     setStops([...orderedStops, ...missingStops]);
     setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
-    setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
     setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
   }, [optimisationFetcher.data]);
 
@@ -904,7 +886,6 @@ export default function OrdersMap() {
 
   const clearOptimisedStats = () => {
     setRouteDistanceKm(null);
-    setRouteDurationMinutes(null);
     setRouteFinishEta(null);
   };
 
@@ -1031,26 +1012,41 @@ export default function OrdersMap() {
   };
 
   return (
-    <Page title="Orders Map" fullWidth>
+    <Page title="Planning Map" fullWidth>
       <Layout>
         <Layout.Section>
           <LegacyCard>
             <Box padding="400" borderBlockEndWidth="025" borderColor="border">
-              <InlineStack align="space-between">
+              <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
-                  <Text as="h2" variant="headingMd">Ready for own fleet delivery</Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Click delivery or return pins to build a route, then select a driver, optimise and save the draft.</Text>
-                  {!addressLookupEnabled ? <Text as="p" variant="bodySm" tone="critical">Address lookup credentials are not set up. Add them in Settings before testing new manual or custom addresses.</Text> : null}
-                  {!routexlEnabled ? <Text as="p" variant="bodySm" tone="critical">RouteXL is not enabled yet. Add RouteXL credentials before using live planning optimisation.</Text> : null}
-                  {actionData && "error" in actionData ? <Text as="p" variant="bodySm" tone="critical">{actionData.error}</Text> : null}
+                  {!addressLookupEnabled ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      Address lookup credentials are not set up. Add them in Settings before testing new manual or custom addresses.
+                    </Text>
+                  ) : null}
+
+                  {!routexlEnabled ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      RouteXL is not enabled yet. Add RouteXL credentials before using live planning optimisation.
+                    </Text>
+                  ) : null}
+
+                  {actionData && "error" in actionData ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      {actionData.error}
+                    </Text>
+                  ) : null}
                 </BlockStack>
-                <Badge tone="info">{allOrders.length} stops</Badge>
+
+                <Badge tone="info">{allOrders.length} orders</Badge>
               </InlineStack>
             </Box>
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
               {allOrders.length === 0 ? (
-                <EmptyState heading="No matching delivery or return stops found" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"><p>No stops matched the current planning filters.</p></EmptyState>
+                <EmptyState heading="No matching delivery or return stops found" image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png">
+                  <p>No stops matched the current planning filters.</p>
+                </EmptyState>
               ) : (
                 <DeliveryMap
                   orders={allOrders}
@@ -1077,11 +1073,81 @@ export default function OrdersMap() {
             <Box padding="300" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="300">
                 <BlockStack gap="100">
-                  <InlineStack align="space-between"><Text as="span" variant="bodySm">Stops: {stops.length}</Text><Text as="span" variant="bodySm">Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}</Text></InlineStack>
-                  <InlineStack align="space-between"><Text as="span" variant="bodySm">Complete route time: {formatDuration(routeDurationMinutes)}</Text><Badge tone={routeDistanceKm === null ? "info" : "success"}>{routeDistanceKm === null ? "Not optimised" : "Optimised"}</Badge></InlineStack>
-                  <Text as="p" variant="bodySm" tone="subdued">{returnToBase ? "Route includes return to base." : "Route ends at the custom finish location."}{routeFinishEta ? ` Finish ETA: ${routeFinishEta}.` : ""}</Text>
-                  {selectedDriver ? <Text as="p" variant="bodySm" tone="subdued">Driver selected: {selectedDriver.name}</Text> : null}
-                  {optimisationError ? <Text as="p" variant="bodySm" tone="critical">{optimisationError}</Text> : null}
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodySm">
+                      Stops: {stops.length}
+                    </Text>
+
+                    <Text as="span" variant="bodySm">
+                      Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" variant="bodySm">
+                      Finish ETA: {routeFinishEta || "Pending"}
+                    </Text>
+
+                    {routeDistanceKm === null ? (
+                      <span
+                        style={{
+                          background: "#f2f4f7",
+                          border: "1px solid #d0d5dd",
+                          borderRadius: 999,
+                          color: "#344054",
+                          display: "inline-flex",
+                          fontSize: 13,
+                          fontWeight: 700,
+                          lineHeight: "18px",
+                          padding: "2px 8px",
+                        }}
+                      >
+                        Not optimised
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          alignItems: "center",
+                          background: "#c8102e",
+                          border: "1px solid rgba(120, 0, 0, 0.35)",
+                          borderRadius: 999,
+                          boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.25)",
+                          color: "#ffffff",
+                          display: "inline-flex",
+                          fontSize: 13,
+                          fontWeight: 800,
+                          gap: 6,
+                          lineHeight: "18px",
+                          padding: "3px 10px",
+                        }}
+                      >
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            color: "#ffffff",
+                            display: "inline-block",
+                            fontWeight: 900,
+                            lineHeight: "18px",
+                          }}
+                        >
+                          ⚡︎
+                        </span>
+                        <span>Optimised</span>
+                      </span>
+                    )}
+                  </InlineStack>
+
+                  {selectedDriver ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Driver selected: {selectedDriver.name}
+                    </Text>
+                  ) : null}
+
+                  {optimisationError ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      {optimisationError}
+                    </Text>
+                  ) : null}
                 </BlockStack>
 
                 <BlockStack gap="200">
@@ -1115,7 +1181,10 @@ export default function OrdersMap() {
                 <details>
                   <summary style={{ cursor: "pointer", listStyle: "none" }}>
                     <InlineStack align="space-between" blockAlign="center">
-                      <BlockStack gap="050"><Text as="h3" variant="headingSm">Add manual order</Text><Text as="p" variant="bodySm" tone="subdued">Open this only when you need to add a non-Shopify delivery.</Text></BlockStack>
+                      <BlockStack gap="050">
+                        <Text as="h3" variant="headingSm">Add manual order</Text>
+                        <Text as="p" variant="bodySm" tone="subdued">Open this only when you need to add a non-Shopify delivery.</Text>
+                      </BlockStack>
                       <span style={{ border: "1px solid #c9cccf", borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 700, color: "#323841" }}>Open</span>
                     </InlineStack>
                   </summary>
