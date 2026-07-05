@@ -21,7 +21,8 @@ function standalonePackingListPath(pathname: string) {
 }
 
 function rewritePackingListLinks() {
-  document.querySelectorAll<HTMLAnchorElement>('a[href*="/app/routes/"][href$="/packing-list"]').forEach((link) => {
+  document.querySelectorAll('a[href*="/app/routes/"][href$="/packing-list"]').forEach((element) => {
+    const link = element as HTMLAnchorElement;
     try {
       const url = new URL(link.href);
       const standalonePath = standalonePackingListPath(url.pathname);
@@ -50,21 +51,6 @@ export default function App() {
 
   useEffect(() => {
     rewritePackingListLinks();
-
-    const handleClick = (event: MouseEvent) => {
-      const link = (event.target as Element | null)?.closest?.('a[href*="/app/routes/"][href*="/packing-list"]') as HTMLAnchorElement | null;
-      if (!link) return;
-
-      const url = new URL(link.href);
-      const standalonePath = standalonePackingListPath(url.pathname);
-      if (!standalonePath) return;
-
-      event.preventDefault();
-      window.open(`${url.origin}${standalonePath}${url.search}`, link.target || "_blank");
-    };
-
-    document.addEventListener("click", handleClick, true);
-    return () => document.removeEventListener("click", handleClick, true);
   }, [location.pathname]);
 
   if (isPackingListPath(location.pathname)) {
@@ -79,14 +65,12 @@ export default function App() {
           Orders Map
         </Link>
         <Link to="/app/routes">Routes</Link>
-        <Link to="/app/driver-routes">Driver Routes</Link>
         <Link to="/app/drivers">Drivers</Link>
         <Link to="/app/address-checks">Address Checks</Link>
         <Link to="/app/pod-search">Proof of Delivery</Link>
         <Link to="/app/returns">Returns</Link>
         <Link to="/app/notifications">Notifications</Link>
         <Link to="/app/fulfilment-settings">Fulfilment Settings</Link>
-        <Link to="/app/area-filters">Area Filters</Link>
         <Link to="/app/settings">Settings</Link>
       </NavMenu>
       <Outlet />
