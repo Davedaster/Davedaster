@@ -25,24 +25,35 @@ type ReturnLineInput = {
   quantityExpected: number;
 };
 
-function parseReturnLines(value: string): ReturnLineInput[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const quantityMatch = line.match(/^(\d+)\s*(?:x|×)?\s*(.+)$/i);
+function parseSelectedLines(value: FormDataEntryValue | null): ReturnLineInput[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
 
-      if (!quantityMatch) {
-        return { itemName: line, quantityExpected: 1 };
-      }
+  try {
+    const parsed = JSON.parse(value) as ReturnLineInput[];
 
-      return {
-        quantityExpected: Math.max(1, Math.round(Number(quantityMatch[1]) || 1)),
-        itemName: quantityMatch[2].trim(),
-      };
-    })
-    .filter((line) => line.itemName);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((line) => ({
+        itemName: String(line.itemName || "").trim(),
+        quantityExpected: Math.max(1, Math.round(Number(line.quantityExpected) || 1)),
+      }))
+      .filter((line) => line.itemName && line.quantityExpected > 0);
+  } catch {
+    return [];
+  }
+}
+
+function clampReturnQuantity(value: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.min(Math.max(0, Math.round(value)), Math.max(0, max));
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -62,16 +73,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const orderNumber = String(formData.get("orderNumber") || "").trim();
-  const itemsText = String(formData.get("itemsText") || "").trim();
+  const selectedLines = parseSelectedLines(formData.get("selectedLinesJson"));
 
   if (!orderNumber) {
     return json({ ok: false, error: "Load a Shopify order before creating the return collection." }, { status: 400 });
   }
 
-  const selectedLines = parseReturnLines(itemsText);
-
   if (!selectedLines.length) {
-    return json({ ok: false, error: "Add at least one item and quantity to collect." }, { status: 400 });
+    return json({ ok: false, error: "Choose at least one item and quantity to collect." }, { status: 400 });
   }
 
   try {
@@ -120,21 +129,40 @@ export default function ReturnsPage() {
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState(query);
   const [lookupOrderNumber, setLookupOrderNumber] = useState(orderNumber);
-  const [itemsText, setItemsText] = useState("");
+  const [quantitiesByItemId, setQuantitiesByItemId] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState("");
-  const isCreating = navigation.state !== "idle";
-
-  const suggestedItemsText = useMemo(() => {
-    if (!returnOrder) {
-      return "";
-    }
-
-    return returnOrder.lineItems.map((line) => formatTicketLine(line.quantity, line.title)).join("\n");
-  }, [returnOrder]);
+  const isCreating = navigation.state !== "idle" && navigation.formData?.get("intent") === "createReturnCollection";
 
   useEffect(() => {
-    setItemsText(suggestedItemsText);
-  }, [suggestedItemsText]);
+    if (!returnOrder) {
+      setQuantitiesByItemId({});
+      return;
+    }
+
+    setQuantitiesByItemId(Object.fromEntries(returnOrder.lineItems.map((line) => [line.id, 0])));
+  }, [returnOrder?.id]);
+
+  const selectedLines = useMemo(() => {
+    if (!returnOrder) {
+      return [];
+    }
+
+    return returnOrder.lineItems
+      .map((line) => ({
+        itemName: line.title,
+        quantityExpected: clampReturnQuantity(quantitiesByItemId[line.id] ?? 0, line.quantity),
+      }))
+      .filter((line) => line.quantityExpected > 0);
+  }, [returnOrder, quantitiesByItemId]);
+
+  const selectedLinesJson = JSON.stringify(selectedLines);
+
+  const setItemQuantity = (itemId: string, value: number, max: number) => {
+    setQuantitiesByItemId((current) => ({
+      ...current,
+      [itemId]: clampReturnQuantity(value, max),
+    }));
+  };
 
   const ticketRows = tickets.map((ticket) => [
     ticket.reference,
@@ -180,7 +208,9 @@ export default function ReturnsPage() {
 
               {returnOrder ? (
                 <Form method="post">
+                  <input type="hidden" name="intent" value="createReturnCollection" />
                   <input type="hidden" name="orderNumber" value={returnOrder.name} />
+                  <input type="hidden" name="selectedLinesJson" value={selectedLinesJson} />
                   <BlockStack gap="300">
                     <Box background="bg-surface-secondary" padding="300" borderRadius="300">
                       <BlockStack gap="100">
@@ -190,26 +220,37 @@ export default function ReturnsPage() {
                       </BlockStack>
                     </Box>
 
-                    <BlockStack gap="100">
-                      <Text as="h3" variant="headingSm">Original order items</Text>
-                      {returnOrder.lineItems.map((line) => (
-                        <Text key={line.id} as="p" variant="bodySm" tone="subdued">
-                          {formatTicketLine(line.quantity, line.title)}{line.sku ? ` · ${line.sku}` : ""}
-                        </Text>
-                      ))}
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">Items to collect</Text>
+                      {returnOrder.lineItems.map((line) => {
+                        const quantity = quantitiesByItemId[line.id] ?? 0;
+                        const maxQuantity = Math.max(0, line.quantity);
+
+                        return (
+                          <Box key={line.id} padding="300" borderWidth="025" borderColor="border" borderRadius="300">
+                            <BlockStack gap="250">
+                              <BlockStack gap="050">
+                                <Text as="p" variant="bodyMd" fontWeight="semibold">{line.title}</Text>
+                                {line.sku ? <Text as="p" variant="bodySm" tone="subdued">{line.sku}</Text> : null}
+                              </BlockStack>
+                              <InlineStack align="space-between" blockAlign="center" gap="200">
+                                <BlockStack gap="050">
+                                  <Text as="span" variant="bodySm" tone="subdued">Quantity</Text>
+                                  <Text as="span" variant="headingMd">{quantity} / {maxQuantity}</Text>
+                                </BlockStack>
+                                <InlineStack gap="100">
+                                  <Button disabled={quantity <= 0} onClick={() => setItemQuantity(line.id, quantity - 1, maxQuantity)}>-</Button>
+                                  <Button disabled={quantity >= maxQuantity} onClick={() => setItemQuantity(line.id, quantity + 1, maxQuantity)}>+</Button>
+                                </InlineStack>
+                              </InlineStack>
+                            </BlockStack>
+                          </Box>
+                        );
+                      })}
                     </BlockStack>
 
-                    <TextField
-                      label="Items to collect"
-                      name="itemsText"
-                      value={itemsText}
-                      onChange={setItemsText}
-                      autoComplete="off"
-                      multiline={5}
-                      helpText="Edit the quantities here. The driver can add extra items later from the phone proof screen."
-                    />
                     <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
-                    <Button submit variant="primary" loading={isCreating} disabled={!itemsText.trim()}>Create return collection</Button>
+                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return collection</Button>
                   </BlockStack>
                 </Form>
               ) : null}
