@@ -70,6 +70,14 @@ function createToken() {
   return crypto.randomBytes(12).toString("hex");
 }
 
+function isResolvedStopStatus(status: string) {
+  return status === "DELIVERED" || status === "FAILED";
+}
+
+function normalisedNote(value?: string | null) {
+  return value?.trim() || null;
+}
+
 export function buildDriverRouteUrl(request: Request, token: string) {
   return `${getBaseUrl(request)}/driver/routes/${encodeURIComponent(token)}`;
 }
@@ -216,6 +224,51 @@ async function getStopForDriverToken(token: string, stopId: string) {
   return stop;
 }
 
+async function getCollectionStopForDriverToken(token: string, stopId: string) {
+  const stop = await prisma.stop.findFirst({
+    where: {
+      id: stopId,
+      route: {
+        driverAccessToken: token,
+        status: {
+          in: ["OUT_FOR_DELIVERY"],
+        },
+      },
+    },
+    include: {
+      route: {
+        include: {
+          stops: true,
+        },
+      },
+      deliveryGroup: true,
+      returnTickets: {
+        include: {
+          lines: true,
+        },
+      },
+    },
+  });
+
+  if (!stop || !stop.deliveryGroupId) {
+    throw new Error("Collection stop not found for this active driver route.");
+  }
+
+  if (!stop.returnTickets.length) {
+    throw new Error("This stop is not a collection stop.");
+  }
+
+  if (stop.status === "DELIVERED") {
+    throw new Error("This collection has already been completed.");
+  }
+
+  if (stop.status === "FAILED") {
+    throw new Error("This collection has already been marked as not collected.");
+  }
+
+  return stop;
+}
+
 export async function completeDriverStopFromToken(input: {
   token: string;
   stopId: string;
@@ -264,6 +317,187 @@ export async function markDriverStopMissedFromToken(input: {
   });
 
   await sendNextPendingStopNotification(stop.routeId, input.stopId);
+}
+
+export async function completeCollectionStopFromToken(input: {
+  token: string;
+  stopId: string;
+  proofPhotoUrls: string[];
+  driverNote?: string | null;
+  safePlaceNote?: string | null;
+  leftInSafePlace?: boolean;
+  customerSignature?: string | null;
+}) {
+  const stop = await getCollectionStopForDriverToken(input.token, input.stopId);
+  const proofPhotoUrls = input.proofPhotoUrls.filter(Boolean);
+  const leftInSafePlace = Boolean(input.leftInSafePlace);
+  const driverNote = normalisedNote(input.driverNote);
+  const safePlaceNote = normalisedNote(input.safePlaceNote);
+  const customerSignature = normalisedNote(input.customerSignature);
+
+  if (leftInSafePlace) {
+    if (proofPhotoUrls.length < 2) {
+      throw new Error("Collection left safe needs at least 2 photos.");
+    }
+
+    if (!safePlaceNote) {
+      throw new Error("Collection left safe needs a note.");
+    }
+  } else {
+    if (proofPhotoUrls.length < 1) {
+      throw new Error("Customer present collection needs at least 1 photo.");
+    }
+
+    if (!customerSignature) {
+      throw new Error("Customer present collection needs a signature.");
+    }
+  }
+
+  const completedAt = new Date();
+  const firstPhotoUrl = proofPhotoUrls[0] || null;
+  const allStopsResolved = stop.route.stops
+    .filter((routeStop) => routeStop.id !== input.stopId)
+    .every((routeStop) => isResolvedStopStatus(routeStop.status));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.deliveryGroup.update({
+      where: {
+        id: stop.deliveryGroupId!,
+      },
+      data: {
+        proofPhotoUrl: firstPhotoUrl,
+        deliveryNote: driverNote,
+        safePlaceNote: leftInSafePlace ? safePlaceNote : null,
+      },
+    });
+
+    if (proofPhotoUrls.length) {
+      await tx.proofPhoto.createMany({
+        data: proofPhotoUrls.map((url, index) => ({
+          deliveryGroupId: stop.deliveryGroupId!,
+          url,
+          label: `Collection photo ${index + 1}`,
+        })),
+      });
+    }
+
+    await tx.returnTicket.updateMany({
+      where: {
+        stopId: input.stopId,
+      },
+      data: {
+        status: "COLLECTED",
+        collectionPhotoUrl: firstPhotoUrl,
+        customerSignature: leftInSafePlace ? null : customerSignature,
+        driverNote: driverNote || safePlaceNote,
+        collectedAt: completedAt,
+      },
+    });
+
+    for (const ticket of stop.returnTickets) {
+      for (const line of ticket.lines) {
+        await tx.returnTicketLine.update({
+          where: {
+            id: line.id,
+          },
+          data: {
+            quantityCollected: line.quantityExpected,
+          },
+        });
+      }
+    }
+
+    await tx.stop.update({
+      where: {
+        id: input.stopId,
+      },
+      data: {
+        status: "DELIVERED",
+        actualArrival: completedAt,
+      },
+    });
+
+    await tx.route.update({
+      where: {
+        id: stop.routeId,
+      },
+      data: {
+        status: allStopsResolved ? "COMPLETED" : stop.route.status,
+        history: {
+          create: {
+            action: "Collection completed",
+            details: `Stop ${stop.orderIndex} collection completed. ${leftInSafePlace ? "Customer not present, collection left safe." : "Customer present, signature captured."}`,
+          },
+        },
+      },
+    });
+  });
+}
+
+export async function markCollectionStopMissedFromToken(input: {
+  token: string;
+  stopId: string;
+  reason: string;
+  note?: string | null;
+}) {
+  const stop = await getCollectionStopForDriverToken(input.token, input.stopId);
+  const reason = input.reason.trim();
+  const note = normalisedNote(input.note);
+
+  if (!reason) {
+    throw new Error("Could not collect reason is required.");
+  }
+
+  const failedAt = new Date();
+  const allStopsResolved = stop.route.stops
+    .filter((routeStop) => routeStop.id !== input.stopId)
+    .every((routeStop) => isResolvedStopStatus(routeStop.status));
+
+  await prisma.$transaction(async (tx) => {
+    await tx.deliveryGroup.update({
+      where: {
+        id: stop.deliveryGroupId!,
+      },
+      data: {
+        deliveryNote: note ? `Could not collect, ${reason}. ${note}` : `Could not collect, ${reason}`,
+      },
+    });
+
+    await tx.returnTicket.updateMany({
+      where: {
+        stopId: input.stopId,
+      },
+      data: {
+        status: "COULD_NOT_COLLECT",
+        driverNote: note ? `${reason}. ${note}` : reason,
+      },
+    });
+
+    await tx.stop.update({
+      where: {
+        id: input.stopId,
+      },
+      data: {
+        status: "FAILED",
+        actualArrival: failedAt,
+      },
+    });
+
+    await tx.route.update({
+      where: {
+        id: stop.routeId,
+      },
+      data: {
+        status: allStopsResolved ? "COMPLETED" : stop.route.status,
+        history: {
+          create: {
+            action: "Collection not completed",
+            details: `Stop ${stop.orderIndex} collection could not be completed. Reason: ${reason}${note ? `. ${note}` : ""}`,
+          },
+        },
+      },
+    });
+  });
 }
 
 export async function sendDriverRouteLink(input: {
