@@ -4,6 +4,7 @@ import { formatEtaSlot } from "./etaSlots.server";
 
 export type NotificationChannel = "sms" | "email";
 export type NotificationTemplateId = "bookedSlot" | "outForDelivery" | "nextDropTracking" | "delayUpdate" | "deliveryComplete";
+export type NotificationServiceType = "delivery" | "collection";
 
 export type NotificationTemplateInput = {
   customerName?: string | null;
@@ -22,6 +23,7 @@ export type NotificationTemplateInput = {
   signaturePhotoUrl?: string | null;
   leftInSafePlace?: boolean;
   delayMinutes?: number | null;
+  serviceType?: NotificationServiceType;
 };
 
 export type NotificationMessage = {
@@ -86,7 +88,43 @@ function shell(title: string, intro: string, highlight: string, extra = "") {
 </div>`;
 }
 
+function collectionShell(title: string, intro: string, highlight: string, extra = "") {
+  return `<div style="margin:0;background:#f7f9fc;padding:28px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#323841;">
+  <div style="max-width:620px;margin:0 auto;">
+    {% if company.logo_url %}<div style="text-align:center;margin:0 0 22px;"><img src="{{ company.logo_url }}" alt="{{ company.name }}" style="display:inline-block;max-height:54px;max-width:220px;object-fit:contain;"></div>{% endif %}
+    <div style="background:#ffffff;border-radius:26px;padding:30px;box-shadow:0 16px 44px rgba(16,24,40,.07);">
+      <p style="margin:0 0 12px;color:{{ company.accent_colour }};font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">Collection update</p>
+      <h1 style="margin:0;color:#323841;font-size:30px;line-height:1.12;letter-spacing:-.35px;font-weight:700;">${title}</h1>
+      <p style="margin:18px 0 0;color:#667085;font-size:15px;line-height:1.6;">Hi {{ customer.name }},</p>
+      <p style="margin:8px 0 0;color:#667085;font-size:15px;line-height:1.6;">${intro}</p>
+      <div style="margin:22px 0 0;padding:16px 0;border-top:1px solid #edf1f5;border-bottom:1px solid #edf1f5;">
+        <p style="margin:0 0 5px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Estimated collection</p>
+        <p style="margin:0;color:#323841;font-size:25px;line-height:1.18;font-weight:700;">${highlight}</p>
+        <p style="margin:7px 0 0;color:#667085;font-size:13px;line-height:1.4;">Return order {{ order.number }} · {{ delivery.date }}</p>
+      </div>
+      {% if driver.name %}
+      <div style="margin-top:22px;">
+        {% if driver.photo_url %}<img src="{{ driver.photo_url }}" alt="{{ driver.name }}" width="52" height="52" style="float:left;width:52px;height:52px;object-fit:cover;border-radius:50%;margin:0 13px 8px 0;">{% endif %}
+        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Your driver today</p>
+        <p style="margin:0;color:#323841;font-size:19px;line-height:1.2;font-weight:700;">{{ driver.name }}</p>
+        {% if driver.vehicle_registration %}<p style="margin:6px 0 0;color:#667085;font-size:14px;line-height:1.45;">Vehicle registration {{ driver.vehicle_registration }}</p>{% endif %}
+        <div style="clear:both;"></div>
+      </div>
+      {% endif %}
+      <div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;">
+        <p style="margin:0 0 4px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Items to collect</p>
+        <p style="margin:0;color:#323841;font-size:15px;line-height:1.55;font-weight:600;">{{ order.number }}{% if order.items_summary %} · {{ order.items_summary }}{% endif %}</p>
+      </div>
+      ${extra}
+      {% if tracking.url %}<p style="margin:24px 0 0;"><a href="{{ tracking.url }}" style="display:inline-block;background:{{ company.accent_colour }};color:#ffffff;text-decoration:none;border-radius:999px;padding:13px 20px;font-weight:700;">Track your collection</a></p>{% endif %}
+    </div>
+    <p style="margin:18px 0 0;text-align:center;color:#667085;font-size:13px;line-height:1.5;">Need help? Call {{ company.phone }} or email {{ company.email }}.</p>
+  </div>
+</div>`;
+}
+
 const proofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Delivery photo</p><img src="{{ proof.photo_url }}" alt="Delivery photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer signature</p><img src="{{ proof.signature_url }}" alt="Customer signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
+const collectionProofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Collection photo</p><img src="{{ proof.photo_url }}" alt="Collection photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer collection signature</p><img src="{{ proof.signature_url }}" alt="Customer collection signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
 const safePlaceDeliveryCompleteSmsBody = "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}";
 
 const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
@@ -129,6 +167,37 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     emailSubject: "Your panel order has been delivered, {{ order.number }}",
     emailHtml: shell("Your panels have been delivered", "Your panel order has been delivered. Thank you for your order.", "Completed today", proofImagesHtml),
     smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + "{% else %}Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order.\n\nNeed help? Call {{ company.phone }}{% endif %}",
+  },
+};
+
+const collectionDefaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
+  bookedSlot: {
+    ...defaults.bookedSlot,
+    emailSubject: "Your return collection, {{ order.number }}",
+    emailHtml: collectionShell("Your return collection is planned", "Your return collection has been booked for the slot below.", "{{ delivery.eta_slot }}"),
+    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return collection for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+  },
+  outForDelivery: {
+    ...defaults.outForDelivery,
+    emailSubject: "Your return collection is out today, {{ order.number }}",
+    emailHtml: collectionShell("Your return collection is out today", "Your return collection is now with our driver and is booked for the slot below.", "{{ delivery.eta_slot }}"),
+    smsBody: "Hi {{ customer.name }}, your return collection is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+  },
+  nextDropTracking: {
+    ...defaults.nextDropTracking,
+    emailSubject: "You are next for collection, {{ order.number }}",
+    emailHtml: collectionShell("You are next for collection", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to collect your return next.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next stop.</p>"),
+    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to collect your return next. Track here: {{ tracking.url }}",
+  },
+  delayUpdate: {
+    ...defaults.delayUpdate,
+    smsBody: "Hi {{ customer.name }}, sorry, your collection is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
+  },
+  deliveryComplete: {
+    ...defaults.deliveryComplete,
+    emailSubject: "Your return collection has been completed, {{ order.number }}",
+    emailHtml: collectionShell("Your return collection is complete", "Your return items have been collected. They will be checked before any refund, replacement or further action is confirmed.", "Collected today", collectionProofImagesHtml),
+    smsBody: "Hi {{ customer.name }}, your return collection for {{ order.number }} has been completed. The items will be checked before any refund, replacement or further action is confirmed. View proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
 };
 
@@ -210,8 +279,8 @@ function displayName(name?: string | null) {
   return name?.trim() || "there";
 }
 
-function formatDate(value?: Date | string | null) {
-  if (!value) return "your delivery day";
+function formatDate(value?: Date | string | null, serviceType: NotificationServiceType = "delivery") {
+  if (!value) return serviceType === "collection" ? "your collection day" : "your delivery day";
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "2-digit", month: "long" }).format(new Date(value));
 }
 
@@ -220,8 +289,8 @@ function formatTime(value?: Date | string | null) {
   return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" }).format(new Date(value));
 }
 
-function formatSlot(estimatedArrival?: Date | string | null, slotMinutes = 60) {
-  if (!estimatedArrival) return "your booked delivery slot";
+function formatSlot(estimatedArrival?: Date | string | null, slotMinutes = 60, serviceType: NotificationServiceType = "delivery") {
+  if (!estimatedArrival) return serviceType === "collection" ? "your booked collection slot" : "your booked delivery slot";
   const start = new Date(estimatedArrival);
   const end = new Date(start.getTime() + slotMinutes * 60 * 1000);
   return formatEtaSlot(start, end);
@@ -265,16 +334,35 @@ function companyContext(settings?: Awaited<ReturnType<typeof getCustomerTracking
   };
 }
 
+function serviceContext(serviceType: NotificationServiceType) {
+  const isCollection = serviceType === "collection";
+
+  return {
+    type: serviceType,
+    is_collection: isCollection,
+    is_delivery: !isCollection,
+    name: isCollection ? "collection" : "delivery",
+    title: isCollection ? "Collection" : "Delivery",
+    verb: isCollection ? "collect" : "deliver",
+    past_tense: isCollection ? "collected" : "delivered",
+    proof_name: isCollection ? "Proof of collection" : "Proof of delivery",
+    tracking_label: isCollection ? "Track your collection" : "Track your delivery",
+  };
+}
+
 function buildTemplateContext(input: NotificationTemplateInput, settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null) {
   const slotMinutes = input.slotMinutes || 60;
+  const serviceType = input.serviceType === "collection" ? "collection" : "delivery";
   const start = input.estimatedArrival ? new Date(input.estimatedArrival) : null;
   const end = start ? new Date(start.getTime() + slotMinutes * 60 * 1000) : null;
 
   return {
     customer: { name: displayName(input.customerName) },
     order: { number: input.orderNumber || "your order", items_summary: input.itemsSummary || "" },
-    route: { name: input.routeName || "your delivery route" },
-    delivery: { date: formatDate(input.deliveryDate), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes), left_in_safe_place: Boolean(input.leftInSafePlace) },
+    route: { name: input.routeName || "your route" },
+    service: serviceContext(serviceType),
+    delivery: { date: formatDate(input.deliveryDate, serviceType), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes, serviceType), left_in_safe_place: Boolean(input.leftInSafePlace) },
+    collection: { date: formatDate(input.deliveryDate, "collection"), eta_start: formatTime(start), eta_end: formatTime(end), eta_slot: formatSlot(input.estimatedArrival, slotMinutes, "collection") },
     tracking: { url: input.trackingUrl || "" },
     driver: { name: input.driverName || "", photo_url: input.driverPhotoUrl || "", vehicle_name: input.driverVehicleName || "", vehicle_registration: input.driverVehicleRegistration || "" },
     company: companyContext(settings),
@@ -283,11 +371,20 @@ function buildTemplateContext(input: NotificationTemplateInput, settings?: Await
   };
 }
 
+function templateForService(template: EditableNotificationTemplate, input: NotificationTemplateInput) {
+  if (input.serviceType === "collection") {
+    return collectionDefaults[template.id] || template;
+  }
+
+  return template;
+}
+
 function renderTemplate(template: EditableNotificationTemplate, input: NotificationTemplateInput, channel: NotificationChannel, settings?: Awaited<ReturnType<typeof getCustomerTrackingSettings>> | null): NotificationMessage {
+  const selectedTemplate = templateForService(template, input);
   const context = buildTemplateContext(input, settings);
-  const body = renderLiquid(template.smsBody, context, "text");
-  if (channel === "sms" || !notificationTemplateSupportsEmail(template.id)) return { body };
-  return { subject: renderLiquid(template.emailSubject, context, "text"), body, html: renderLiquid(template.emailHtml, context, "html") };
+  const body = renderLiquid(selectedTemplate.smsBody, context, "text");
+  if (channel === "sms" || !notificationTemplateSupportsEmail(selectedTemplate.id)) return { body };
+  return { subject: renderLiquid(selectedTemplate.emailSubject, context, "text"), body, html: renderLiquid(selectedTemplate.emailHtml, context, "html") };
 }
 
 async function buildNotificationMessage(templateId: NotificationTemplateId, input: NotificationTemplateInput, channel: NotificationChannel) {
@@ -305,7 +402,7 @@ export function buildNotificationTemplatePreview(input: NotificationTemplateInpu
 
 export function availableNotificationVariables() {
   return [
-    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ delivery.left_in_safe_place }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ company.logo_url }}", "{{ company.accent_colour }}", "{{ proof.photo_url }}", "{{ proof.signature_url }}", "{{ delay.minutes }}",
+    "{{ customer.name }}", "{{ order.number }}", "{{ order.items_summary }}", "{{ route.name }}", "{{ service.type }}", "{{ service.name }}", "{{ service.title }}", "{{ service.proof_name }}", "{{ service.tracking_label }}", "{{ delivery.date }}", "{{ delivery.eta_start }}", "{{ delivery.eta_end }}", "{{ delivery.eta_slot }}", "{{ delivery.left_in_safe_place }}", "{{ collection.date }}", "{{ collection.eta_start }}", "{{ collection.eta_end }}", "{{ collection.eta_slot }}", "{{ tracking.url }}", "{{ driver.name }}", "{{ driver.photo_url }}", "{{ driver.vehicle_name }}", "{{ driver.vehicle_registration }}", "{{ company.name }}", "{{ company.phone }}", "{{ company.email }}", "{{ company.logo_url }}", "{{ company.accent_colour }}", "{{ proof.photo_url }}", "{{ proof.signature_url }}", "{{ delay.minutes }}",
   ];
 }
 
