@@ -1,4 +1,6 @@
 import prisma from "../db.server";
+import { lookupAddress } from "./getAddress.server";
+import type { DeliveryOrder } from "./shopifyOrders.server";
 
 export type ReturnTicketInput = {
   stopId?: string | null;
@@ -24,6 +26,8 @@ export type CompleteReturnTicketInput = {
   customerSignature?: string | null;
   driverNote?: string | null;
 };
+
+type ReturnTicketWithLines = Awaited<ReturnType<typeof getReturnTicketsForPlanning>>[number];
 
 function extractPostcode(value: string) {
   const match = value.match(/[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}/i);
@@ -89,8 +93,82 @@ function linesSummary(lines: Array<{ itemName: string; quantityExpected: number 
   return lines.map((line) => `${line.quantityExpected} x ${line.itemName}`).join(", ");
 }
 
+function normalisedReturnLine(line: { itemName: string; quantityExpected: number }) {
+  const quantity = Number(line.quantityExpected || 1);
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+  return `${safeQuantity} × ${line.itemName}`;
+}
+
 function assignmentHistoryDetails(ticket: { reference: string; orderNumber: string | null; customerName: string; postcode: string | null }) {
   return `${ticket.reference} · ${ticket.orderNumber || "No order number"} · ${ticket.customerName} · ${ticket.postcode || "No postcode"}`;
+}
+
+async function getReturnTicketsForPlanning() {
+  return prisma.returnTicket.findMany({
+    where: {
+      status: "OPEN",
+      routeId: null,
+      stopId: null,
+    },
+    include: {
+      lines: {
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
+    },
+    orderBy: {
+      returnRequestedAt: "asc",
+    },
+    take: 50,
+  });
+}
+
+async function returnTicketToPlanningOrder(ticket: ReturnTicketWithLines): Promise<DeliveryOrder> {
+  const postcode = ticket.postcode || extractPostcode(ticket.address);
+  const lookup = ticket.latitude !== null && ticket.longitude !== null
+    ? null
+    : await lookupAddress(postcode, ticket.address);
+  const latitude = ticket.latitude ?? lookup?.latitude ?? null;
+  const longitude = ticket.longitude ?? lookup?.longitude ?? null;
+  const formattedAddress = lookup?.formattedAddress || ticket.address;
+  const lineItemLines = ticket.lines.map(normalisedReturnLine);
+  const lineItemSummary = lineItemLines.join(", ") || "1 × Return collection";
+
+  return {
+    id: `return:${ticket.id}`,
+    name: ticket.orderNumber || ticket.reference,
+    createdAt: ticket.returnRequestedAt.toISOString(),
+    customerName: ticket.customerName,
+    email: ticket.customerEmail,
+    phone: ticket.customerPhone,
+    shippingMethod: "Return collection",
+    fulfilmentStatus: "return_collection",
+    financialStatus: "return",
+    postcode: lookup?.postcode || postcode || null,
+    addressSummary: ticket.address,
+    formattedAddress,
+    hasDeliveryAddress: Boolean(ticket.address),
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: latitude !== null && longitude !== null ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: latitude !== null && longitude !== null ? "HIGH" : "LOW",
+    latitude,
+    longitude,
+    lineItemSummary,
+    lineItemLines: ["🔴 Return collection", ...lineItemLines],
+    fulfilByDate: null,
+    hasManualOverride: true,
+    manualAddress: ticket.address,
+    manualAddressNotes: ticket.notes || "Return collection added from Returns page",
+    orderSource: "return",
+    routeAllocation: null,
+  };
+}
+
+export async function listOpenReturnPlanningOrders() {
+  const tickets = await getReturnTicketsForPlanning();
+  return Promise.all(tickets.map(returnTicketToPlanningOrder));
 }
 
 export async function listDraftRoutesForReturnAssignment() {
