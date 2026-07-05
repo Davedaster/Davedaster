@@ -210,7 +210,7 @@ function tooltipToneForLine(line: string): TooltipTone {
   const lower = line.toLowerCase();
   const fulfilmentTone = fulfilmentToneFromLine(line);
 
-  if (lower.includes("redeliver")) {
+  if (lower.includes("redeliver") || lower.includes("collection")) {
     return "critical";
   }
 
@@ -270,6 +270,10 @@ function tooltipHtml(point: RouteMapPoint) {
 }
 
 function markerColour(point: RouteMapPoint) {
+  if (point.status === "RETURN_COLLECTION") {
+    return "#b42318";
+  }
+
   if (point.status === "DELIVERED" || point.status === "COLLECTED") {
     return "#16a34a";
   }
