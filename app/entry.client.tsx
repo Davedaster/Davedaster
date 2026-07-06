@@ -295,6 +295,64 @@ function installTomTomRouteLineCache() {
   }, true);
 }
 
+function tidyDriverPodStatusCards() {
+  if (!window.location.pathname.startsWith("/driver/routes/")) {
+    return;
+  }
+
+  document.querySelectorAll<HTMLElement>("article").forEach((card) => {
+    const heading = card.querySelector<HTMLElement>("h2");
+    if (!heading || !cleanText(heading).startsWith("Drop ")) {
+      return;
+    }
+
+    const cardText = card.textContent || "";
+    const closed = cardText.includes("Delivery complete")
+      || cardText.includes("Collection complete")
+      || cardText.includes("Delivery marked missed")
+      || cardText.includes("Collection could not be completed");
+
+    if (!closed) {
+      const baseHeading = cleanText(heading).replace(/\s+·\s+(CURRENT|NEXT)$/i, "");
+      const status = card.id === "next-stop" ? "CURRENT" : "NEXT";
+      setText(heading, `${baseHeading} · ${status}`);
+    }
+
+    const badge = heading.parentElement?.parentElement?.lastElementChild;
+    if (badge instanceof HTMLElement) {
+      Object.assign(badge.style, {
+        width: "52px",
+        height: "52px",
+        minWidth: "52px",
+        maxWidth: "52px",
+        minHeight: "52px",
+        maxHeight: "52px",
+        flex: "0 0 52px",
+        aspectRatio: "1 / 1",
+        borderRadius: "50%",
+        lineHeight: "1",
+      });
+    }
+  });
+}
+
+function installDriverPodTidier() {
+  const start = () => {
+    tidyDriverPodStatusCards();
+    new MutationObserver(() => window.requestAnimationFrame(tidyDriverPodStatusCards)).observe(document.body, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  };
+
+  if (document.body) {
+    start();
+  } else {
+    window.addEventListener("DOMContentLoaded", start, { once: true });
+  }
+}
+
 declare global {
   interface Window {
     __bpdTomTomRouteLineCacheInstalled?: boolean;
@@ -303,6 +361,7 @@ declare global {
 
 installRouteSummarySimplifier();
 installTomTomRouteLineCache();
+installDriverPodTidier();
 
 startTransition(() => {
   hydrateRoot(
