@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import prisma from "../db.server";
+import { getPublicAppBaseUrl } from "./customerTracking.server";
 import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
@@ -19,10 +20,10 @@ type DriverRouteNotificationResult = {
   errors: string[];
 };
 
-const DEFAULT_APP_BASE_URL = "https://davedaster-production.up.railway.app";
+const DEFAULT_APP_BASE_URL = "https://www.bpd-delivery.uk";
 
-function getBaseUrl(_request: Request) {
-  return DEFAULT_APP_BASE_URL;
+function getBaseUrl(request: Request) {
+  return getPublicAppBaseUrl(new URL(request.url).origin || DEFAULT_APP_BASE_URL);
 }
 
 function formatDate(value: Date | string) {
