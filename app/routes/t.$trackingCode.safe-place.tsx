@@ -12,7 +12,16 @@ function cleanInstruction(value: FormDataEntryValue | null) {
     .slice(0, 500);
 }
 
-async function buildSafePlaceNote(formData: FormData) {
+function returnSafePlaceLabel(value: string) {
+  const label = value.trim();
+  const withoutLeave = label.replace(/^leave\s+/i, "").trim();
+
+  if (!withoutLeave) return label;
+
+  return withoutLeave.charAt(0).toUpperCase() + withoutLeave.slice(1);
+}
+
+async function buildSafePlaceNote(formData: FormData, isCollection: boolean) {
   const settings = await getCustomerTrackingSettings();
   const optionId = cleanInstruction(formData.get("safePlaceOption"));
   const details = cleanInstruction(formData.get("safePlaceDetails"));
@@ -26,7 +35,9 @@ async function buildSafePlaceNote(formData: FormData) {
     return "";
   }
 
-  return [option.label, details].filter(Boolean).join(". ");
+  const optionLabel = isCollection ? returnSafePlaceLabel(option.label) : option.label;
+
+  return [optionLabel, details].filter(Boolean).join(". ");
 }
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
@@ -34,13 +45,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (!trackingCode) {
     throw new Response("Tracking details not found", { status: 404 });
-  }
-
-  const formData = await request.formData();
-  const safePlaceNote = await buildSafePlaceNote(formData);
-
-  if (!safePlaceNote) {
-    return redirect(`/t/${encodeURIComponent(trackingCode)}?instructions=missing`);
   }
 
   const tracking = await getCustomerTrackingByCode(trackingCode);
@@ -52,6 +56,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
   if (stop.status === "DELIVERED" || stop.status === "FAILED") {
     return redirect(`/t/${encodeURIComponent(trackingCode)}?instructions=closed`);
+  }
+
+  const formData = await request.formData();
+  const safePlaceNote = await buildSafePlaceNote(formData, tracking.orderSource === "return");
+
+  if (!safePlaceNote) {
+    return redirect(`/t/${encodeURIComponent(trackingCode)}?instructions=missing`);
   }
 
   await prisma.deliveryGroup.update({
