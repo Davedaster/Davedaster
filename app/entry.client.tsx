@@ -188,6 +188,95 @@ function installRouteSummarySimplifier() {
   }
 }
 
+function installDriverPodDisplayFixes() {
+  let scheduled = false;
+
+  const tidy = () => {
+    if (!window.location.pathname.startsWith("/driver/routes/")) {
+      return;
+    }
+
+    const routeStarted = (document.body?.innerText || "").includes("Route started");
+    const pendingCards: HTMLElement[] = [];
+
+    document.querySelectorAll<HTMLElement>("article").forEach((card) => {
+      const heading = card.querySelector<HTMLHeadingElement>("h2");
+      const header = heading?.parentElement?.parentElement;
+      const numberBadge = header?.lastElementChild as HTMLElement | null;
+      const cardText = card.innerText || "";
+
+      if (!heading || !header || !numberBadge) {
+        return;
+      }
+
+      Object.assign(numberBadge.style, {
+        width: "52px",
+        height: "52px",
+        minWidth: "52px",
+        maxWidth: "52px",
+        minHeight: "52px",
+        maxHeight: "52px",
+        flex: "0 0 52px",
+        aspectRatio: "1 / 1",
+        borderRadius: "50%",
+        lineHeight: "1",
+      });
+
+      const isComplete = cardText.includes("Delivery complete") || cardText.includes("Collection complete") || cardText.includes("Delivery marked missed") || cardText.includes("Collection could not be completed");
+
+      if (!isComplete) {
+        pendingCards.push(card);
+      }
+    });
+
+    pendingCards.forEach((card, index) => {
+      const heading = card.querySelector<HTMLHeadingElement>("h2");
+      if (!heading) {
+        return;
+      }
+
+      const match = heading.textContent?.match(/^Drop\s+(\d+)/i);
+      const dropNumber = match?.[1] || "";
+      const isCollection = heading.textContent?.includes("Collection") || card.innerText.includes("Items to collect");
+      const status = routeStarted && index === 0 ? "CURRENT" : "NEXT";
+      const nextHeading = `Drop ${dropNumber}${isCollection ? " · Collection" : ""} · ${status}`;
+
+      if (heading.textContent !== nextHeading) {
+        heading.textContent = nextHeading;
+      }
+    });
+  };
+
+  const schedule = () => {
+    if (scheduled) {
+      return;
+    }
+
+    scheduled = true;
+    window.requestAnimationFrame(() => {
+      scheduled = false;
+      tidy();
+    });
+  };
+
+  const start = () => {
+    tidy();
+    new MutationObserver(schedule).observe(document.body, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    window.setTimeout(tidy, 250);
+    window.setTimeout(tidy, 1000);
+  };
+
+  if (document.body) {
+    start();
+  } else {
+    window.addEventListener("DOMContentLoaded", start, { once: true });
+  }
+}
+
 function installTomTomRouteLineCache() {
   if (typeof window === "undefined" || window.__bpdTomTomRouteLineCacheInstalled) {
     return;
@@ -302,6 +391,7 @@ declare global {
 }
 
 installRouteSummarySimplifier();
+installDriverPodDisplayFixes();
 installTomTomRouteLineCache();
 
 startTransition(() => {
