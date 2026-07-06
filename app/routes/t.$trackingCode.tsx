@@ -75,6 +75,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     missing: url.searchParams.get("instructions") === "missing",
     closed: url.searchParams.get("instructions") === "closed",
     orderNumber: tracking.shopifyOrderNumber,
+    orderSource: tracking.orderSource,
     customerName: tracking.customerName || "Customer",
     itemsSummary: tracking.lineItemSummary || "",
     postcode: tracking.postcode || tracking.deliveryGroup?.postcode || "",
@@ -134,14 +135,46 @@ export default function CustomerTrackingPage() {
   const routeStarted = data.routeStatus === "OUT_FOR_DELIVERY";
   const complete = data.stopStatus === "DELIVERED";
   const missed = data.stopStatus === "FAILED";
+  const isCollection = data.orderSource === "return";
   const selectedSafePlace = safePlaceOptions.find((option) => option.id === safePlaceOption) || safePlaceOptions[0];
   const requiresExtraDetails = selectedSafePlace.requiresDetails;
   const primaryColour = settings.primaryColour || "#509AE6";
-  const heading = pageHeading({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
-  const message = pageMessage({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
+  const heading = isCollection
+    ? complete
+      ? "Your collection is complete"
+      : missed
+        ? "Collection attempted"
+        : routeStarted
+          ? "Your collection is out today"
+          : "Your collection is planned"
+    : pageHeading({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
+  const message = isCollection
+    ? complete
+      ? "Your return has been collected and will be checked by our team."
+      : missed
+        ? "We attempted your collection but could not complete it. Please contact our team and we will help arrange the next step."
+        : routeStarted
+          ? "Your collection is on today’s route. Please have the return items packed and ready."
+          : "Your collection is booked. Please have the return items packed and ready for our team."
+    : pageMessage({ routeStatus: data.routeStatus, stopStatus: data.stopStatus, settings });
   const callHref = settings.supportPhone ? `tel:${settings.supportPhone.replace(/[^+\d]/g, "")}` : null;
   const emailHref = settings.supportEmail ? `mailto:${settings.supportEmail}` : null;
-  const stopStatusLine = complete && data.deliveredTime ? `Stop ${data.stopNumber}, delivered at ${data.deliveredTime}` : `Stop ${data.stopNumber}, ${cleanStatus(data.stopStatus)}`;
+  const stopStatusLine = complete && data.deliveredTime ? `Stop ${data.stopNumber}, ${isCollection ? "collected" : "delivered"} at ${data.deliveredTime}` : `Stop ${data.stopNumber}, ${cleanStatus(data.stopStatus)}`;
+  const statusText = isCollection
+    ? complete
+      ? "Collected"
+      : missed
+        ? "Collection missed"
+        : routeStarted
+          ? "Out for collection"
+          : "Booked"
+    : complete
+      ? "Delivered"
+      : missed
+        ? "Delivery missed"
+        : routeStarted
+          ? "Out for delivery"
+          : "Booked";
 
   return (
     <main style={{ minHeight: "100vh", background: "#f3f6fb", padding: "24px 14px", fontFamily: "Arial, sans-serif", color: "#1f2937" }}>
@@ -150,28 +183,28 @@ export default function CustomerTrackingPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>{settings.logoUrl ? <img src={settings.logoUrl} alt={settings.companyName} style={{ maxHeight: 52, maxWidth: 210, objectFit: "contain" }} /> : <p style={{ margin: 0, color: primaryColour, fontWeight: 900 }}>{settings.companyName}</p>}</div>
         <h1 style={{ margin: "8px 0 10px", fontSize: 30, lineHeight: 1.1 }}>{heading}</h1>
         <p style={{ margin: "0 0 8px", color: "#667085", fontWeight: 700 }}>{message}</p>
-        <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>Order {data.orderNumber}</p>
-        {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Safe place instructions saved.</div> : null}
-        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>Please add extra details for the driver before saving this safe place.</div> : null}
-        {data.closed ? <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>This delivery is already closed, so instructions cannot be changed.</div> : null}
+        <p style={{ margin: "0 0 18px", color: "#667085", fontWeight: 700 }}>{isCollection ? "Return order" : "Order"} {data.orderNumber}</p>
+        {data.saved ? <div style={{ background: "#dcfce7", color: "#166534", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>{isCollection ? "Collection instructions saved." : "Safe place instructions saved."}</div> : null}
+        {data.missing ? <div style={{ background: "#fef3c7", color: "#92400e", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>{isCollection ? "Please add extra details for the driver before saving this collection instruction." : "Please add extra details for the driver before saving this safe place."}</div> : null}
+        {data.closed ? <div style={{ background: "#fee2e2", color: "#991b1b", borderRadius: 12, padding: 12, marginBottom: 16, fontWeight: 800 }}>{isCollection ? "This collection is already closed, so instructions cannot be changed." : "This delivery is already closed, so instructions cannot be changed."}</div> : null}
         <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
-          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Delivery date</p><p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{formatDate(data.routeDate)}</p></div>
+          <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>{isCollection ? "Collection date" : "Delivery date"}</p><p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{formatDate(data.routeDate)}</p></div>
           <div style={{ background: "#eef6ff", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Booked slot</p><p style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{data.etaSlot}</p></div>
-          <div style={{ background: "#f8fafc", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Status</p><p style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{complete ? "Delivered" : missed ? "Delivery missed" : routeStarted ? "Out for delivery" : "Booked"}</p><p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>{stopStatusLine}</p></div>
+          <div style={{ background: "#f8fafc", borderRadius: 16, padding: 16 }}><p style={{ margin: "0 0 4px", fontSize: 13, color: "#475467", fontWeight: 800 }}>Status</p><p style={{ margin: 0, fontSize: 18, fontWeight: 900 }}>{statusText}</p><p style={{ margin: "8px 0 0", color: "#667085", fontWeight: 700 }}>{stopStatusLine}</p></div>
         </div>
         <ProfileCard name={data.driverName} imageUrl={data.driverPhotoUrl} />
-        {settings.roomOfChoiceText ? <p style={{ margin: "8px 0 18px", color: "#667085", fontWeight: 700 }}>{settings.roomOfChoiceText}</p> : null}
+        {isCollection ? <p style={{ margin: "8px 0 18px", color: "#667085", fontWeight: 700 }}>Please make sure all return items are packed and ready for collection. If you will not be in, leave them in the agreed safe place.</p> : settings.roomOfChoiceText ? <p style={{ margin: "8px 0 18px", color: "#667085", fontWeight: 700 }}>{settings.roomOfChoiceText}</p> : null}
         {(callHref || emailHref) ? <div style={{ display: "grid", gridTemplateColumns: callHref && emailHref ? "1fr 1fr" : "1fr", gap: 10, marginBottom: 18 }}>{callHref ? <a href={callHref} style={{ background: primaryColour, color: "#ffffff", borderRadius: 14, padding: "13px 14px", textAlign: "center", textDecoration: "none", fontWeight: 900 }}>Call our team</a> : null}{emailHref ? <a href={emailHref} style={{ background: "#323841", color: "#ffffff", borderRadius: 14, padding: "13px 14px", textAlign: "center", textDecoration: "none", fontWeight: 900 }}>Email our team</a> : null}</div> : null}
-        {complete || missed ? (data.proofPhotos.length ? <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof of delivery is available below.</div> : <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>) : null}
-        <ProofImages photos={data.deliveryPhotos} title="Delivery photo" onOpen={setSelectedProofPhoto} />
-        <ProofImages photos={data.signaturePhotos} title="Customer signature" onOpen={setSelectedProofPhoto} />
+        {complete || missed ? (data.proofPhotos.length ? <div style={{ background: "#ecfdf3", color: "#166534", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>{isCollection ? "Proof of collection is available below." : "Proof of delivery is available below."}</div> : <div style={{ background: "#fff7ed", color: "#c2410c", borderRadius: 16, padding: 14, marginBottom: 18, fontWeight: 900 }}>Proof images are being processed. Refresh this page shortly.</div>) : null}
+        <ProofImages photos={data.deliveryPhotos} title={isCollection ? "Collection photo" : "Delivery photo"} onOpen={setSelectedProofPhoto} />
+        <ProofImages photos={data.signaturePhotos} title={isCollection ? "Collection signature" : "Customer signature"} onOpen={setSelectedProofPhoto} />
         {data.itemsSummary ? <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, marginBottom: 18 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>Items</p><p style={{ margin: 0, color: "#475467", fontWeight: 700 }}>{data.itemsSummary}</p></div> : null}
         <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
-          <h2 style={{ margin: "0 0 10px", fontSize: 20 }}>Safe place instructions</h2>
-          {data.safePlaceNote ? <p style={{ margin: "0 0 12px", color: "#166534", fontWeight: 800 }}>Current instruction: {data.safePlaceNote}</p> : null}
+          <h2 style={{ margin: "0 0 10px", fontSize: 20 }}>{isCollection ? "Collection instructions" : "Safe place instructions"}</h2>
+          {data.safePlaceNote ? <p style={{ margin: "0 0 12px", color: "#166534", fontWeight: 800 }}>{isCollection ? "Current collection instruction" : "Current instruction"}: {data.safePlaceNote}</p> : null}
           <form method="post" action={`/t/${encodeURIComponent(data.trackingCode)}/safe-place`}>
-            <label style={{ display: "block", fontWeight: 900, marginBottom: 8 }}>Choose a safe place<select name="safePlaceOption" value={safePlaceOption} onChange={(event) => setSafePlaceOption(event.currentTarget.value)} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>{safePlaceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-            <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>Extra details {requiresExtraDetails ? <span style={{ color: "#dc2626" }}>*</span> : <span style={{ color: "#667085", fontWeight: 700 }}>(optional)</span>}<textarea name="safePlaceDetails" rows={3} maxLength={500} required={requiresExtraDetails} aria-invalid={requiresExtraDetails ? "true" : undefined} placeholder={requiresExtraDetails ? "Please tell us where the driver should leave the panels" : "Example, where to place the panels"} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: requiresExtraDetails ? "2px solid #dc2626" : "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />{requiresExtraDetails ? <span style={{ display: "block", marginTop: 6, color: "#dc2626", fontSize: 13 }}>Please add instructions for the driver.</span> : null}</label>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 8 }}>{isCollection ? "Where will the return be left?" : "Choose a safe place"}<select name="safePlaceOption" value={safePlaceOption} onChange={(event) => setSafePlaceOption(event.currentTarget.value)} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: "1px solid #cbd5e1", padding: 12, fontSize: 16 }}>{safePlaceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+            <label style={{ display: "block", fontWeight: 900, marginBottom: 12 }}>Extra details {requiresExtraDetails ? <span style={{ color: "#dc2626" }}>*</span> : <span style={{ color: "#667085", fontWeight: 700 }}>(optional)</span>}<textarea name="safePlaceDetails" rows={3} maxLength={500} required={requiresExtraDetails} aria-invalid={requiresExtraDetails ? "true" : undefined} placeholder={isCollection ? "Example, where the packed return items will be left" : requiresExtraDetails ? "Please tell us where the driver should leave the panels" : "Example, where to place the panels"} style={{ display: "block", marginTop: 6, width: "100%", borderRadius: 12, border: requiresExtraDetails ? "2px solid #dc2626" : "1px solid #cbd5e1", padding: 12, fontSize: 16 }} />{requiresExtraDetails ? <span style={{ display: "block", marginTop: 6, color: "#dc2626", fontSize: 13 }}>Please add instructions for the driver.</span> : null}</label>
             <button type="submit" disabled={complete || missed} style={{ width: "100%", border: 0, borderRadius: 14, padding: "14px 16px", background: complete || missed ? "#d0d5dd" : primaryColour, color: "#ffffff", fontSize: 16, fontWeight: 900 }}>Save instructions</button>
           </form>
         </div>
