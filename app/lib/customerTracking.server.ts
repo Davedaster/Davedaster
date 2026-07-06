@@ -4,7 +4,7 @@ import prisma from "../db.server";
 
 const TRACKING_CODE_BYTES = 6;
 const TRACKABLE_ROUTE_STATUSES = ["PUBLISHED", "NOTIFICATIONS_SENT", "OUT_FOR_DELIVERY", "COMPLETED"];
-const DEFAULT_APP_BASE_URL = "https://davedaster-production.up.railway.app";
+const DEFAULT_APP_BASE_URL = "https://www.bpd-delivery.uk";
 
 function createTrackingCode() {
   return crypto
@@ -15,14 +15,20 @@ function createTrackingCode() {
     .replace(/=+$/g, "");
 }
 
-export function getPublicAppBaseUrl(_fallbackUrl?: string | null) {
-  return DEFAULT_APP_BASE_URL;
+function cleanBaseUrl(value?: string | null) {
+  const baseUrl = value?.trim() || DEFAULT_APP_BASE_URL;
+
+  return baseUrl.replace(/\/+$/g, "");
+}
+
+export function getPublicAppBaseUrl(fallbackUrl?: string | null) {
+  return cleanBaseUrl(process.env.PUBLIC_APP_BASE_URL || process.env.SHOPIFY_APP_URL || fallbackUrl || DEFAULT_APP_BASE_URL);
 }
 
 export function buildShortCustomerTrackingUrl(baseUrl: string, trackingCode: string) {
-  const cleanBaseUrl = getPublicAppBaseUrl(baseUrl);
+  const cleanAppBaseUrl = getPublicAppBaseUrl(baseUrl);
 
-  return `${cleanBaseUrl}/t/${encodeURIComponent(trackingCode)}`;
+  return `${cleanAppBaseUrl}/t/${encodeURIComponent(trackingCode)}`;
 }
 
 export async function ensureCustomerTrackingCode(orderStopId: string) {
