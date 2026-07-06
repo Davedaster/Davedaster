@@ -31,6 +31,7 @@ type ReturnTicketForRows = Awaited<ReturnType<typeof searchReturnTickets>>[numbe
 type DraftRouteForAssignment = Awaited<ReturnType<typeof listDraftRoutesForReturnAssignment>>[number];
 
 const ARCHIVE_STATUSES = new Set(["COLLECTED", "COULD_NOT_COLLECT", "CANCELLED"]);
+const DELETABLE_RETURN_STATUSES = new Set(["OPEN", "ASSIGNED", "OUT_FOR_COLLECTION"]);
 
 function parseSelectedLines(value: FormDataEntryValue | null): ReturnLineInput[] {
   if (typeof value !== "string" || !value.trim()) {
@@ -61,6 +62,139 @@ function clampReturnQuantity(value: number, max: number) {
   }
 
   return Math.min(Math.max(0, Math.round(value)), Math.max(0, max));
+}
+
+async function cancelReturnTicket(ticketId: string) {
+  if (!ticketId) {
+    throw new Error("Return collection not found.");
+  }
+
+  const ticket = await prisma.returnTicket.findUnique({
+    where: {
+      id: ticketId,
+    },
+    include: {
+      route: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      },
+      stop: {
+        include: {
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+          returnTickets: {
+            select: {
+              id: true,
+              status: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!ticket) {
+    throw new Error("Return collection not found.");
+  }
+
+  if (!DELETABLE_RETURN_STATUSES.has(ticket.status)) {
+    throw new Error("Only active returns can be deleted.");
+  }
+
+  const routeId = ticket.routeId;
+  const stopId = ticket.stopId;
+  const stopOrderIndex = ticket.stop?.orderIndex ?? null;
+  const deliveryGroupId = ticket.stop?.deliveryGroupId ?? null;
+  const deliveryGroupOrders = ticket.stop?.deliveryGroup?.orders || [];
+  const returnOrderId = `return:${ticket.id}`;
+  const matchingReturnOrderIds = deliveryGroupOrders
+    .filter((order) => order.shopifyOrderId === returnOrderId)
+    .map((order) => order.id);
+  const deliveryGroupOnlyContainsThisReturn = deliveryGroupOrders.length > 0 && deliveryGroupOrders.every((order) => order.shopifyOrderId === returnOrderId);
+  const otherReturnTicketsOnStop = ticket.stop?.returnTickets.filter((item) => item.id !== ticket.id && item.status !== "CANCELLED") || [];
+  const shouldDeleteRouteStop = Boolean(
+    stopId &&
+    deliveryGroupId &&
+    deliveryGroupOnlyContainsThisReturn &&
+    otherReturnTicketsOnStop.length === 0,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.returnTicket.update({
+      where: {
+        id: ticket.id,
+      },
+      data: {
+        status: "CANCELLED",
+        routeId: null,
+        stopId: null,
+      },
+    });
+
+    if (matchingReturnOrderIds.length && !shouldDeleteRouteStop) {
+      await tx.orderStop.deleteMany({
+        where: {
+          id: {
+            in: matchingReturnOrderIds,
+          },
+        },
+      });
+    }
+
+    if (shouldDeleteRouteStop) {
+      await tx.stop.delete({
+        where: {
+          id: stopId!,
+        },
+      });
+
+      await tx.deliveryGroup.delete({
+        where: {
+          id: deliveryGroupId!,
+        },
+      });
+
+      if (routeId && stopOrderIndex !== null) {
+        await tx.stop.updateMany({
+          where: {
+            routeId,
+            orderIndex: {
+              gt: stopOrderIndex,
+            },
+          },
+          data: {
+            orderIndex: {
+              decrement: 1,
+            },
+          },
+        });
+      }
+    }
+
+    if (routeId) {
+      await tx.route.update({
+        where: {
+          id: routeId,
+        },
+        data: {
+          totalMileage: null,
+          totalDuration: null,
+          history: {
+            create: {
+              action: "Return collection deleted",
+              details: `${ticket.reference} · ${ticket.orderNumber || "No order number"} · ${ticket.customerName}${shouldDeleteRouteStop ? " · route stop removed" : ""}`,
+            },
+          },
+        },
+      });
+    }
+  });
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -97,21 +231,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "cancelReturn") {
     try {
-      const result = await prisma.returnTicket.updateMany({
-        where: {
-          id: String(formData.get("ticketId") || ""),
-          status: "OPEN",
-          routeId: null,
-          stopId: null,
-        },
-        data: {
-          status: "CANCELLED",
-        },
-      });
-
-      if (!result.count) {
-        throw new Error("Only open, unassigned returns can be deleted.");
-      }
+      await cancelReturnTicket(String(formData.get("ticketId") || ""));
 
       return redirect("/app/returns?deleted=1");
     } catch (error) {
@@ -249,7 +369,7 @@ function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRow
 }
 
 function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
-  if (ticket.status !== "OPEN" || ticket.routeId || ticket.stopId) {
+  if (!DELETABLE_RETURN_STATUSES.has(ticket.status)) {
     return <Text as="span" tone="subdued">Locked</Text>;
   }
 
@@ -259,7 +379,9 @@ function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
         "Delete this return?",
         "",
         "This cannot be undone from the app.",
-        "The return will be cancelled and removed from the active returns list and planning map.",
+        "The return will be cancelled and removed from active returns.",
+        "If it is already on a draft or published route, its route stop will also be removed.",
+        "Customer deliveries on the same route will stay in place.",
         "",
         "Only continue if you are sure.",
       ].join("\n"));
@@ -466,7 +588,9 @@ export default function ReturnsPage() {
               </Form>
             </BlockStack>
           </LegacyCard>
+        </Layout.Section>
 
+        <Layout.Section>
           <LegacyCard title="Active returns">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text", "text"]}
@@ -474,7 +598,9 @@ export default function ReturnsPage() {
               rows={activeTicketRows}
             />
           </LegacyCard>
+        </Layout.Section>
 
+        <Layout.Section>
           <LegacyCard title="Return archive">
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text", "text", "text", "text"]}
