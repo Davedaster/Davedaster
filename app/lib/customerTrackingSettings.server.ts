@@ -42,9 +42,9 @@ export type CustomerTrackingSettings = {
 const SETTINGS_KEY = "customer_tracking_page_settings";
 
 export const defaultSafePlaceOptions: SafePlaceOption[] = [
-  { id: "side_gate", label: "Leave behind side gate", requiresDetails: false },
-  { id: "rear_garden", label: "Leave in rear garden", requiresDetails: false },
-  { id: "garage", label: "Leave in garage", requiresDetails: false },
+  { id: "side_gate", label: "Behind side gate", requiresDetails: false },
+  { id: "rear_garden", label: "In rear garden", requiresDetails: false },
+  { id: "garage", label: "In garage", requiresDetails: false },
   { id: "other", label: "Other safe place", requiresDetails: true },
 ];
 
