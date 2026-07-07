@@ -100,6 +100,8 @@ type PlanningEtaPreviewResult = {
   error: string;
 };
 
+const RAPID_DELIVERY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/Rapid_Delivery.png?v=1782326829";
+
 const fallbackRoutePlanningSettings = {
   routeDate: new Date().toISOString().slice(0, 10),
   plannedStartTime: "05:00",
@@ -792,6 +794,52 @@ function OptimiseRouteButton({ onClick, loading, disabled }: { onClick: () => vo
   );
 }
 
+function OptimisedStatusPill({ optimised }: { optimised: boolean }) {
+  if (!optimised) {
+    return (
+      <span
+        style={{
+          background: "#f2f4f7",
+          border: "1px solid #d0d5dd",
+          borderRadius: 999,
+          color: "#344054",
+          display: "inline-flex",
+          fontSize: 13,
+          fontWeight: 700,
+          lineHeight: "18px",
+          padding: "2px 8px",
+        }}
+      >
+        Not optimised
+      </span>
+    );
+  }
+
+  return (
+    <span
+      style={{
+        alignItems: "center",
+        background: "#c8102e",
+        border: "1px solid rgba(120, 0, 0, 0.35)",
+        borderRadius: 999,
+        boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.25)",
+        color: "#ffffff",
+        display: "inline-flex",
+        fontSize: 13,
+        fontWeight: 800,
+        gap: 6,
+        lineHeight: "18px",
+        padding: "3px 10px",
+      }}
+    >
+      <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8.9 1.3 3.4 8.5h4.2L6.8 14.7l5.8-7.9H8.2l.7-5.5Z" />
+      </svg>
+      <span>Optimised</span>
+    </span>
+  );
+}
+
 function StructuredAddressFields({
   address,
   onChange,
@@ -874,6 +922,7 @@ export default function OrdersMap() {
   const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
   const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
+  const [routeOptimised, setRouteOptimised] = useState(false);
 
   const defaultStartAddress = defaults.startAddress;
   const defaultStartLatitude = typeof defaults.startLatitude === "number" ? defaults.startLatitude : null;
@@ -919,6 +968,7 @@ export default function OrdersMap() {
     setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
     setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
     setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
+    setRouteOptimised(true);
   }, [optimisationFetcher.data]);
 
   useEffect(() => {
@@ -950,6 +1000,7 @@ export default function OrdersMap() {
     setRouteDistanceKm(null);
     setRouteFinishEta(null);
     setRouteDurationMinutes(null);
+    setRouteOptimised(false);
   };
 
   const resetTransientAddressFields = () => {
@@ -1107,12 +1158,24 @@ export default function OrdersMap() {
   };
 
   return (
-    <Page title="Planning Map" fullWidth>
+    <Page fullWidth>
+      <Box paddingBlockEnd="300">
+        <img
+          src={RAPID_DELIVERY_LOGO_URL}
+          alt="Rapid delivery"
+          style={{ display: "block", height: "auto", maxWidth: 190, width: "42vw" }}
+        />
+      </Box>
       <Layout>
         <Layout.Section>
           <LegacyCard>
             <Box padding="400" borderBlockEndWidth="025" borderColor="border">
-              <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="200">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h1" variant="headingLg">Planning Map</Text>
+                  <Badge tone="info">{allOrders.length} orders</Badge>
+                </InlineStack>
+
                 <BlockStack gap="100">
                   {!addressLookupEnabled ? (
                     <Text as="p" variant="bodySm" tone="critical">
@@ -1132,9 +1195,7 @@ export default function OrdersMap() {
                     </Text>
                   ) : null}
                 </BlockStack>
-
-                <Badge tone="info">{allOrders.length} orders</Badge>
-              </InlineStack>
+              </BlockStack>
             </Box>
 
             <Box minHeight="420px" background="bg-surface-secondary" padding="400">
@@ -1183,53 +1244,7 @@ export default function OrdersMap() {
                       Finish ETA: {routeFinishEta || "Pending"}
                     </Text>
 
-                    {routeDistanceKm === null ? (
-                      <span
-                        style={{
-                          background: "#f2f4f7",
-                          border: "1px solid #d0d5dd",
-                          borderRadius: 999,
-                          color: "#344054",
-                          display: "inline-flex",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          lineHeight: "18px",
-                          padding: "2px 8px",
-                        }}
-                      >
-                        Live ETA
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          alignItems: "center",
-                          background: "#c8102e",
-                          border: "1px solid rgba(120, 0, 0, 0.35)",
-                          borderRadius: 999,
-                          boxShadow: "inset 0 -1px 0 rgba(0,0,0,0.25)",
-                          color: "#ffffff",
-                          display: "inline-flex",
-                          fontSize: 13,
-                          fontWeight: 800,
-                          gap: 6,
-                          lineHeight: "18px",
-                          padding: "3px 10px",
-                        }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          style={{
-                            color: "#ffffff",
-                            display: "inline-block",
-                            fontWeight: 900,
-                            lineHeight: "18px",
-                          }}
-                        >
-                          ⚡︎
-                        </span>
-                        <span>Optimised</span>
-                      </span>
-                    )}
+                    <OptimisedStatusPill optimised={routeOptimised} />
                   </InlineStack>
 
                   {selectedDriver ? (
