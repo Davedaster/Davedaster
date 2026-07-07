@@ -24,6 +24,7 @@ type PlanningEtaPreviewResult = {
   totalTravelMinutes: number;
   totalHandlingMinutes: number;
   totalRouteMinutes: number;
+  totalDistanceKm: number | null;
   finishTravelMinutes: number;
   routeFinishEta: string | null;
   tomTomLegs: number;
@@ -43,6 +44,7 @@ type RoutePayload = {
   routes?: Array<{
     summary?: {
       travelTimeInSeconds?: number;
+      lengthInMeters?: number;
     };
   }>;
 };
@@ -211,6 +213,14 @@ function distanceKm(from: RoutePoint, to: RoutePoint) {
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function fallbackDistanceKm(from: RoutePoint | null, to: RoutePoint | null) {
+  if (!from || !to) {
+    return null;
+  }
+
+  return distanceKm(from, to) * FALLBACK_ROAD_DISTANCE_FACTOR;
+}
+
 function fallbackTravelMinutes(from: RoutePoint | null, to: RoutePoint | null, defaultMinutes: number) {
   if (!from || !to) {
     return Math.max(10, defaultMinutes);
@@ -237,6 +247,7 @@ async function routeTravelMinutes(from: RoutePoint | null, to: RoutePoint | null
   if (!from || !to) {
     return {
       travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      distanceKm: fallbackDistanceKm(from, to),
       usedTomTom: false,
     };
   }
@@ -246,6 +257,7 @@ async function routeTravelMinutes(from: RoutePoint | null, to: RoutePoint | null
   if (!credentials.tomtomApiKey) {
     return {
       travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      distanceKm: fallbackDistanceKm(from, to),
       usedTomTom: false,
     };
   }
@@ -256,27 +268,33 @@ async function routeTravelMinutes(from: RoutePoint | null, to: RoutePoint | null
     if (!response.ok) {
       return {
         travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+        distanceKm: fallbackDistanceKm(from, to),
         usedTomTom: false,
       };
     }
 
     const payload = await response.json() as RoutePayload;
-    const travelSeconds = payload.routes?.[0]?.summary?.travelTimeInSeconds;
+    const summary = payload.routes?.[0]?.summary;
+    const travelSeconds = summary?.travelTimeInSeconds;
+    const lengthMeters = summary?.lengthInMeters;
 
     if (typeof travelSeconds !== "number" || !Number.isFinite(travelSeconds)) {
       return {
         travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+        distanceKm: fallbackDistanceKm(from, to),
         usedTomTom: false,
       };
     }
 
     return {
       travelMinutes: Math.max(1, Math.ceil(travelSeconds / 60)),
+      distanceKm: typeof lengthMeters === "number" && Number.isFinite(lengthMeters) ? lengthMeters / 1000 : fallbackDistanceKm(from, to),
       usedTomTom: true,
     };
   } catch {
     return {
       travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      distanceKm: fallbackDistanceKm(from, to),
       usedTomTom: false,
     };
   }
@@ -389,22 +407,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       eta: formatEtaTime(slot.estimatedArrival),
       arrivalMinutes: Math.max(0, Math.round((slot.estimatedArrival.getTime() - routeStart.getTime()) / 60000)),
     }));
-    const lastSelectedOrder = selectedOrders[selectedOrders.length - 1];
-    const lastStopPoint = lastSelectedOrder && hasCoordinates({
-      latitude: lastSelectedOrder.latitude,
-      longitude: lastSelectedOrder.longitude,
-    })
-      ? {
-        latitude: lastSelectedOrder.latitude,
-        longitude: lastSelectedOrder.longitude,
+    let previousDistancePoint: RoutePoint | null = start;
+    let totalDistanceKm: number | null = 0;
+
+    for (const order of selectedOrders) {
+      const stopPoint = hasCoordinates({ latitude: order.latitude, longitude: order.longitude })
+        ? { latitude: order.latitude, longitude: order.longitude }
+        : null;
+      const leg = await routeTravelMinutes(previousDistancePoint, stopPoint, timePerDropMinutes);
+
+      if (totalDistanceKm !== null && typeof leg.distanceKm === "number") {
+        totalDistanceKm += leg.distanceKm;
+      } else {
+        totalDistanceKm = null;
       }
-      : null;
-    const finishLeg = await routeTravelMinutes(lastStopPoint, finish, timePerDropMinutes);
+
+      if (stopPoint) {
+        previousDistancePoint = stopPoint;
+      }
+    }
+
+    const finishLeg = await routeTravelMinutes(previousDistancePoint, finish, timePerDropMinutes);
     const finalDropHandlingMinutes = selectedOrders.length ? timePerDropMinutes : 0;
     const totalHandlingMinutes = etaResult.totalHandlingMinutes + finalDropHandlingMinutes;
     const totalTravelMinutes = etaResult.totalTravelMinutes + finishLeg.travelMinutes;
     const totalRouteMinutes = totalTravelMinutes + totalHandlingMinutes;
     const routeFinishEta = addMinutes(routeStart, totalRouteMinutes);
+
+    if (totalDistanceKm !== null && typeof finishLeg.distanceKm === "number") {
+      totalDistanceKm += finishLeg.distanceKm;
+    } else {
+      totalDistanceKm = null;
+    }
 
     return json<PlanningEtaPreviewResult>({
       ok: true,
@@ -412,6 +446,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       totalTravelMinutes,
       totalHandlingMinutes,
       totalRouteMinutes,
+      totalDistanceKm,
       finishTravelMinutes: finishLeg.travelMinutes,
       routeFinishEta: formatEtaTime(routeFinishEta),
       tomTomLegs: etaResult.tomTomLegs + (finishLeg.usedTomTom ? 1 : 0),
