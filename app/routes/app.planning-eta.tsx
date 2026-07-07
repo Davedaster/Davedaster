@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
+import { getAppCredentials } from "../lib/appCredentials.server";
 import { buildTravelEtaSlots } from "../lib/etaSlots.server";
 import { lookupAddress } from "../lib/getAddress.server";
 import { listOpenReturnPlanningOrders } from "../lib/returns.server";
@@ -22,6 +23,9 @@ type PlanningEtaPreviewResult = {
   stopEtas: StopEtaPreview[];
   totalTravelMinutes: number;
   totalHandlingMinutes: number;
+  totalRouteMinutes: number;
+  finishTravelMinutes: number;
+  routeFinishEta: string | null;
   tomTomLegs: number;
   fallbackLegs: number;
   returnToBase: boolean;
@@ -30,7 +34,22 @@ type PlanningEtaPreviewResult = {
   error: string;
 };
 
+type RoutePoint = {
+  latitude: number;
+  longitude: number;
+};
+
+type RoutePayload = {
+  routes?: Array<{
+    summary?: {
+      travelTimeInSeconds?: number;
+    };
+  }>;
+};
+
 const ROUTE_TIME_ZONE = "Europe/London";
+const FALLBACK_AVERAGE_ROAD_SPEED_KPH = 64;
+const FALLBACK_ROAD_DISTANCE_FACTOR = 1.35;
 
 const fallbackRoutePlanningSettings = {
   routeDate: new Date().toISOString().slice(0, 10),
@@ -169,7 +188,101 @@ function finiteNumber(value: number, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-async function resolvePlanningStart(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
+function hasCoordinates(value: { latitude?: number | null; longitude?: number | null } | null | undefined): value is RoutePoint {
+  return typeof value?.latitude === "number" &&
+    typeof value?.longitude === "number" &&
+    Number.isFinite(value.latitude) &&
+    Number.isFinite(value.longitude);
+}
+
+function degreesToRadians(value: number) {
+  return value * Math.PI / 180;
+}
+
+function distanceKm(from: RoutePoint, to: RoutePoint) {
+  const earthRadiusKm = 6371;
+  const latDifference = degreesToRadians(to.latitude - from.latitude);
+  const lngDifference = degreesToRadians(to.longitude - from.longitude);
+  const fromLat = degreesToRadians(from.latitude);
+  const toLat = degreesToRadians(to.latitude);
+  const a = Math.sin(latDifference / 2) ** 2 +
+    Math.cos(fromLat) * Math.cos(toLat) * Math.sin(lngDifference / 2) ** 2;
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fallbackTravelMinutes(from: RoutePoint | null, to: RoutePoint | null, defaultMinutes: number) {
+  if (!from || !to) {
+    return Math.max(10, defaultMinutes);
+  }
+
+  const estimatedRoadKm = distanceKm(from, to) * FALLBACK_ROAD_DISTANCE_FACTOR;
+  return Math.max(5, Math.ceil((estimatedRoadKm / FALLBACK_AVERAGE_ROAD_SPEED_KPH) * 60));
+}
+
+function routeApiUrl(from: RoutePoint, to: RoutePoint, apiKey: string) {
+  const locations = `${from.latitude},${from.longitude}:${to.latitude},${to.longitude}`;
+  const params = new URLSearchParams({
+    key: apiKey,
+    traffic: "true",
+    travelMode: "van",
+    routeType: "fastest",
+    computeTravelTimeFor: "all",
+  });
+
+  return `https://api.tomtom.com/routing/1/calculateRoute/${locations}/json?${params.toString()}`;
+}
+
+async function routeTravelMinutes(from: RoutePoint | null, to: RoutePoint | null, defaultMinutes: number) {
+  if (!from || !to) {
+    return {
+      travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      usedTomTom: false,
+    };
+  }
+
+  const credentials = await getAppCredentials();
+
+  if (!credentials.tomtomApiKey) {
+    return {
+      travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      usedTomTom: false,
+    };
+  }
+
+  try {
+    const response = await fetch(routeApiUrl(from, to, credentials.tomtomApiKey));
+
+    if (!response.ok) {
+      return {
+        travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+        usedTomTom: false,
+      };
+    }
+
+    const payload = await response.json() as RoutePayload;
+    const travelSeconds = payload.routes?.[0]?.summary?.travelTimeInSeconds;
+
+    if (typeof travelSeconds !== "number" || !Number.isFinite(travelSeconds)) {
+      return {
+        travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+        usedTomTom: false,
+      };
+    }
+
+    return {
+      travelMinutes: Math.max(1, Math.ceil(travelSeconds / 60)),
+      usedTomTom: true,
+    };
+  } catch {
+    return {
+      travelMinutes: fallbackTravelMinutes(from, to, defaultMinutes),
+      usedTomTom: false,
+    };
+  }
+}
+
+async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
   const trimmedAddress = address?.trim() || fallbackRoutePlanningSettings.startAddress;
 
   if (typeof latitude === "number" && Number.isFinite(latitude) && typeof longitude === "number" && Number.isFinite(longitude)) {
@@ -237,8 +350,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const timePerDropMinutes = finiteNumber(Number(formData.get("timePerDropMinutes") || fallbackRoutePlanningSettings.timePerDropMinutes), fallbackRoutePlanningSettings.timePerDropMinutes);
     const customerSlotMinutes = finiteNumber(Number(formData.get("customerSlotMinutes") || fallbackRoutePlanningSettings.customerSlotMinutes), fallbackRoutePlanningSettings.customerSlotMinutes);
     const startAddress = String(formData.get("startAddress") || fallbackRoutePlanningSettings.startAddress).trim();
+    const finishAddress = String(formData.get("finishAddress") || startAddress).trim();
     const startLatitude = formCoordinate(formData, "startLatitude") ?? fallbackRoutePlanningSettings.startLatitude;
     const startLongitude = formCoordinate(formData, "startLongitude") ?? fallbackRoutePlanningSettings.startLongitude;
+    const rawFinishLatitude = formCoordinate(formData, "finishLatitude");
+    const rawFinishLongitude = formCoordinate(formData, "finishLongitude");
     const returnToBase = String(formData.get("returnToBase") || "") === "true";
     const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
     const selectedOrders = await getSelectedPlanningOrders(admin, selectedOrderIds, manualOrders);
@@ -247,7 +363,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json<PlanningEtaPreviewResult>({ ok: false, error: "Selected orders could not all be found for the ETA preview." }, { status: 400 });
     }
 
-    const start = await resolvePlanningStart(startAddress, startLatitude, startLongitude);
+    const start = await resolvePlanningEndpoint(startAddress, startLatitude, startLongitude);
+    const finish = returnToBase
+      ? start
+      : await resolvePlanningEndpoint(finishAddress || startAddress, rawFinishLatitude, rawFinishLongitude);
     const etaStops = selectedOrders.map((order, index) => ({
       id: order.id,
       orderIndex: index + 1,
@@ -270,14 +389,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       eta: formatEtaTime(slot.estimatedArrival),
       arrivalMinutes: Math.max(0, Math.round((slot.estimatedArrival.getTime() - routeStart.getTime()) / 60000)),
     }));
+    const lastSelectedOrder = selectedOrders[selectedOrders.length - 1];
+    const lastStopPoint = hasCoordinates({ latitude: lastSelectedOrder?.latitude, longitude: lastSelectedOrder?.longitude })
+      ? { latitude: lastSelectedOrder.latitude!, longitude: lastSelectedOrder.longitude! }
+      : null;
+    const finishLeg = await routeTravelMinutes(lastStopPoint, finish, timePerDropMinutes);
+    const finalDropHandlingMinutes = selectedOrders.length ? timePerDropMinutes : 0;
+    const totalHandlingMinutes = etaResult.totalHandlingMinutes + finalDropHandlingMinutes;
+    const totalTravelMinutes = etaResult.totalTravelMinutes + finishLeg.travelMinutes;
+    const totalRouteMinutes = totalTravelMinutes + totalHandlingMinutes;
+    const routeFinishEta = addMinutes(routeStart, totalRouteMinutes);
 
     return json<PlanningEtaPreviewResult>({
       ok: true,
       stopEtas,
-      totalTravelMinutes: etaResult.totalTravelMinutes,
-      totalHandlingMinutes: etaResult.totalHandlingMinutes,
-      tomTomLegs: etaResult.tomTomLegs,
-      fallbackLegs: etaResult.fallbackLegs,
+      totalTravelMinutes,
+      totalHandlingMinutes,
+      totalRouteMinutes,
+      finishTravelMinutes: finishLeg.travelMinutes,
+      routeFinishEta: formatEtaTime(routeFinishEta),
+      tomTomLegs: etaResult.tomTomLegs + (finishLeg.usedTomTom ? 1 : 0),
+      fallbackLegs: etaResult.fallbackLegs + (finishLeg.usedTomTom ? 0 : 1),
       returnToBase,
     });
   } catch (error) {
