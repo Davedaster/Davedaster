@@ -3,6 +3,7 @@ import { getAppCredentials } from "./appCredentials.server";
 import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { sendEmailWithResend, sendSmsWithTwilio, isResendEnabled, isTwilioEnabled } from "./notificationSenders.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
+import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -244,6 +245,13 @@ export async function markStopFailedDelivery(input: {
     if (sent) {
       notificationResults.push(`${order.shopifyOrderNumber}: customer notified${trackingUrl ? ` with ${trackingUrl}` : ""}`);
     }
+  }
+
+  try {
+    const etaResult = await recalculateTrafficEtaAfterStop(input.stopId);
+    notificationResults.push(`Traffic ETA refresh: ${etaResult.ok ? `${etaResult.recalculatedStops || 0} stop${etaResult.recalculatedStops === 1 ? "" : "s"} refreshed` : etaResult.reason || "skipped"}`);
+  } catch (error) {
+    notificationResults.push(`Traffic ETA refresh skipped, ${notificationErrorMessage(error)}`);
   }
 
   try {
