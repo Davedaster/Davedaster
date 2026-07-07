@@ -1,6 +1,5 @@
 import prisma from "../db.server";
-import { getAppCredentials } from "./appCredentials.server";
-import { buildTravelEtaSlots, optimiseStopOrderByTravelTime } from "./etaSlots.server";
+import { buildTravelEtaSlots } from "./etaSlots.server";
 import { lookupAddress } from "./getAddress.server";
 import { assertOrdersAvailableForRoute } from "./routeAllocations.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
@@ -491,51 +490,7 @@ export async function optimiseRoute(routeId: string) {
   }
 
   if (optimisableStops.length !== unlockedStops.length) {
-    throw new Error("Every unlocked stop needs latitude and longitude before the route can be optimised. Locked stops are left in place.");
-  }
-
-  const unlockedOrderIndexes = unlockedStops
-    .map((stop) => stop.orderIndex)
-    .sort((a, b) => a - b);
-  const credentials = await getAppCredentials();
-
-  if (credentials.tomtomApiKey) {
-    const optimised = await optimiseStopOrderByTravelTime(
-      optimisableStops,
-      start,
-      finish,
-      route.timePerDropMinutes,
-    );
-
-    await prisma.$transaction(async (tx) => {
-      for (const [index, stopId] of optimised.orderedStopIds.entries()) {
-        const orderIndex = unlockedOrderIndexes[index];
-
-        if (orderIndex) {
-          await tx.stop.update({
-            where: { id: stopId },
-            data: { orderIndex },
-          });
-        }
-      }
-
-      await tx.route.update({
-        where: { id: routeId },
-        data: {
-          totalDuration: optimised.totalTravelMinutes,
-          history: {
-            create: {
-              action: "TomTom optimised",
-              details: lockedStops.length
-                ? `TomTom optimised ${unlockedStops.length} unlocked stops and preserved ${lockedStops.length} locked stops. ${optimised.tomTomLegs} TomTom legs, ${optimised.fallbackLegs} fallback legs.`
-                : `TomTom optimised ${unlockedStops.length} stops. ${optimised.tomTomLegs} TomTom legs, ${optimised.fallbackLegs} fallback legs. Estimated drive ${optimised.totalTravelMinutes} minutes.`,
-            },
-          },
-        },
-      });
-    });
-
-    return getRoute(routeId);
+    throw new Error("Every unlocked stop needs latitude and longitude before RouteXL can optimise the route. Locked stops are left in place.");
   }
 
   const stopByRouteXLKey = new Map(
@@ -578,6 +533,10 @@ export async function optimiseRoute(routeId: string) {
   const orderedStopKeys = optimised.waypoints
     .slice(1, -1)
     .map((waypoint) => extractRouteXLStopKey(waypoint.name));
+
+  const unlockedOrderIndexes = unlockedStops
+    .map((stop) => stop.orderIndex)
+    .sort((a, b) => a - b);
 
   await prisma.$transaction(async (tx) => {
     for (const [index, stopKey] of orderedStopKeys.entries()) {
