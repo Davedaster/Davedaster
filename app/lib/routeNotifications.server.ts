@@ -3,6 +3,7 @@ import { getAppCredentials } from "./appCredentials.server";
 import { buildShortCustomerTrackingUrl, ensureCustomerTrackingCode, getPublicAppBaseUrl } from "./customerTracking.server";
 import { sendEmailWithResend, sendSmsWithTwilio, isResendEnabled, isTwilioEnabled } from "./notificationSenders.server";
 import { buildBookedSlotMessage, buildDelayMessage, buildNextDropTrackingMessage, buildOutForDeliveryMessage, type NotificationChannel, type NotificationMessage, type NotificationTemplateInput } from "./notificationTemplates.server";
+import { calculateEtaSlots } from "./routeDrafts.server";
 
 type SendRouteNotificationsResult = {
   smsSent: number;
@@ -176,12 +177,12 @@ function etaGapMinutes(completedStop: StopForNotifications, nextStop: StopForNot
 }
 
 export async function sendBookedSlotNotifications(routeId: string): Promise<SendRouteNotificationsResult> {
-  const [route, credentials, canSendSms, canSendEmail] = await Promise.all([
-    getRouteForNotifications(routeId),
+  const [credentials, canSendSms, canSendEmail] = await Promise.all([
     getAppCredentials(),
     isTwilioEnabled(),
     isResendEnabled(),
   ]);
+  let route = await getRouteForNotifications(routeId);
 
   if (!route) {
     throw new Error("Route not found.");
@@ -197,6 +198,17 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
 
   if (!canSendSms && !canSendEmail) {
     throw new Error("Twilio and Resend are not set up yet. Add them in Settings, API Credentials before sending messages.");
+  }
+
+  await calculateEtaSlots(routeId);
+  route = await getRouteForNotifications(routeId);
+
+  if (!route) {
+    throw new Error("Route not found after recalculating customer ETAs.");
+  }
+
+  if (route.notificationsSent) {
+    throw new Error("Customer notifications have already been sent for this route.");
   }
 
   let smsSent = 0;
