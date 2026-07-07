@@ -89,6 +89,7 @@ type PlanningEtaPreviewResult = {
   totalTravelMinutes: number;
   totalHandlingMinutes: number;
   totalRouteMinutes: number;
+  totalDistanceKm: number | null;
   finishTravelMinutes: number;
   routeFinishEta: string | null;
   tomTomLegs: number;
@@ -253,6 +254,14 @@ function formatMinutesDuration(value: number | null | undefined) {
   }
 
   return `${hours} hr ${minutes.toString().padStart(2, "0")} min`;
+}
+
+function formatMiles(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "Pending";
+  }
+
+  return `${(value * 0.621371).toFixed(1)} mi`;
 }
 
 async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
@@ -864,6 +873,7 @@ export default function OrdersMap() {
   const [manualItems, setManualItems] = useState("");
   const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
+  const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
 
   const defaultStartAddress = defaults.startAddress;
   const defaultStartLatitude = typeof defaults.startLatitude === "number" ? defaults.startLatitude : null;
@@ -892,12 +902,6 @@ export default function OrdersMap() {
   const optimisationError = optimisationFetcher.data && !optimisationFetcher.data.ok ? optimisationFetcher.data.error : null;
   const etaPreviewRunning = etaPreviewFetcher.state !== "idle";
   const etaPreviewError = etaPreviewFetcher.data && !etaPreviewFetcher.data.ok ? etaPreviewFetcher.data.error : null;
-  const etaPreviewSummary = etaPreviewFetcher.data?.ok && stops.length
-    ? `${formatMinutesDuration(etaPreviewFetcher.data.totalRouteMinutes)} total route time, ${formatMinutesDuration(etaPreviewFetcher.data.totalTravelMinutes)} driving`
-    : null;
-  const etaPreviewLegSummary = etaPreviewFetcher.data?.ok && stops.length
-    ? `${etaPreviewFetcher.data.tomTomLegs} TomTom leg${etaPreviewFetcher.data.tomTomLegs === 1 ? "" : "s"}${etaPreviewFetcher.data.fallbackLegs ? `, ${etaPreviewFetcher.data.fallbackLegs} fallback leg${etaPreviewFetcher.data.fallbackLegs === 1 ? "" : "s"}` : ""}`
-    : null;
 
   useEffect(() => {
     if (!optimisationFetcher.data?.ok) {
@@ -914,6 +918,7 @@ export default function OrdersMap() {
     setStops([...orderedStops, ...missingStops]);
     setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
     setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
+    setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
   }, [optimisationFetcher.data]);
 
   useEffect(() => {
@@ -927,7 +932,9 @@ export default function OrdersMap() {
       ...stop,
       eta: etaById.get(stop.id) || stop.eta,
     })));
+    setRouteDistanceKm(etaPreviewFetcher.data.totalDistanceKm);
     setRouteFinishEta(etaPreviewFetcher.data.routeFinishEta);
+    setRouteDurationMinutes(etaPreviewFetcher.data.totalRouteMinutes);
   }, [etaPreviewFetcher.data]);
 
   useEffect(() => {
@@ -942,6 +949,7 @@ export default function OrdersMap() {
   const clearOptimisedStats = () => {
     setRouteDistanceKm(null);
     setRouteFinishEta(null);
+    setRouteDurationMinutes(null);
   };
 
   const resetTransientAddressFields = () => {
@@ -1162,11 +1170,11 @@ export default function OrdersMap() {
                 <BlockStack gap="100">
                   <InlineStack align="space-between">
                     <Text as="span" variant="bodySm">
-                      Stops: {stops.length}
+                      Full route: {formatMinutesDuration(routeDurationMinutes)}
                     </Text>
 
                     <Text as="span" variant="bodySm">
-                      Miles: {routeDistanceKm === null ? "Pending" : `${(routeDistanceKm * 0.621371).toFixed(1)} mi`}
+                      Total miles: {formatMiles(routeDistanceKm)}
                     </Text>
                   </InlineStack>
 
@@ -1232,25 +1240,13 @@ export default function OrdersMap() {
 
                   {etaPreviewRunning && stops.length ? (
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Updating live ETA preview...
-                    </Text>
-                  ) : null}
-
-                  {!etaPreviewRunning && etaPreviewSummary ? (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Live ETA preview: {etaPreviewSummary}
-                    </Text>
-                  ) : null}
-
-                  {!etaPreviewRunning && etaPreviewLegSummary ? (
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Route legs: {etaPreviewLegSummary}
+                      Updating route summary...
                     </Text>
                   ) : null}
 
                   {etaPreviewError && stops.length ? (
                     <Text as="p" variant="bodySm" tone="critical">
-                      Live ETA preview unavailable: {etaPreviewError}
+                      Route summary unavailable: {etaPreviewError}
                     </Text>
                   ) : null}
 
