@@ -18,6 +18,7 @@ import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
 import { assertOrdersAvailableForRoute } from "../lib/routeAllocations.server";
+import { calculateEtaSlots } from "../lib/routeDrafts.server";
 import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
 
 type Stop = { id: string; orderNumber: string; customerName: string; postcode: string; eta: string };
@@ -71,6 +72,7 @@ async function replaceDraftRoute(input: { route: NonNullable<DraftRoute>; orders
     if (groupIds.length) await tx.deliveryGroup.deleteMany({ where: { id: { in: groupIds } } });
     await tx.route.update({ where: { id: input.route.id }, data: { name: routeName, date: parseDate(routeDate), driverId: input.driverId || null, plannedStartTime: input.start || "05:00", timePerDropMinutes: dropMinutes, customerSlotMinutes: slotMinutes, startAddress: input.route.startAddress || SHOP.address, startLatitude: input.route.startLatitude ?? SHOP.latitude, startLongitude: input.route.startLongitude ?? SHOP.longitude, finishAddress: input.route.finishAddress || SHOP.address, finishLatitude: input.route.finishLatitude ?? SHOP.latitude, finishLongitude: input.route.finishLongitude ?? SHOP.longitude, totalMileage: null, totalDuration: null, stops: { create: input.orders.map((order, index) => ({ orderIndex: index + 1, estimatedArrival: estimatedArrival(routeDate, input.start || "05:00", index * dropMinutes), deliveryGroup: { create: { address: order.formattedAddress || order.addressSummary, formattedAddress: order.formattedAddress, postcode: order.postcode, latitude: order.latitude, longitude: order.longitude, addressStatus: order.addressStatus, addressSource: order.orderSource === "manual" ? "manual" : order.hasManualOverride ? "manual" : "getaddress", addressConfidence: order.addressConfidence, manualAddress: order.manualAddress, useManualAddress: order.hasManualOverride || order.orderSource === "manual", orders: { create: { shopifyOrderId: order.id, shopifyOrderNumber: order.name, orderSource: order.orderSource || "shopify", customerName: order.customerName, customerEmail: order.email, customerPhone: order.phone, postcode: order.postcode, lineItemSummary: order.lineItemSummary } } } } })) }, history: { create: { action: "Draft route edited", details: `Edited on map planner with ${input.orders.length} stops.` } } } });
   });
+  await calculateEtaSlots(input.route.id, input.start || "05:00", dropMinutes, slotMinutes);
   return routeName;
 }
 
