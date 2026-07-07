@@ -310,10 +310,17 @@ function TemplateEditor({
           </BlockStack>
           <InlineStack gap="200">
             <Button onClick={onToggle}>{isOpen ? "Close" : "Edit"}</Button>
-            <Form method="post">
+            <Form
+              method="post"
+              onSubmit={(event) => {
+                if (!window.confirm(`Reset ${template.label} back to the default template? This will replace the saved SMS and email copy for this template.`)) {
+                  event.preventDefault();
+                }
+              }}
+            >
               <input type="hidden" name="intent" value="resetTemplate" />
               <input type="hidden" name="templateId" value={template.id} />
-              <Button submit>Reset default</Button>
+              <Button submit tone="critical">Reset default</Button>
             </Form>
           </InlineStack>
         </InlineStack>
@@ -400,7 +407,7 @@ export default function Notifications() {
   const { twilioEnabled, resendConfigured, resendEnabled, emailNotificationsEnabled, templates, previews, variables } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const previewsById = new Map(previews.map((preview) => [preview.id, preview]));
-  const [openTemplateId, setOpenTemplateId] = useState<string | null>(templates[0]?.id || null);
+  const [openTemplateId, setOpenTemplateId] = useState<string | null>(null);
 
   return (
     <Page title="Notifications">
@@ -410,7 +417,7 @@ export default function Notifications() {
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Customer notification templates</Text>
               <Text as="p" variant="bodyMd" tone="subdued">
-                Edit the SMS text, email subject and HTML email used for delivery updates. Late delivery updates are SMS only, so the email editor is removed for that template.
+                Edit the SMS text, email subject and HTML email used for delivery updates. Templates stay closed until you choose one to edit, keeping this page easier to scan.
               </Text>
               <InlineStack gap="200">
                 <Badge tone={twilioEnabled ? "success" : "warning"}>{`Twilio ${twilioEnabled ? "enabled" : "not set up"}`}</Badge>
