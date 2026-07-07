@@ -83,6 +83,19 @@ type PlanningOptimisationResult = {
   error: string;
 };
 
+type PlanningEtaPreviewResult = {
+  ok: true;
+  stopEtas: StopEta[];
+  totalTravelMinutes: number;
+  totalHandlingMinutes: number;
+  tomTomLegs: number;
+  fallbackLegs: number;
+  returnToBase: boolean;
+} | {
+  ok: false;
+  error: string;
+};
+
 const fallbackRoutePlanningSettings = {
   routeDate: new Date().toISOString().slice(0, 10),
   plannedStartTime: "05:00",
@@ -812,6 +825,7 @@ export default function OrdersMap() {
   const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults, tomtomApiKey } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const optimisationFetcher = useFetcher<PlanningOptimisationResult>();
+  const etaPreviewFetcher = useFetcher<PlanningEtaPreviewResult>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [routeName, setRouteName] = useState("");
   const [selectedDriverId, setSelectedDriverId] = useState("");
@@ -857,6 +871,11 @@ export default function OrdersMap() {
   const manualOrdersJson = JSON.stringify(manualOrders);
   const optimisationRunning = optimisationFetcher.state !== "idle";
   const optimisationError = optimisationFetcher.data && !optimisationFetcher.data.ok ? optimisationFetcher.data.error : null;
+  const etaPreviewRunning = etaPreviewFetcher.state !== "idle";
+  const etaPreviewError = etaPreviewFetcher.data && !etaPreviewFetcher.data.ok ? etaPreviewFetcher.data.error : null;
+  const etaPreviewSummary = etaPreviewFetcher.data?.ok && stops.length
+    ? `${etaPreviewFetcher.data.tomTomLegs} TomTom leg${etaPreviewFetcher.data.tomTomLegs === 1 ? "" : "s"}${etaPreviewFetcher.data.fallbackLegs ? `, ${etaPreviewFetcher.data.fallbackLegs} fallback leg${etaPreviewFetcher.data.fallbackLegs === 1 ? "" : "s"}` : ""}`
+    : null;
 
   useEffect(() => {
     if (!optimisationFetcher.data?.ok) {
@@ -874,6 +893,19 @@ export default function OrdersMap() {
     setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
     setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
   }, [optimisationFetcher.data]);
+
+  useEffect(() => {
+    if (!etaPreviewFetcher.data?.ok) {
+      return;
+    }
+
+    const etaById = new Map(etaPreviewFetcher.data.stopEtas.map((stopEta) => [stopEta.id, stopEta.eta]));
+
+    setStops((currentStops) => currentStops.map((stop) => ({
+      ...stop,
+      eta: etaById.get(stop.id) || stop.eta,
+    })));
+  }, [etaPreviewFetcher.data]);
 
   useEffect(() => {
     setStops((currentStops) => refreshStopEtas(currentStops, plannedStartTime, timePerDropMinutes));
@@ -959,6 +991,38 @@ export default function OrdersMap() {
     formData.set("finishLatitude", returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude)));
     formData.set("finishLongitude", returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude)));
   };
+
+  const submitEtaPreview = () => {
+    if (!stops.length) {
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("selectedOrderIds", selectedOrderIds);
+    formData.set("manualOrdersJson", manualOrdersJson);
+    formData.set("routeDate", routeDate);
+    formData.set("plannedStartTime", plannedStartTime);
+    formData.set("timePerDropMinutes", timePerDropMinutes);
+    formData.set("customerSlotMinutes", customerSlotMinutes);
+    formData.set("returnToBase", returnToBase ? "true" : "false");
+    appendEndpointFields(formData);
+
+    etaPreviewFetcher.submit(formData, { method: "post", action: "/app/planning-eta" });
+  };
+
+  useEffect(() => {
+    if (!stops.length) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      submitEtaPreview();
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [selectedOrderIds, manualOrdersJson, routeDate, plannedStartTime, timePerDropMinutes, customerSlotMinutes, startAddress, startLatitude, startLongitude, returnToBase]);
 
   const optimisePlanningRoute = () => {
     const formData = new FormData();
@@ -1140,6 +1204,24 @@ export default function OrdersMap() {
                   {selectedDriver ? (
                     <Text as="p" variant="bodySm" tone="subdued">
                       Driver selected: {selectedDriver.name}
+                    </Text>
+                  ) : null}
+
+                  {etaPreviewRunning && stops.length ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Updating live ETA preview...
+                    </Text>
+                  ) : null}
+
+                  {!etaPreviewRunning && etaPreviewSummary ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Live ETA preview: {etaPreviewSummary}
+                    </Text>
+                  ) : null}
+
+                  {etaPreviewError && stops.length ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      Live ETA preview unavailable: {etaPreviewError}
                     </Text>
                   ) : null}
 
