@@ -323,7 +323,7 @@ export async function markDriverStopMissedFromToken(input: {
   reason: string;
   note?: string | null;
 }) {
-  const stop = await getStopForDriverToken(input.token, input.stopId);
+  await getStopForDriverToken(input.token, input.stopId);
 
   await markStopFailedDelivery({
     admin: input.admin,
@@ -331,8 +331,6 @@ export async function markDriverStopMissedFromToken(input: {
     reason: input.reason,
     note: input.note,
   });
-
-  await sendNextPendingStopNotification(stop.routeId, input.stopId);
 }
 
 export async function completeCollectionStopFromToken(input: {
