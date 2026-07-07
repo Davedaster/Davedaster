@@ -394,21 +394,7 @@ function DeleteReturnControl({ ticket, isDeleting }: { ticket: ReturnTicketForRo
   }
 
   return (
-    <Form method="post" onSubmit={(event) => {
-      const confirmed = window.confirm([
-        "Delete this return?",
-        "",
-        "This will cancel the return and move it out of Active returns.",
-        "If it is already on a draft or published route, its route stop will also be removed.",
-        "Customer deliveries on the same route will stay in place.",
-        "",
-        "Only continue if you are sure.",
-      ].join("\n"));
-
-      if (!confirmed) {
-        event.preventDefault();
-      }
-    }}>
+    <Form method="post">
       <input type="hidden" name="intent" value="cancelReturn" />
       <input type="hidden" name="ticketId" value={ticket.id} />
       <Button submit tone="critical" size="slim" loading={isDeleting} disabled={isDeleting}>Delete</Button>
