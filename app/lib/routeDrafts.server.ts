@@ -189,7 +189,7 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
   const planning = await buildPlanningData(input);
   const name = buildRouteName(input.orders, input.routeName, planning.date);
 
-  return prisma.route.create({
+  const draftRoute = await prisma.route.create({
     data: {
       name,
       date: planning.date,
@@ -258,6 +258,13 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
       history: true,
     },
   });
+
+  return calculateEtaSlots(
+    draftRoute.id,
+    planning.plannedStartTime,
+    planning.timePerDropMinutes,
+    planning.customerSlotMinutes,
+  );
 }
 
 export async function listRoutes() {
