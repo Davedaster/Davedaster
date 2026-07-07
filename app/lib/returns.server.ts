@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { lookupAddress } from "./getAddress.server";
+import { calculateEtaSlots } from "./routeDrafts.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
 
 export type ReturnTicketInput = {
@@ -160,7 +161,7 @@ async function returnTicketToPlanningOrder(ticket: ReturnTicketWithLines): Promi
     latitude,
     longitude,
     lineItemSummary,
-    lineItemLines: ["🔴 Return collection", ...lineItemLines],
+    lineItemLines: ["\u{1F534} Return collection", ...lineItemLines],
     fulfilByDate: null,
     hasManualOverride: true,
     manualAddress: ticket.address,
@@ -410,7 +411,7 @@ export async function assignReturnTicketToDraftRoute(ticketId: string, routeId: 
   const summary = linesSummary(ticket.lines);
   const postcode = ticket.postcode || extractPostcode(ticket.address);
 
-  return prisma.$transaction(async (tx) => {
+  const stop = await prisma.$transaction(async (tx) => {
     const deliveryGroup = await tx.deliveryGroup.create({
       data: {
         address: ticket.address,
@@ -476,6 +477,10 @@ export async function assignReturnTicketToDraftRoute(ticketId: string, routeId: 
 
     return stop;
   });
+
+  await calculateEtaSlots(route.id);
+
+  return stop;
 }
 
 export async function searchReturnTickets(query: string) {
