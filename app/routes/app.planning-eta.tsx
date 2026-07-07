@@ -390,8 +390,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       arrivalMinutes: Math.max(0, Math.round((slot.estimatedArrival.getTime() - routeStart.getTime()) / 60000)),
     }));
     const lastSelectedOrder = selectedOrders[selectedOrders.length - 1];
-    const lastStopPoint = hasCoordinates({ latitude: lastSelectedOrder?.latitude, longitude: lastSelectedOrder?.longitude })
-      ? { latitude: lastSelectedOrder.latitude!, longitude: lastSelectedOrder.longitude! }
+    const lastStopPoint = lastSelectedOrder && hasCoordinates({
+      latitude: lastSelectedOrder.latitude,
+      longitude: lastSelectedOrder.longitude,
+    })
+      ? {
+        latitude: lastSelectedOrder.latitude,
+        longitude: lastSelectedOrder.longitude,
+      }
       : null;
     const finishLeg = await routeTravelMinutes(lastStopPoint, finish, timePerDropMinutes);
     const finalDropHandlingMinutes = selectedOrders.length ? timePerDropMinutes : 0;
