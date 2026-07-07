@@ -1,7 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 
-import { defaultCountry } from "../lib/addressFields";
 import { buildTravelEtaSlots } from "../lib/etaSlots.server";
 import { lookupAddress } from "../lib/getAddress.server";
 import { listOpenReturnPlanningOrders } from "../lib/returns.server";
@@ -170,7 +169,7 @@ function finiteNumber(value: number, fallback: number) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
+async function resolvePlanningStart(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
   const trimmedAddress = address?.trim() || fallbackRoutePlanningSettings.startAddress;
 
   if (typeof latitude === "number" && Number.isFinite(latitude) && typeof longitude === "number" && Number.isFinite(longitude)) {
@@ -211,7 +210,7 @@ async function getSelectedPlanningOrders(
   const [shopifyOrders, returnPlanningOrders, manualDeliveryOrders] = await Promise.all([
     getDeliveryOrders(admin),
     listReturnPlanningOrdersSafely(),
-    Promise.all(manualOrders.map((order) => toManualDeliveryOrder({ ...order, country: order.country || defaultCountry }))),
+    Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
   ]);
   const ordersById = new Map([...shopifyOrders, ...returnPlanningOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
 
@@ -238,14 +237,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const timePerDropMinutes = finiteNumber(Number(formData.get("timePerDropMinutes") || fallbackRoutePlanningSettings.timePerDropMinutes), fallbackRoutePlanningSettings.timePerDropMinutes);
     const customerSlotMinutes = finiteNumber(Number(formData.get("customerSlotMinutes") || fallbackRoutePlanningSettings.customerSlotMinutes), fallbackRoutePlanningSettings.customerSlotMinutes);
     const startAddress = String(formData.get("startAddress") || fallbackRoutePlanningSettings.startAddress).trim();
-    const finishAddress = String(formData.get("finishAddress") || startAddress).trim();
     const startLatitude = formCoordinate(formData, "startLatitude") ?? fallbackRoutePlanningSettings.startLatitude;
     const startLongitude = formCoordinate(formData, "startLongitude") ?? fallbackRoutePlanningSettings.startLongitude;
-    const rawFinishLatitude = formCoordinate(formData, "finishLatitude");
-    const rawFinishLongitude = formCoordinate(formData, "finishLongitude");
     const returnToBase = String(formData.get("returnToBase") || "") === "true";
-    const finishLatitude = returnToBase ? startLatitude : rawFinishLatitude;
-    const finishLongitude = returnToBase ? startLongitude : rawFinishLongitude;
     const manualOrders = parseManualOrders(formData.get("manualOrdersJson"));
     const selectedOrders = await getSelectedPlanningOrders(admin, selectedOrderIds, manualOrders);
 
@@ -253,10 +247,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json<PlanningEtaPreviewResult>({ ok: false, error: "Selected orders could not all be found for the ETA preview." }, { status: 400 });
     }
 
-    const start = await resolvePlanningEndpoint(startAddress, startLatitude, startLongitude);
-    const finish = returnToBase
-      ? start
-      : await resolvePlanningEndpoint(finishAddress || startAddress, finishLatitude, finishLongitude);
+    const start = await resolvePlanningStart(startAddress, startLatitude, startLongitude);
     const etaStops = selectedOrders.map((order, index) => ({
       id: order.id,
       orderIndex: index + 1,
