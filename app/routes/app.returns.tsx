@@ -21,6 +21,7 @@ import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 import { assignReturnTicketToDraftRoute, listDraftRoutesForReturnAssignment, searchReturnTickets } from "../lib/returns.server";
 import { createReturnCollectionFromShopifyOrder, findShopifyOrderForReturn } from "../lib/returnCollections.server";
+import { calculateEtaSlots } from "../lib/routeDrafts.server";
 
 type ReturnLineInput = {
   itemName: string;
@@ -195,6 +196,10 @@ async function cancelReturnTicket(ticketId: string) {
       });
     }
   });
+
+  if (routeId) {
+    await calculateEtaSlots(routeId);
+  }
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
