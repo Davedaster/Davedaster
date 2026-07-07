@@ -3,9 +3,6 @@ import { getAppCredentials } from "./appCredentials.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { buildDeliveryCompleteMessage, buildSafePlaceDeliveryCompleteSms } from "./notificationTemplates.server";
 
-const GOOGLE_REVIEW_URL = "https://g.page/r/CZDHYoyjIf6CEAE/review";
-const COMPANY_PHONE = "01803 222784";
-
 type DeliveryCompleteOrder = {
   id?: string;
   shopifyOrderId: string;
@@ -31,16 +28,6 @@ type DeliveryCompleteResult = {
   failed: number;
   errors: string[];
 };
-
-function customerDisplayName(name?: string | null) {
-  return name?.trim() || "there";
-}
-
-function buildReceivedDeliveryCompleteSms(order: DeliveryCompleteOrder) {
-  return {
-    body: `Hi ${customerDisplayName(order.customerName)}, your Bathroom Panels Direct delivery for ${order.shopifyOrderNumber} has been completed. Thank you for your order.\n\nIf you're happy with the service, a quick Google review really helps our family business: ${GOOGLE_REVIEW_URL}\n\nNeed help? Call ${COMPANY_PHONE}`,
-  };
-}
 
 async function trackingUrlForOrder(baseUrl: string, order: DeliveryCompleteOrder) {
   if (!order.id) {
@@ -94,7 +81,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
           to: order.customerPhone,
           message: input.leftInSafePlace
             ? await buildSafePlaceDeliveryCompleteSms(baseMessageInput)
-            : buildReceivedDeliveryCompleteSms(order),
+            : await buildDeliveryCompleteMessage(baseMessageInput, "sms"),
         });
         smsSent += 1;
         sentAnything = true;
