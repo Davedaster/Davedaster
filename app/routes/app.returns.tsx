@@ -117,7 +117,7 @@ async function cancelReturnTicket(ticketId: string) {
   const matchingReturnOrderIds = deliveryGroupOrders
     .filter((order) => order.shopifyOrderId === returnOrderId)
     .map((order) => order.id);
-  const deliveryGroupOnlyContainsThisReturn = deliveryGroupOrders.length > 0 && deliveryGroupOrders.every((order) => order.shopifyOrderId === returnOrderId);
+  const deliveryGroupOnlyContainsThisReturn = deliveryGroupOrders.length === 0 || deliveryGroupOrders.every((order) => order.shopifyOrderId === returnOrderId);
   const otherReturnTicketsOnStop = ticket.stop?.returnTickets.filter((item) => item.id !== ticket.id && item.status !== "CANCELLED") || [];
   const shouldDeleteRouteStop = Boolean(
     stopId &&
@@ -138,7 +138,19 @@ async function cancelReturnTicket(ticketId: string) {
       },
     });
 
-    if (matchingReturnOrderIds.length && !shouldDeleteRouteStop) {
+    if (shouldDeleteRouteStop && deliveryGroupId) {
+      await tx.orderStop.deleteMany({
+        where: {
+          deliveryGroupId,
+        },
+      });
+
+      await tx.proofPhoto.deleteMany({
+        where: {
+          deliveryGroupId,
+        },
+      });
+    } else if (matchingReturnOrderIds.length) {
       await tx.orderStop.deleteMany({
         where: {
           id: {
@@ -345,7 +357,7 @@ function routeLabel(route: DraftRouteForAssignment) {
   return `${route.name} · ${date} · ${route.stops.length} stops`;
 }
 
-function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRows; draftRoutes: DraftRouteForAssignment[] }) {
+function AssignmentControl({ ticket, draftRoutes, isAssigning }: { ticket: ReturnTicketForRows; draftRoutes: DraftRouteForAssignment[]; isAssigning: boolean }) {
   const [routeId, setRouteId] = useState("");
   const options = [
     { label: draftRoutes.length ? "Choose draft route" : "No draft routes available", value: "" },
@@ -366,14 +378,14 @@ function AssignmentControl({ ticket, draftRoutes }: { ticket: ReturnTicketForRow
       <input type="hidden" name="ticketId" value={ticket.id} />
       <input type="hidden" name="routeId" value={routeId} />
       <BlockStack gap="150">
-        <Select label="Draft route" labelHidden options={options} value={routeId} onChange={setRouteId} />
-        <Button submit size="slim" disabled={!routeId}>Assign</Button>
+        <Select label="Draft route" labelHidden options={options} value={routeId} onChange={setRouteId} disabled={isAssigning} />
+        <Button submit size="slim" loading={isAssigning} disabled={!routeId || isAssigning}>Assign</Button>
       </BlockStack>
     </Form>
   );
 }
 
-function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
+function DeleteReturnControl({ ticket, isDeleting }: { ticket: ReturnTicketForRows; isDeleting: boolean }) {
   if (!DELETABLE_RETURN_STATUSES.has(ticket.status)) {
     return <Text as="span" tone="subdued">Locked</Text>;
   }
@@ -397,20 +409,7 @@ function DeleteReturnControl({ ticket }: { ticket: ReturnTicketForRows }) {
     }}>
       <input type="hidden" name="intent" value="cancelReturn" />
       <input type="hidden" name="ticketId" value={ticket.id} />
-      <button
-        type="submit"
-        style={{
-          border: "1px solid #b42318",
-          background: "#fff7f5",
-          color: "#b42318",
-          borderRadius: 8,
-          padding: "7px 10px",
-          fontWeight: 800,
-          cursor: "pointer",
-        }}
-      >
-        Delete
-      </button>
+      <Button submit tone="critical" size="slim" loading={isDeleting} disabled={isDeleting}>Delete</Button>
     </Form>
   );
 }
@@ -423,7 +422,9 @@ export default function ReturnsPage() {
   const [lookupOrderNumber, setLookupOrderNumber] = useState(orderNumber);
   const [quantitiesByItemId, setQuantitiesByItemId] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState("");
-  const isCreating = navigation.state !== "idle" && navigation.formData?.get("intent") === "createReturnCollection";
+  const activeActionIntent = navigation.state !== "idle" ? String(navigation.formData?.get("intent") || "") : "";
+  const activeActionTicketId = navigation.state !== "idle" ? String(navigation.formData?.get("ticketId") || "") : "";
+  const isCreating = activeActionIntent === "createReturnCollection";
 
   useEffect(() => {
     if (!returnOrder) {
@@ -466,8 +467,8 @@ export default function ReturnsPage() {
     ticket.customerName,
     ticket.postcode || "No postcode",
     ticket.lines.map((line) => formatTicketLine(line.quantityExpected, line.itemName)).join(", "),
-    <AssignmentControl ticket={ticket} draftRoutes={draftRoutes} />,
-    <DeleteReturnControl ticket={ticket} />,
+    <AssignmentControl ticket={ticket} draftRoutes={draftRoutes} isAssigning={activeActionIntent === "assignReturnToRoute" && activeActionTicketId === ticket.id} />,
+    <DeleteReturnControl ticket={ticket} isDeleting={activeActionIntent === "cancelReturn" && activeActionTicketId === ticket.id} />,
     ticket.returnRequestedAt ? formatDate(ticket.returnRequestedAt) : formatDate(ticket.createdAt),
   ]);
 
@@ -560,7 +561,7 @@ export default function ReturnsPage() {
                     </BlockStack>
 
                     <TextField label="Internal notes" name="notes" value={notes} onChange={setNotes} autoComplete="off" multiline={3} />
-                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length}>Create return</Button>
+                    <Button submit variant="primary" loading={isCreating} disabled={!selectedLines.length || isCreating}>Create return</Button>
                   </BlockStack>
                 </Form>
               ) : null}
