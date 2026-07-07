@@ -367,7 +367,7 @@ export async function renameRoute(routeId: string, name: string) {
 export async function updateRoutePlanningSettings(routeId: string, input: RoutePlanningSettingsInput) {
   const planning = await buildPlanningData(input);
 
-  return prisma.route.update({
+  await prisma.route.update({
     where: {
       id: routeId,
     },
@@ -390,6 +390,13 @@ export async function updateRoutePlanningSettings(routeId: string, input: RouteP
       },
     },
   });
+
+  return calculateEtaSlots(
+    routeId,
+    planning.plannedStartTime,
+    planning.timePerDropMinutes,
+    planning.customerSlotMinutes,
+  );
 }
 
 export async function assignDriverToRoute(routeId: string, driverId: string | null) {
@@ -575,7 +582,7 @@ export async function optimiseRoute(routeId: string) {
     });
   });
 
-  return getRoute(routeId);
+  return calculateEtaSlots(routeId);
 }
 
 export async function calculateEtaSlots(routeId: string, startTime?: string, stopMinutes?: number, slotMinutes?: number) {
