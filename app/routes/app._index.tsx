@@ -88,6 +88,9 @@ type PlanningEtaPreviewResult = {
   stopEtas: StopEta[];
   totalTravelMinutes: number;
   totalHandlingMinutes: number;
+  totalRouteMinutes: number;
+  finishTravelMinutes: number;
+  routeFinishEta: string | null;
   tomTomLegs: number;
   fallbackLegs: number;
   returnToBase: boolean;
@@ -234,6 +237,22 @@ function formatEtaTime(startTime: string, offsetMinutes: number) {
   const etaMinuteValue = etaMinutes % 60;
 
   return `${String(etaHours).padStart(2, "0")}:${String(etaMinuteValue).padStart(2, "0")}`;
+}
+
+function formatMinutesDuration(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "Pending";
+  }
+
+  const rounded = Math.max(0, Math.round(value));
+  const hours = Math.floor(rounded / 60);
+  const minutes = rounded % 60;
+
+  if (!hours) {
+    return `${minutes} min`;
+  }
+
+  return `${hours} hr ${minutes.toString().padStart(2, "0")} min`;
 }
 
 async function resolvePlanningEndpoint(address: string | null | undefined, latitude?: number | null, longitude?: number | null) {
@@ -874,6 +893,9 @@ export default function OrdersMap() {
   const etaPreviewRunning = etaPreviewFetcher.state !== "idle";
   const etaPreviewError = etaPreviewFetcher.data && !etaPreviewFetcher.data.ok ? etaPreviewFetcher.data.error : null;
   const etaPreviewSummary = etaPreviewFetcher.data?.ok && stops.length
+    ? `${formatMinutesDuration(etaPreviewFetcher.data.totalRouteMinutes)} total route time, ${formatMinutesDuration(etaPreviewFetcher.data.totalTravelMinutes)} driving`
+    : null;
+  const etaPreviewLegSummary = etaPreviewFetcher.data?.ok && stops.length
     ? `${etaPreviewFetcher.data.tomTomLegs} TomTom leg${etaPreviewFetcher.data.tomTomLegs === 1 ? "" : "s"}${etaPreviewFetcher.data.fallbackLegs ? `, ${etaPreviewFetcher.data.fallbackLegs} fallback leg${etaPreviewFetcher.data.fallbackLegs === 1 ? "" : "s"}` : ""}`
     : null;
 
@@ -905,6 +927,7 @@ export default function OrdersMap() {
       ...stop,
       eta: etaById.get(stop.id) || stop.eta,
     })));
+    setRouteFinishEta(etaPreviewFetcher.data.routeFinishEta);
   }, [etaPreviewFetcher.data]);
 
   useEffect(() => {
@@ -1022,7 +1045,7 @@ export default function OrdersMap() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedOrderIds, manualOrdersJson, routeDate, plannedStartTime, timePerDropMinutes, customerSlotMinutes, startAddress, startLatitude, startLongitude, returnToBase]);
+  }, [selectedOrderIds, manualOrdersJson, routeDate, plannedStartTime, timePerDropMinutes, customerSlotMinutes, startAddress, startLatitude, startLongitude, finishAddress, returnToBase]);
 
   const optimisePlanningRoute = () => {
     const formData = new FormData();
@@ -1166,7 +1189,7 @@ export default function OrdersMap() {
                           padding: "2px 8px",
                         }}
                       >
-                        Not optimised
+                        Live ETA
                       </span>
                     ) : (
                       <span
@@ -1216,6 +1239,12 @@ export default function OrdersMap() {
                   {!etaPreviewRunning && etaPreviewSummary ? (
                     <Text as="p" variant="bodySm" tone="subdued">
                       Live ETA preview: {etaPreviewSummary}
+                    </Text>
+                  ) : null}
+
+                  {!etaPreviewRunning && etaPreviewLegSummary ? (
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Route legs: {etaPreviewLegSummary}
                     </Text>
                   ) : null}
 
