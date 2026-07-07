@@ -482,15 +482,17 @@ export async function sendNextPendingStopNotification(routeId: string, completed
     return { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] };
   }
 
-  const fallbackGap = Math.max(1, route.timePerDropMinutes || 10);
-  const gapMinutes = etaGapMinutes(completedStop, nextStop, fallbackGap);
-  const actualCompletion = completedStop.actualArrival ? new Date(completedStop.actualArrival) : new Date();
-  const updatedEta = new Date(actualCompletion.getTime() + gapMinutes * 60 * 1000);
+  if (!nextStop.estimatedArrival) {
+    const fallbackGap = Math.max(1, route.timePerDropMinutes || 10);
+    const gapMinutes = etaGapMinutes(completedStop, nextStop, fallbackGap);
+    const actualCompletion = completedStop.actualArrival ? new Date(completedStop.actualArrival) : new Date();
+    const updatedEta = new Date(actualCompletion.getTime() + gapMinutes * 60 * 1000);
 
-  await prisma.stop.update({
-    where: { id: nextStop.id },
-    data: { estimatedArrival: updatedEta },
-  });
+    await prisma.stop.update({
+      where: { id: nextStop.id },
+      data: { estimatedArrival: updatedEta },
+    });
+  }
 
   return sendManualRouteNotification({
     routeId,
