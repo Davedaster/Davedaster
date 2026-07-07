@@ -6,6 +6,7 @@ import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
 import { sendNextPendingStopNotification } from "./routeNotifications.server";
+import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
 
 type ShopifyAdmin = {
   graphql: (
@@ -77,6 +78,20 @@ function isResolvedStopStatus(status: string) {
 
 function normalisedNote(value?: string | null) {
   return value?.trim() || null;
+}
+
+async function refreshNextStopAfterCollection(routeId: string, stopId: string) {
+  try {
+    await recalculateTrafficEtaAfterStop(stopId);
+  } catch {
+    // Traffic ETA refresh must not undo a saved collection update.
+  }
+
+  try {
+    await sendNextPendingStopNotification(routeId, stopId);
+  } catch {
+    // Customer update must not undo a saved collection update.
+  }
 }
 
 export function buildDriverRouteUrl(request: Request, token: string) {
@@ -433,6 +448,8 @@ export async function completeCollectionStopFromToken(input: {
       },
     });
   });
+
+  await refreshNextStopAfterCollection(stop.routeId, input.stopId);
 }
 
 export async function markCollectionStopMissedFromToken(input: {
@@ -499,6 +516,8 @@ export async function markCollectionStopMissedFromToken(input: {
       },
     });
   });
+
+  await refreshNextStopAfterCollection(stop.routeId, input.stopId);
 }
 
 export async function sendDriverRouteLink(input: {
