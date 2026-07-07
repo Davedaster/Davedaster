@@ -1,5 +1,6 @@
 import prisma from "../db.server";
 import { assertOrdersAvailableForRoute } from "./routeAllocations.server";
+import { calculateEtaSlots } from "./routeDrafts.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
 
 function shopifyOrderIds(orders: DeliveryOrder[]) {
@@ -55,7 +56,7 @@ export async function addOrderToDraftRoute(routeId: string, order: DeliveryOrder
 
   const nextOrderIndex = route.stops.reduce((max, stop) => Math.max(max, stop.orderIndex), 0) + 1;
 
-  return prisma.route.update({
+  await prisma.route.update({
     where: {
       id: routeId,
     },
@@ -102,6 +103,8 @@ export async function addOrderToDraftRoute(routeId: string, order: DeliveryOrder
       },
     },
   });
+
+  return calculateEtaSlots(routeId);
 }
 
 export async function removeDraftRouteStop(routeId: string, stopId: string) {
@@ -185,6 +188,8 @@ export async function removeDraftRouteStop(routeId: string, stopId: string) {
       },
     });
   });
+
+  return calculateEtaSlots(routeId);
 }
 
 export async function moveDraftRouteStop(routeId: string, stopId: string, direction: "up" | "down") {
@@ -244,12 +249,5 @@ export async function moveDraftRouteStop(routeId: string, stopId: string, direct
     }),
   ]);
 
-  return prisma.route.findUnique({
-    where: { id: routeId },
-    include: {
-      stops: {
-        orderBy: { orderIndex: "asc" },
-      },
-    },
-  });
+  return calculateEtaSlots(routeId);
 }
