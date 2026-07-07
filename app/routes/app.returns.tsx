@@ -219,13 +219,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const query = url.searchParams.get("q") || "";
   const orderNumber = url.searchParams.get("orderNumber") || "";
+  const created = url.searchParams.get("created") === "1";
+  const assigned = url.searchParams.get("assigned") === "1";
+  const deleted = url.searchParams.get("deleted") === "1";
   const [tickets, draftRoutes, returnOrder] = await Promise.all([
     searchReturnTickets(query),
     listDraftRoutesForReturnAssignment(),
     orderNumber.trim() ? findShopifyOrderForReturn(admin, orderNumber) : Promise.resolve(null),
   ]);
 
-  return json({ tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()) });
+  return json({ tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted: Boolean(orderNumber.trim()), created, assigned, deleted });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -395,8 +398,7 @@ function DeleteReturnControl({ ticket, isDeleting }: { ticket: ReturnTicketForRo
       const confirmed = window.confirm([
         "Delete this return?",
         "",
-        "This cannot be undone from the app.",
-        "The return will be cancelled and removed from active returns.",
+        "This will cancel the return and move it out of Active returns.",
         "If it is already on a draft or published route, its route stop will also be removed.",
         "Customer deliveries on the same route will stay in place.",
         "",
@@ -414,8 +416,22 @@ function DeleteReturnControl({ ticket, isDeleting }: { ticket: ReturnTicketForRo
   );
 }
 
+function StatusMessage({ children, tone = "success" }: { children: React.ReactNode; tone?: "success" | "critical" | "info" }) {
+  const styles = {
+    success: { background: "#ecfdf3", border: "#abefc6", color: "#067647" },
+    critical: { background: "#fff7f5", border: "#fecdca", color: "#b42318" },
+    info: { background: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" },
+  }[tone];
+
+  return (
+    <div style={{ background: styles.background, border: `1px solid ${styles.border}`, borderRadius: 12, color: styles.color, padding: 12, fontWeight: 800 }}>
+      {children}
+    </div>
+  );
+}
+
 export default function ReturnsPage() {
-  const { tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted } = useLoaderData<typeof loader>();
+  const { tickets, draftRoutes, query, orderNumber, returnOrder, orderLookupAttempted, created, assigned, deleted } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigation = useNavigation();
   const [searchQuery, setSearchQuery] = useState(query);
@@ -493,8 +509,12 @@ export default function ReturnsPage() {
           <LegacyCard sectioned title="Create return">
             <BlockStack gap="400">
               {actionData && "error" in actionData ? (
-                <Text as="p" tone="critical">{actionData.error}</Text>
+                <StatusMessage tone="critical">{actionData.error}</StatusMessage>
               ) : null}
+
+              {created ? <StatusMessage>Return created successfully.</StatusMessage> : null}
+              {assigned ? <StatusMessage>Return assigned to the draft route.</StatusMessage> : null}
+              {deleted ? <StatusMessage>Return deleted from Active returns and moved to the archive.</StatusMessage> : null}
 
               <Form method="get">
                 <BlockStack gap="200">
