@@ -1,5 +1,6 @@
 import prisma from "../db.server";
-import { buildEtaSlots } from "./etaSlots.server";
+import { getAppCredentials } from "./appCredentials.server";
+import { buildTravelEtaSlots, optimiseStopOrderByTravelTime } from "./etaSlots.server";
 import { lookupAddress } from "./getAddress.server";
 import { assertOrdersAvailableForRoute } from "./routeAllocations.server";
 import type { DeliveryOrder } from "./shopifyOrders.server";
@@ -490,7 +491,51 @@ export async function optimiseRoute(routeId: string) {
   }
 
   if (optimisableStops.length !== unlockedStops.length) {
-    throw new Error("Every unlocked stop needs latitude and longitude before RouteXL can optimise the route. Locked stops are left in place.");
+    throw new Error("Every unlocked stop needs latitude and longitude before the route can be optimised. Locked stops are left in place.");
+  }
+
+  const unlockedOrderIndexes = unlockedStops
+    .map((stop) => stop.orderIndex)
+    .sort((a, b) => a - b);
+  const credentials = await getAppCredentials();
+
+  if (credentials.tomtomApiKey) {
+    const optimised = await optimiseStopOrderByTravelTime(
+      optimisableStops,
+      start,
+      finish,
+      route.timePerDropMinutes,
+    );
+
+    await prisma.$transaction(async (tx) => {
+      for (const [index, stopId] of optimised.orderedStopIds.entries()) {
+        const orderIndex = unlockedOrderIndexes[index];
+
+        if (orderIndex) {
+          await tx.stop.update({
+            where: { id: stopId },
+            data: { orderIndex },
+          });
+        }
+      }
+
+      await tx.route.update({
+        where: { id: routeId },
+        data: {
+          totalDuration: optimised.totalTravelMinutes,
+          history: {
+            create: {
+              action: "TomTom optimised",
+              details: lockedStops.length
+                ? `TomTom optimised ${unlockedStops.length} unlocked stops and preserved ${lockedStops.length} locked stops. ${optimised.tomTomLegs} TomTom legs, ${optimised.fallbackLegs} fallback legs.`
+                : `TomTom optimised ${unlockedStops.length} stops. ${optimised.tomTomLegs} TomTom legs, ${optimised.fallbackLegs} fallback legs. Estimated drive ${optimised.totalTravelMinutes} minutes.`,
+            },
+          },
+        },
+      });
+    });
+
+    return getRoute(routeId);
   }
 
   const stopByRouteXLKey = new Map(
@@ -534,10 +579,6 @@ export async function optimiseRoute(routeId: string) {
     .slice(1, -1)
     .map((waypoint) => extractRouteXLStopKey(waypoint.name));
 
-  const unlockedOrderIndexes = unlockedStops
-    .map((stop) => stop.orderIndex)
-    .sort((a, b) => a - b);
-
   await prisma.$transaction(async (tx) => {
     for (const [index, stopKey] of orderedStopKeys.entries()) {
       const matchingStop = stopByRouteXLKey.get(stopKey);
@@ -578,16 +619,18 @@ export async function calculateEtaSlots(routeId: string, startTime?: string, sto
     throw new Error("Route not found.");
   }
 
-  const etaSlots = buildEtaSlots(
+  const start = getRouteEndpoint(route, "start");
+  const etaResult = await buildTravelEtaSlots(
     route.stops,
     route.date,
     startTime || route.plannedStartTime,
     stopMinutes || route.timePerDropMinutes,
     slotMinutes || route.customerSlotMinutes,
+    start,
   );
 
   await prisma.$transaction(async (tx) => {
-    for (const etaSlot of etaSlots) {
+    for (const etaSlot of etaResult.slots) {
       await tx.stop.update({
         where: { id: etaSlot.stopId },
         data: { estimatedArrival: etaSlot.estimatedArrival },
@@ -597,10 +640,11 @@ export async function calculateEtaSlots(routeId: string, startTime?: string, sto
     await tx.route.update({
       where: { id: routeId },
       data: {
+        totalDuration: etaResult.totalTravelMinutes + etaResult.totalHandlingMinutes,
         history: {
           create: {
             action: "ETA slots calculated",
-            details: `Start ${startTime || route.plannedStartTime}, ${stopMinutes || route.timePerDropMinutes} minutes per stop, ${slotMinutes || route.customerSlotMinutes} minute customer slots`,
+            details: `Start ${startTime || route.plannedStartTime}. ${etaResult.tomTomLegs} TomTom leg${etaResult.tomTomLegs === 1 ? "" : "s"}, ${etaResult.fallbackLegs} fallback leg${etaResult.fallbackLegs === 1 ? "" : "s"}. Travel ${etaResult.totalTravelMinutes} min, stop time ${etaResult.totalHandlingMinutes} min, slot ${slotMinutes || route.customerSlotMinutes} min.`,
           },
         },
       },
