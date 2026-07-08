@@ -143,12 +143,22 @@ async function prepareProofInputFile(input: HTMLInputElement) {
 }
 
 function ProofPhotoInput({ label, disabled, onChange }: { label: string; disabled: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
-  async function handleChange(event: ChangeEvent<HTMLInputElement>) {
-    await prepareProofInputFile(event.currentTarget);
+  const [isPreparingPhoto, setIsPreparingPhoto] = useState(false);
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+
     onChange(event);
+
+    if (!input.files?.[0]) {
+      return;
+    }
+
+    setIsPreparingPhoto(true);
+    void prepareProofInputFile(input).finally(() => setIsPreparingPhoto(false));
   }
 
-  return <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{label}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={disabled} onChange={handleChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>;
+  return <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{label}{isPreparingPhoto ? <span style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>Preparing photo...</span> : null}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={disabled} onChange={handleChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>;
 }`,
 );
 
