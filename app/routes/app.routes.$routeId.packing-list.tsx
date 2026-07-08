@@ -3,7 +3,38 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useEffect } from "react";
 
+import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { getRoute } from "../lib/routeDrafts.server";
+
+type ShopifyAdmin = {
+  graphql: (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => Promise<Response>;
+};
+
+type ShopifyLineItem = {
+  title?: string | null;
+  quantity?: number | null;
+  variantTitle?: string | null;
+  variant?: {
+    title?: string | null;
+  } | null;
+};
+
+type ShopifyOrderLineItemsPayload = {
+  data?: {
+    nodes?: Array<{
+      id: string;
+      lineItems: {
+        edges: Array<{
+          node: ShopifyLineItem;
+        }>;
+      };
+    } | null>;
+  };
+  errors?: Array<{ message: string }>;
+};
 
 type PackedItem = {
   label: string;
@@ -18,6 +49,30 @@ type PackingDrop = {
   items: PackedItem[];
 };
 
+type LineItemLookup = Map<string, string[]>;
+
+const SHOPIFY_ORDER_LINE_ITEMS_QUERY = `#graphql
+  query RoutePackingLineItems($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order {
+        id
+        lineItems(first: 100) {
+          edges {
+            node {
+              title
+              quantity
+              variantTitle
+              variant {
+                title
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const loader = async ({ params }: LoaderFunctionArgs) => {
   const routeId = params.routeId;
 
@@ -27,12 +82,14 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
 
   if (!route) throw new Response("Route not found", { status: 404 });
 
+  const lineItemLookup = await buildShopifyLineItemLookup(route);
+
   return json({
     routeName: route.name,
     routeDate: route.date,
     driverName: route.driver?.name || "No driver assigned",
-    drops: buildPackingDrops(route),
-    totals: buildRouteTotals(route),
+    drops: buildPackingDrops(route, lineItemLookup),
+    totals: buildRouteTotals(route, lineItemLookup),
   });
 };
 
@@ -48,6 +105,111 @@ function formatDate(value: string | Date) {
 
 function splitLineItems(summary?: string | null) {
   return (summary || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function quantityLine(quantity: number, title: string) {
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+  return `${safeQuantity} × ${title}`;
+}
+
+function cleanTitle(value?: string | null) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
+function cleanVariantTitle(item: ShopifyLineItem) {
+  const variantTitle = cleanTitle(item.variantTitle || item.variant?.title);
+
+  if (!variantTitle || variantTitle.toLowerCase() === "default title") {
+    return "";
+  }
+
+  return variantTitle;
+}
+
+function lineItemDisplayTitle(item: ShopifyLineItem) {
+  const title = cleanTitle(item.title) || "Untitled product";
+  const variantTitle = cleanVariantTitle(item);
+
+  if (!variantTitle) {
+    return title;
+  }
+
+  const lowerTitle = title.toLowerCase();
+  const lowerVariant = variantTitle.toLowerCase();
+  const variantAlreadyShown = lowerTitle === lowerVariant ||
+    lowerTitle.includes(`| ${lowerVariant}`) ||
+    lowerTitle.includes(`- ${lowerVariant}`) ||
+    lowerTitle.includes(` ${lowerVariant} `);
+
+  return variantAlreadyShown ? title : `${title} | ${variantTitle}`;
+}
+
+function lineItemLineFromShopify(item: ShopifyLineItem) {
+  return quantityLine(Number(item.quantity || 1), lineItemDisplayTitle(item));
+}
+
+function shopifyOrderIdsFromRoute(route: any) {
+  const orderIds = (route.stops || []).flatMap((stop: any) =>
+    (stop.deliveryGroup?.orders || [])
+      .map((order: any) => String(order.shopifyOrderId || ""))
+      .filter((orderId: string) => orderId.startsWith("gid://shopify/Order/")),
+  );
+
+  return [...new Set(orderIds)];
+}
+
+async function fetchShopifyLineItemLookup(admin: ShopifyAdmin, orderIds: string[]) {
+  const response = await admin.graphql(SHOPIFY_ORDER_LINE_ITEMS_QUERY, {
+    variables: {
+      ids: orderIds,
+    },
+  });
+  const payload = await response.json() as ShopifyOrderLineItemsPayload;
+
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join(", "));
+  }
+
+  const lookup: LineItemLookup = new Map();
+
+  for (const node of payload.data?.nodes || []) {
+    if (!node?.id) continue;
+
+    const lines = (node.lineItems?.edges || [])
+      .map((edge) => lineItemLineFromShopify(edge.node))
+      .filter(Boolean);
+
+    if (lines.length) {
+      lookup.set(node.id, lines);
+    }
+  }
+
+  return lookup;
+}
+
+async function buildShopifyLineItemLookup(route: any) {
+  const orderIds = shopifyOrderIdsFromRoute(route);
+
+  if (!orderIds.length) {
+    return new Map<string, string[]>();
+  }
+
+  try {
+    const admin = await getOfflineShopifyAdmin();
+    return await fetchShopifyLineItemLookup(admin, orderIds);
+  } catch {
+    return new Map<string, string[]>();
+  }
+}
+
+function orderLineItems(order: any, lineItemLookup: LineItemLookup) {
+  const liveLineItems = lineItemLookup.get(String(order.shopifyOrderId || ""));
+
+  if (liveLineItems?.length) {
+    return liveLineItems;
+  }
+
+  return splitLineItems(order.lineItemSummary);
 }
 
 function parseItem(item: string): PackedItem {
@@ -83,14 +245,14 @@ function combineLineItems(lineItems: string[]) {
   return Array.from(itemMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function buildPackingDrops(route: any): PackingDrop[] {
+function buildPackingDrops(route: any, lineItemLookup: LineItemLookup): PackingDrop[] {
   return [...(route.stops || [])]
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .map((stop) => {
       const orders = stop.deliveryGroup?.orders || [];
       const customerNames = orders.map((order: any) => order.customerName).filter(Boolean).join(", ") || "Customer name missing";
       const orderNumbers = orders.map((order: any) => order.shopifyOrderNumber).filter(Boolean).join(", ") || "No linked orders";
-      const items = combineLineItems(orders.flatMap((order: any) => splitLineItems(order.lineItemSummary)));
+      const items = combineLineItems(orders.flatMap((order: any) => orderLineItems(order, lineItemLookup)));
 
       return {
         id: stop.id,
@@ -102,9 +264,9 @@ function buildPackingDrops(route: any): PackingDrop[] {
     });
 }
 
-function buildRouteTotals(route: any) {
+function buildRouteTotals(route: any, lineItemLookup: LineItemLookup) {
   const allItems = (route.stops || []).flatMap((stop: any) =>
-    (stop.deliveryGroup?.orders || []).flatMap((order: any) => splitLineItems(order.lineItemSummary)),
+    (stop.deliveryGroup?.orders || []).flatMap((order: any) => orderLineItems(order, lineItemLookup)),
   );
 
   return combineLineItems(allItems);
