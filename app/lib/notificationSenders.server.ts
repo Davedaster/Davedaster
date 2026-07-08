@@ -79,11 +79,19 @@ function buildTwilioAuthHeader(accountSid: string, authToken: string) {
   return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
 }
 
+function isDriverRouteLinkSms(messageBody: string) {
+  return /\/driver\/routes\//i.test(messageBody);
+}
+
 function withSmsHelpText(messageBody: string) {
   const cleanBody = (messageBody || "").trim();
 
   if (!cleanBody) {
     return SMS_HELP_TEXT;
+  }
+
+  if (isDriverRouteLinkSms(cleanBody)) {
+    return cleanBody;
   }
 
   if (cleanBody.toLowerCase().includes(SMS_HELP_TEXT.toLowerCase())) {
