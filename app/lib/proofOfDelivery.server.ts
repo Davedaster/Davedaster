@@ -273,7 +273,7 @@ export async function saveProofOfDelivery(input: {
       data: {
         routeId: stop.routeId,
         action: "Delivery follow up completed",
-        details: `Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+        details: `stopId:${input.stopId}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
       },
     });
   } catch (error) {
