@@ -46,6 +46,7 @@ type PackingDrop = {
   dropNumber: number;
   customerNames: string;
   customerAddress: string;
+  customerPhone: string;
   orderNumbers: string;
   items: PackedItem[];
 };
@@ -250,9 +251,18 @@ function cleanAddress(value?: string | null) {
   return (value || "").split(",").map((part) => part.trim()).filter(Boolean).join(", ");
 }
 
+function cleanPhone(value?: string | null) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
 function dropAddress(stop: any) {
   const group = stop.deliveryGroup;
   return cleanAddress(group?.formattedAddress || group?.manualAddress || group?.address || group?.postcode) || "Address not stored";
+}
+
+function dropPhone(orders: any[]) {
+  const phones = [...new Set(orders.map((order) => cleanPhone(order.customerPhone)).filter(Boolean))];
+  return phones.join(", ") || "Phone not stored";
 }
 
 function buildPackingDrops(route: any, lineItemLookup: LineItemLookup): PackingDrop[] {
@@ -269,6 +279,7 @@ function buildPackingDrops(route: any, lineItemLookup: LineItemLookup): PackingD
         dropNumber: stop.orderIndex,
         customerNames,
         customerAddress: dropAddress(stop),
+        customerPhone: dropPhone(orders),
         orderNumbers,
         items,
       };
@@ -340,7 +351,8 @@ export default function PackingListPrintPage() {
         .items-col { width: auto; }
         .checkbox { display: inline-block; width: 17px; height: 17px; border: 2px solid #202223; border-radius: 3px; }
         .customer-name { display: block; font-weight: 800; margin-bottom: 6px; }
-        .customer-address { display: block; font-size: 12px; line-height: 1.35; color: #454f5b; }
+        .customer-address, .customer-phone { display: block; font-size: 12px; line-height: 1.35; color: #454f5b; }
+        .customer-phone { margin-top: 6px; font-weight: 800; }
         .packing-items { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
         .packing-items li { break-inside: avoid; page-break-inside: avoid; font-size: 14px; line-height: 1.35; font-weight: 700; }
         .item-qty { font-weight: 900; margin-right: 4px; white-space: nowrap; }
@@ -359,7 +371,7 @@ export default function PackingListPrintPage() {
           h2 { break-after: avoid; page-break-after: avoid; }
           tr { break-inside: avoid; page-break-inside: avoid; }
           th, td { padding: 7px 8px; }
-          .customer-address { font-size: 11px; }
+          .customer-address, .customer-phone { font-size: 11px; }
           .packing-items { gap: 6px; }
           .packing-items li { font-size: 13px; }
         }
@@ -387,7 +399,7 @@ export default function PackingListPrintPage() {
               <tr>
                 <th className="tick-col">✓</th>
                 <th className="drop-col">Drop</th>
-                <th className="customer-col">Customer / Address</th>
+                <th className="customer-col">Customer / Address / Phone</th>
                 <th className="order-col">Order No.</th>
                 <th className="items-col">What to pack</th>
               </tr>
@@ -400,6 +412,7 @@ export default function PackingListPrintPage() {
                   <td className="customer-col">
                     <span className="customer-name">{drop.customerNames}</span>
                     <span className="customer-address">{drop.customerAddress}</span>
+                    <span className="customer-phone">Phone: {drop.customerPhone}</span>
                   </td>
                   <td className="order-col">{drop.orderNumbers}</td>
                   <td className="items-col"><PackingItems items={drop.items} /></td>
