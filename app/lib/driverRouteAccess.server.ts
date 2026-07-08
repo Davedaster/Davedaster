@@ -6,7 +6,7 @@ import { getOfflineShopifyAdmin } from "./driverShopifyAdmin.server";
 import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
-import { sendNextPendingStopNotification } from "./routeNotifications.server";
+import { sendFirstOutForDeliveryNotification, sendNextPendingStopNotification } from "./routeNotifications.server";
 import { recalculateTrafficEtaAfterStop } from "./trafficEta.server";
 
 type ShopifyAdmin = {
@@ -405,6 +405,18 @@ async function refreshDriverRouteAddressesFromShopify(route: DriverRouteWithStop
   }
 }
 
+async function sendDueFirstOutForDeliveryNotification(route: DriverRouteWithStops) {
+  if (route.status !== "OUT_FOR_DELIVERY") {
+    return;
+  }
+
+  try {
+    await sendFirstOutForDeliveryNotification(route.id);
+  } catch {
+    // Customer notification checks must not stop the driver POD from loading.
+  }
+}
+
 export async function getDriverRouteByToken(token: string) {
   const route = await findDriverRouteByToken(token);
 
@@ -413,12 +425,11 @@ export async function getDriverRouteByToken(token: string) {
   }
 
   const refreshedAddresses = await refreshDriverRouteAddressesFromShopify(route);
+  const nextRoute = refreshedAddresses ? await findDriverRouteByToken(token) || route : route;
 
-  if (!refreshedAddresses) {
-    return route;
-  }
+  await sendDueFirstOutForDeliveryNotification(nextRoute);
 
-  return await findDriverRouteByToken(token) || route;
+  return nextRoute;
 }
 
 export function canStartDriverRoute(routeDate: Date | string, now = new Date()) {
