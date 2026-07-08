@@ -43,11 +43,13 @@ export type EditableNotificationTemplate = {
 
 const SETTING_KEY = "notification_templates";
 const EMAIL_TEMPLATE_VERSION = "clean_logo_delivery_emails_2026_07_01_logo_default";
+const SMS_TEMPLATE_VERSION = "customer_sms_restore_2026_07_08";
 const COMPANY_NAME = "Bathroom Panels Direct";
 const COMPANY_PHONE = "01803 222784";
 const COMPANY_EMAIL = "deliveries@bathroompanelsdirect.co.uk";
 const COMPANY_ACCENT = "#509AE6";
 const COMPANY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/bathroom-panels-direct-logo-dark.png?v=1723113120";
+const GOOGLE_REVIEW_URL = "https://g.page/r/CZDHYoyjIf6CEAE/review";
 
 export function notificationTemplateSupportsEmail(id: string) {
   return id !== "delayUpdate";
@@ -125,7 +127,11 @@ function collectionShell(title: string, intro: string, highlight: string, extra 
 
 const proofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Delivery photo</p><img src="{{ proof.photo_url }}" alt="Delivery photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer signature</p><img src="{{ proof.signature_url }}" alt="Customer signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
 const collectionProofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Return photo</p><img src="{{ proof.photo_url }}" alt="Return photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer return signature</p><img src="{{ proof.signature_url }}" alt="Customer return signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
-const safePlaceDeliveryCompleteSmsBody = "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}";
+const safePlaceDeliveryCompleteSmsBody = `Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}
+
+If you're happy with the service, a quick Google review really helps our family business: ${GOOGLE_REVIEW_URL}
+
+Need help? Call {{ company.phone }}`;
 
 const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
   bookedSlot: {
@@ -134,7 +140,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when a delivery slot is confirmed for a customer.",
     emailSubject: "Your panel order delivery, {{ order.number }}",
     emailHtml: shell("Your panel delivery is planned", "Your panel order has been booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   outForDelivery: {
     id: "outForDelivery",
@@ -142,7 +148,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when the route is out for delivery.",
     emailSubject: "Your panel order is out for delivery, {{ order.number }}",
     emailHtml: shell("Your panels are out for delivery", "Your order is now with our delivery team and is booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your order is out for delivery. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, your order is out for delivery. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   nextDropTracking: {
     id: "nextDropTracking",
@@ -150,7 +156,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when the customer is the next delivery stop.",
     emailSubject: "You are next for delivery, {{ order.number }}",
     emailHtml: shell("You are the next delivery", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next drop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   delayUpdate: {
     id: "delayUpdate",
@@ -158,7 +164,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "SMS only. Sent when a route is running behind schedule.",
     emailSubject: "",
     emailHtml: "",
-    smsBody: "Hi {{ customer.name }}, sorry, your delivery is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, sorry, your delivery is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   deliveryComplete: {
     id: "deliveryComplete",
@@ -166,7 +172,11 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent after a stop has been completed.",
     emailSubject: "Your panel order has been delivered, {{ order.number }}",
     emailHtml: shell("Your panels have been delivered", "Your panel order has been delivered. Thank you for your order.", "Completed today", proofImagesHtml),
-    smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + "{% else %}Hi {{ customer.name }}, your delivery for {{ order.number }} has been completed. Thank you for your order.\n\nNeed help? Call {{ company.phone }}{% endif %}",
+    smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + `{% else %}Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed. Thank you for your order.
+
+If you're happy with the service, a quick Google review really helps our family business: ${GOOGLE_REVIEW_URL}
+
+Need help? Call {{ company.phone }}{% endif %}`,
   },
 };
 
@@ -175,23 +185,23 @@ const collectionDefaults: Record<NotificationTemplateId, EditableNotificationTem
     ...defaults.bookedSlot,
     emailSubject: "Your return, {{ order.number }}",
     emailHtml: collectionShell("Your return is planned", "Your return has been booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   outForDelivery: {
     ...defaults.outForDelivery,
     emailSubject: "Your return is out today, {{ order.number }}",
     emailHtml: collectionShell("Your return is out today", "Your return is now with our driver and is booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your return is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, your return is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   nextDropTracking: {
     ...defaults.nextDropTracking,
     emailSubject: "You are next for your return, {{ order.number }}",
     emailHtml: collectionShell("You are next for your return", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next stop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return. Track here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   delayUpdate: {
     ...defaults.delayUpdate,
-    smsBody: "Hi {{ customer.name }}, sorry, your return is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}",
+    smsBody: "Hi {{ customer.name }}, sorry, your return is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
   },
   deliveryComplete: {
     ...defaults.deliveryComplete,
@@ -208,17 +218,18 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normaliseTemplate(id: NotificationTemplateId, value?: Partial<EditableNotificationTemplate> | null, storedEmailVersion = EMAIL_TEMPLATE_VERSION): EditableNotificationTemplate {
+function normaliseTemplate(id: NotificationTemplateId, value?: Partial<EditableNotificationTemplate> | null, storedEmailVersion = EMAIL_TEMPLATE_VERSION, storedSmsVersion = SMS_TEMPLATE_VERSION): EditableNotificationTemplate {
   const fallback = defaults[id];
   const supportsEmail = notificationTemplateSupportsEmail(id);
   const canUseStoredEmail = supportsEmail && storedEmailVersion === EMAIL_TEMPLATE_VERSION;
+  const canUseStoredSms = storedSmsVersion === SMS_TEMPLATE_VERSION;
   return {
     id,
     label: fallback.label,
     description: fallback.description,
     emailSubject: supportsEmail ? (canUseStoredEmail ? clean(value?.emailSubject) || fallback.emailSubject : fallback.emailSubject) : "",
     emailHtml: supportsEmail ? (canUseStoredEmail ? clean(value?.emailHtml) || fallback.emailHtml : fallback.emailHtml) : "",
-    smsBody: clean(value?.smsBody) || fallback.smsBody,
+    smsBody: canUseStoredSms ? clean(value?.smsBody) || fallback.smsBody : fallback.smsBody,
   };
 }
 
@@ -232,18 +243,19 @@ export function getDefaultNotificationTemplate(id: NotificationTemplateId) {
 
 export async function getNotificationTemplates() {
   const record = await prisma.setting.findUnique({ where: { key: SETTING_KEY } });
-  let stored: Partial<Record<NotificationTemplateId, Partial<EditableNotificationTemplate>>> & { __emailTemplateVersion?: string } = {};
+  let stored: Partial<Record<NotificationTemplateId, Partial<EditableNotificationTemplate>>> & { __emailTemplateVersion?: string; __smsTemplateVersion?: string } = {};
 
   if (record?.value) {
     try {
-      stored = JSON.parse(record.value) as Partial<Record<NotificationTemplateId, Partial<EditableNotificationTemplate>>> & { __emailTemplateVersion?: string };
+      stored = JSON.parse(record.value) as Partial<Record<NotificationTemplateId, Partial<EditableNotificationTemplate>>> & { __emailTemplateVersion?: string; __smsTemplateVersion?: string };
     } catch {
       stored = {};
     }
   }
 
   const storedEmailVersion = clean(stored.__emailTemplateVersion);
-  return Object.fromEntries(notificationTemplateDefinitions.map((definition) => [definition.id, normaliseTemplate(definition.id, stored[definition.id], storedEmailVersion)])) as Record<NotificationTemplateId, EditableNotificationTemplate>;
+  const storedSmsVersion = clean(stored.__smsTemplateVersion);
+  return Object.fromEntries(notificationTemplateDefinitions.map((definition) => [definition.id, normaliseTemplate(definition.id, stored[definition.id], storedEmailVersion, storedSmsVersion)])) as Record<NotificationTemplateId, EditableNotificationTemplate>;
 }
 
 export async function listNotificationTemplates() {
@@ -254,8 +266,8 @@ export async function listNotificationTemplates() {
 async function saveTemplates(next: Record<NotificationTemplateId, EditableNotificationTemplate>) {
   await prisma.setting.upsert({
     where: { key: SETTING_KEY },
-    create: { key: SETTING_KEY, value: JSON.stringify({ ...next, __emailTemplateVersion: EMAIL_TEMPLATE_VERSION }) },
-    update: { value: JSON.stringify({ ...next, __emailTemplateVersion: EMAIL_TEMPLATE_VERSION }) },
+    create: { key: SETTING_KEY, value: JSON.stringify({ ...next, __emailTemplateVersion: EMAIL_TEMPLATE_VERSION, __smsTemplateVersion: SMS_TEMPLATE_VERSION }) },
+    update: { value: JSON.stringify({ ...next, __emailTemplateVersion: EMAIL_TEMPLATE_VERSION, __smsTemplateVersion: SMS_TEMPLATE_VERSION }) },
   });
 }
 
