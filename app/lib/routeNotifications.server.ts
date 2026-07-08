@@ -31,6 +31,39 @@ type RouteHistoryCreateInput = {
   details: string;
 };
 
+const OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
+const EARLIEST_OUT_FOR_DELIVERY_HOUR = 7;
+const EARLIEST_OUT_FOR_DELIVERY_MINUTE = 30;
+
+function emptyNotificationResult(): SendRouteNotificationsResult {
+  return { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] };
+}
+
+function ukClockMinutes(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+    timeZone: "Europe/London",
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value || 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+
+  return hour * 60 + minute;
+}
+
+function canSendOutForDeliveryNow(now = new Date()) {
+  return ukClockMinutes(now) >= (EARLIEST_OUT_FOR_DELIVERY_HOUR * 60) + EARLIEST_OUT_FOR_DELIVERY_MINUTE;
+}
+
+function isOutForDeliveryEtaDue(value?: Date | string | null, now = new Date()) {
+  if (!value) return true;
+  const etaMs = new Date(value).getTime();
+  if (!Number.isFinite(etaMs)) return true;
+  return etaMs - now.getTime() <= OUT_FOR_DELIVERY_LEAD_MS;
+}
+
 function manualNotificationLabel(templateId: ManualRouteNotificationTemplateId) {
   if (templateId === "outForDelivery") return "Out for delivery";
   if (templateId === "nextDropTracking") return "You are next";
@@ -440,14 +473,26 @@ export async function sendFirstOutForDeliveryNotification(routeId: string) {
     throw new Error("Route not found.");
   }
 
+  if (route.status !== "OUT_FOR_DELIVERY") {
+    return emptyNotificationResult();
+  }
+
   const firstPendingStop = route.stops.find((stop) => stop.status === "PENDING");
 
   if (!firstPendingStop) {
-    return { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] };
+    return emptyNotificationResult();
   }
 
   if (hasNotificationHistory(route, "outForDelivery", firstPendingStop.id)) {
-    return { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] };
+    return emptyNotificationResult();
+  }
+
+  if (!canSendOutForDeliveryNow()) {
+    return emptyNotificationResult();
+  }
+
+  if (!isOutForDeliveryEtaDue(firstPendingStop.estimatedArrival)) {
+    return emptyNotificationResult();
   }
 
   return sendManualRouteNotification({
