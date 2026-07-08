@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import prisma from "../db.server";
 import { getPublicAppBaseUrl } from "./customerTracking.server";
+import { getOfflineShopifyAdmin } from "./driverShopifyAdmin.server";
 import { markStopFailedDelivery } from "./failedDelivery.server";
 import { isResendEnabled, isTwilioEnabled, sendEmailWithResend, sendSmsWithTwilio } from "./notificationSenders.server";
 import { saveProofOfDelivery } from "./proofOfDelivery.server";
@@ -15,6 +16,26 @@ type ShopifyAdmin = {
   ) => Promise<Response>;
 };
 
+type ShopifyOrderAddressNode = {
+  id: string;
+  name?: string | null;
+  shippingAddress?: {
+    address1?: string | null;
+    address2?: string | null;
+    city?: string | null;
+    province?: string | null;
+    zip?: string | null;
+    country?: string | null;
+  } | null;
+};
+
+type ShopifyOrderAddressesPayload = {
+  data?: {
+    nodes?: Array<ShopifyOrderAddressNode | null>;
+  };
+  errors?: Array<{ message: string }>;
+};
+
 type DriverRouteNotificationResult = {
   smsSent: boolean;
   emailSent: boolean;
@@ -22,6 +43,24 @@ type DriverRouteNotificationResult = {
 };
 
 const DEFAULT_APP_BASE_URL = "https://www.bpd-delivery.uk";
+const SHOPIFY_ORDER_ADDRESSES_QUERY = `#graphql
+  query DriverRouteOrderAddresses($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order {
+        id
+        name
+        shippingAddress {
+          address1
+          address2
+          city
+          province
+          zip
+          country
+        }
+      }
+    }
+  }
+`;
 
 function getBaseUrl(request: Request) {
   return getPublicAppBaseUrl(new URL(request.url).origin || DEFAULT_APP_BASE_URL);
@@ -78,6 +117,123 @@ function isResolvedStopStatus(status: string) {
 
 function normalisedNote(value?: string | null) {
   return value?.trim() || null;
+}
+
+function addressParts(value?: string | null) {
+  return (value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function compactAddress(value?: string | null) {
+  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function startsWithPostcode(value?: string | null) {
+  return /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test((value || "").trim());
+}
+
+function firstAddressPartLooksSpecific(value?: string | null) {
+  const firstPart = addressParts(value)[0] || "";
+
+  return /\d/.test(firstPart) || /\b(farm|house|cottage|court|unit|flat|apartment|road|street|lane|close|crescent|avenue|drive|way|park|terrace|place|yard|view|hill|barn|lodge|bungalow|rectory|the)\b/i.test(firstPart);
+}
+
+function needsShopifyAddressFallback(value?: string | null) {
+  const parts = addressParts(value);
+
+  if (!parts.length) {
+    return true;
+  }
+
+  if (startsWithPostcode(value)) {
+    return true;
+  }
+
+  if (parts.length <= 2) {
+    return true;
+  }
+
+  return parts.length <= 4 && !firstAddressPartLooksSpecific(value);
+}
+
+function formatShopifyAddress(node: ShopifyOrderAddressNode) {
+  const address = node.shippingAddress;
+
+  if (!address) {
+    return "";
+  }
+
+  return [address.address1, address.address2, address.city, address.province, address.zip, address.country]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function shouldReplaceSavedAddress(currentAddress: string | null | undefined, shopifyAddress: string | null | undefined) {
+  const current = (currentAddress || "").trim();
+  const next = (shopifyAddress || "").trim();
+
+  if (!next) {
+    return false;
+  }
+
+  if (!current) {
+    return true;
+  }
+
+  if (compactAddress(current) === compactAddress(next)) {
+    return false;
+  }
+
+  if (startsWithPostcode(current)) {
+    return true;
+  }
+
+  if (compactAddress(next).includes(compactAddress(current)) && next.length > current.length) {
+    return true;
+  }
+
+  if (addressParts(next).length > addressParts(current).length) {
+    return true;
+  }
+
+  return next.length >= current.length + 12;
+}
+
+async function fetchShopifyOrderAddresses(admin: ShopifyAdmin, orderIds: string[]) {
+  const uniqueOrderIds = [...new Set(orderIds)].filter((id) => id.startsWith("gid://shopify/Order/"));
+  const addresses = new Map<string, string>();
+
+  if (!uniqueOrderIds.length) {
+    return addresses;
+  }
+
+  const response = await admin.graphql(SHOPIFY_ORDER_ADDRESSES_QUERY, {
+    variables: {
+      ids: uniqueOrderIds,
+    },
+  });
+  const payload = await response.json() as ShopifyOrderAddressesPayload;
+
+  if (payload.errors?.length) {
+    return addresses;
+  }
+
+  for (const node of payload.data?.nodes || []) {
+    if (!node?.id) {
+      continue;
+    }
+
+    const address = formatShopifyAddress(node);
+
+    if (address) {
+      addresses.set(node.id, address);
+    }
+  }
+
+  return addresses;
 }
 
 async function refreshNextStopAfterCollection(routeId: string, stopId: string) {
@@ -138,7 +294,7 @@ export async function ensureDriverRouteAccessToken(routeId: string) {
   return token;
 }
 
-export async function getDriverRouteByToken(token: string) {
+async function findDriverRouteByToken(token: string) {
   return prisma.route.findFirst({
     where: {
       driverAccessToken: token,
@@ -179,6 +335,90 @@ export async function getDriverRouteByToken(token: string) {
       },
     },
   });
+}
+
+type DriverRouteWithStops = NonNullable<Awaited<ReturnType<typeof findDriverRouteByToken>>>;
+
+function addressFallbackCandidates(route: DriverRouteWithStops) {
+  const candidates = new Map<string, { groupId: string; currentAddress: string; orderIds: string[] }>();
+
+  for (const stop of route.stops) {
+    const group = stop.deliveryGroup;
+
+    if (!group || !needsShopifyAddressFallback(group.formattedAddress || group.address)) {
+      continue;
+    }
+
+    const orderIds = group.orders
+      .filter((order) => order.orderSource === "shopify")
+      .map((order) => order.shopifyOrderId)
+      .filter((orderId) => orderId.startsWith("gid://shopify/Order/"));
+
+    if (!orderIds.length) {
+      continue;
+    }
+
+    candidates.set(group.id, {
+      groupId: group.id,
+      currentAddress: group.formattedAddress || group.address,
+      orderIds,
+    });
+  }
+
+  return [...candidates.values()];
+}
+
+async function refreshDriverRouteAddressesFromShopify(route: DriverRouteWithStops) {
+  const candidates = addressFallbackCandidates(route);
+
+  if (!candidates.length) {
+    return false;
+  }
+
+  try {
+    const admin = await getOfflineShopifyAdmin();
+    const shopifyAddresses = await fetchShopifyOrderAddresses(admin, candidates.flatMap((candidate) => candidate.orderIds));
+    let updated = false;
+
+    for (const candidate of candidates) {
+      const shopifyAddress = candidate.orderIds.map((orderId) => shopifyAddresses.get(orderId)).find(Boolean);
+
+      if (!shouldReplaceSavedAddress(candidate.currentAddress, shopifyAddress)) {
+        continue;
+      }
+
+      await prisma.deliveryGroup.update({
+        where: {
+          id: candidate.groupId,
+        },
+        data: {
+          address: shopifyAddress!,
+          formattedAddress: shopifyAddress!,
+        },
+      });
+      updated = true;
+    }
+
+    return updated;
+  } catch {
+    return false;
+  }
+}
+
+export async function getDriverRouteByToken(token: string) {
+  const route = await findDriverRouteByToken(token);
+
+  if (!route) {
+    return null;
+  }
+
+  const refreshedAddresses = await refreshDriverRouteAddressesFromShopify(route);
+
+  if (!refreshedAddresses) {
+    return route;
+  }
+
+  return await findDriverRouteByToken(token) || route;
 }
 
 export function canStartDriverRoute(routeDate: Date | string, now = new Date()) {
