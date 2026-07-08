@@ -31,7 +31,6 @@ type RouteHistoryCreateInput = {
   details: string;
 };
 
-const OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
 const EARLIEST_OUT_FOR_DELIVERY_HOUR = 7;
 const EARLIEST_OUT_FOR_DELIVERY_MINUTE = 30;
 
@@ -55,13 +54,6 @@ function ukClockMinutes(now = new Date()) {
 
 function canSendOutForDeliveryNow(now = new Date()) {
   return ukClockMinutes(now) >= (EARLIEST_OUT_FOR_DELIVERY_HOUR * 60) + EARLIEST_OUT_FOR_DELIVERY_MINUTE;
-}
-
-function isOutForDeliveryEtaDue(value?: Date | string | null, now = new Date()) {
-  if (!value) return true;
-  const etaMs = new Date(value).getTime();
-  if (!Number.isFinite(etaMs)) return true;
-  return etaMs - now.getTime() <= OUT_FOR_DELIVERY_LEAD_MS;
 }
 
 function manualNotificationLabel(templateId: ManualRouteNotificationTemplateId) {
@@ -488,10 +480,6 @@ export async function sendFirstOutForDeliveryNotification(routeId: string) {
   }
 
   if (!canSendOutForDeliveryNow()) {
-    return emptyNotificationResult();
-  }
-
-  if (!isOutForDeliveryEtaDue(firstPendingStop.estimatedArrival)) {
     return emptyNotificationResult();
   }
 
