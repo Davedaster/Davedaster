@@ -4,6 +4,7 @@ import { Form, useActionData, useLoaderData, useRevalidator, useSubmit } from "@
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, PointerEvent } from "react";
 
+import prisma from "../db.server";
 import { RouteMap } from "../components/RouteMap";
 import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { buildWazeUrl } from "../lib/waze";
@@ -24,6 +25,7 @@ import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
 const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
 const DRIVER_ROUTE_REFRESH_MS = 15000;
 const COLLECTION_COLOUR = "#b42318";
+const CUSTOMER_NOTIFICATION_ACTIONS = ["Out for delivery sent", "You are next sent", "Delay update sent", "Booked slot recipient notified"];
 
 type StopWithReturnTickets = {
   returnTickets?: Array<{
@@ -32,6 +34,12 @@ type StopWithReturnTickets = {
       quantityExpected?: number | null;
     }>;
   }>;
+};
+
+type DriverRouteForPage = NonNullable<Awaited<ReturnType<typeof getDriverRouteByToken>>>;
+type CustomerNotificationStatus = {
+  label: string;
+  tone: "green" | "blue" | "amber" | "grey";
 };
 
 function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
@@ -44,6 +52,67 @@ function isEtaDueForFirstNotification(value: string | Date | null | undefined) {
 function numberFromFormValue(value: FormDataEntryValue | null) {
   const parsed = Number(String(value || ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function notificationStatusFromAction(action: string): CustomerNotificationStatus | null {
+  if (action === "You are next sent") return { label: "You are next sent", tone: "green" };
+  if (action === "Out for delivery sent") return { label: "Out for delivery sent", tone: "blue" };
+  if (action === "Delay update sent") return { label: "Delay update sent", tone: "amber" };
+  if (action === "Booked slot recipient notified") return { label: "Booked slot sent", tone: "grey" };
+  return null;
+}
+
+function detailsIncludeAnyOrderId(details: string, orderIds: string[]) {
+  return orderIds.some((orderId) => details.includes(`orderId:${orderId}`));
+}
+
+async function loadCustomerNotificationStatuses(route: DriverRouteForPage) {
+  const statuses: Record<string, CustomerNotificationStatus> = {};
+  const stops = route.stops.map((stop) => ({
+    id: stop.id,
+    orderIds: stop.deliveryGroup?.orders.map((order) => order.id) || [],
+  }));
+
+  if (!stops.length) {
+    return statuses;
+  }
+
+  const history = await prisma.routeHistory.findMany({
+    where: {
+      routeId: route.id,
+      action: { in: CUSTOMER_NOTIFICATION_ACTIONS },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { action: true, details: true },
+  });
+
+  for (const event of history) {
+    const status = notificationStatusFromAction(event.action);
+    const details = event.details || "";
+
+    if (!status) {
+      continue;
+    }
+
+    for (const stop of stops) {
+      if (statuses[stop.id]) {
+        continue;
+      }
+
+      if (event.action === "Booked slot recipient notified") {
+        if (detailsIncludeAnyOrderId(details, stop.orderIds)) {
+          statuses[stop.id] = status;
+        }
+        continue;
+      }
+
+      if (details.includes(`stopId:${stop.id}`)) {
+        statuses[stop.id] = status;
+      }
+    }
+  }
+
+  return statuses;
 }
 
 async function tryGetOfflineShopifyAdmin() {
@@ -83,6 +152,7 @@ export const loader = async ({ params }: LoaderFunctionArgs) => {
     route,
     canStart: canStartDriverRoute(route.date),
     proofPhotoStorageEnabled: await isProofPhotoStorageEnabled(),
+    notificationStatuses: await loadCustomerNotificationStatuses(route),
   });
 };
 
@@ -610,13 +680,25 @@ function SafePlaceRequestCard({ note }: { note?: string | null }) {
   );
 }
 
+function CustomerNotificationBadge({ status }: { status?: CustomerNotificationStatus }) {
+  const current = status || { label: "No customer notification logged", tone: "grey" as const };
+  const colours = {
+    green: { background: "#ecfdf3", border: "#16a34a", text: "#067647" },
+    blue: { background: "#eff6ff", border: "#509AE6", text: "#175cd3" },
+    amber: { background: "#fff7ed", border: "#f97316", text: "#c2410c" },
+    grey: { background: "#f8fafc", border: "#d0d5dd", text: "#667085" },
+  }[current.tone];
+
+  return <p style={{ margin: 0, display: "inline-flex", width: "fit-content", maxWidth: "100%", border: `1px solid ${colours.border}`, borderRadius: 999, padding: "7px 10px", background: colours.background, color: colours.text, fontWeight: 900, fontSize: 13, lineHeight: 1.2 }}>Customer update: {current.label}</p>;
+}
+
 function ProofCard({ proofPhotos }: { proofPhotos: Array<{ id: string; url: string; label?: string | null }> }) {
   if (!proofPhotos.length) return null;
   return <div style={{ marginTop: 12, display: "grid", gap: 8 }}><p style={{ margin: 0, fontWeight: 900 }}>Proof card</p><div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>{proofPhotos.map((photo) => <figure key={photo.id} style={{ margin: 0, minWidth: 104 }}><a href={proofPhotoSrc(photo.url)} target="_blank" rel="noreferrer"><img src={proofPhotoSrc(photo.url)} alt={photo.label || "Proof"} style={{ width: 104, height: 84, objectFit: "cover", borderRadius: 12, border: "1px solid #d0d5dd", background: "#ffffff" }} /></a><figcaption style={{ fontSize: 11, color: "#667085", marginTop: 4, fontWeight: 700 }}>{photo.label || "Proof"}</figcaption></figure>)}</div></div>;
 }
 
 export default function DriverRoutePage() {
-  const { route, canStart, proofPhotoStorageEnabled } = useLoaderData<typeof loader>();
+  const { route, canStart, proofPhotoStorageEnabled, notificationStatuses } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const revalidator = useRevalidator();
   const firstEta = route.stops.find((stop) => stop.estimatedArrival)?.estimatedArrival || route.date;
@@ -679,6 +761,7 @@ export default function DriverRoutePage() {
           const proofPhotos = group?.proofPhotos || [];
           const actionDisabled = !routeStarted || isDelivered || isFailed || !isNextStop;
           const customerSafePlaceNote = group?.safePlaceNote || "";
+          const customerNotificationStatus = notificationStatuses[stop.id];
           const stopBorder = isDelivered ? "2px solid #16a34a" : isFailed ? "2px solid #b42318" : collectionStop ? `3px solid ${COLLECTION_COLOUR}` : isNextStop ? "3px solid #509AE6" : "1px solid #e5e7eb";
           const stopHeaderBackground = isDelivered ? "#16a34a" : isFailed ? "#b42318" : collectionStop ? COLLECTION_COLOUR : isNextStop ? "#509AE6" : "#f8fafc";
           const stopHeaderText = isDelivered || isFailed || collectionStop || isNextStop ? "#ffffff" : "#323841";
@@ -691,7 +774,7 @@ export default function DriverRoutePage() {
               <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.22)", display: "grid", placeItems: "center", fontSize: 25, fontWeight: 900 }}>{isDelivered ? "✓" : isFailed ? "!" : stop.orderIndex}</div>
             </div>
             <div style={{ padding: 16, display: "grid", gap: 12, maxWidth: "100%", overflow: "hidden", boxSizing: "border-box" }}>
-              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>{collectionStop ? "Return order" : "Order"} {orders}</p>{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
+              <div style={{ display: "grid", gap: 8 }}><p style={{ margin: 0, fontSize: 21 }}><strong>{customerName}</strong></p><p style={{ margin: 0, color: "#667085", fontWeight: 900 }}>{collectionStop ? "Return order" : "Order"} {orders}</p><CustomerNotificationBadge status={customerNotificationStatus} />{cleanPhone ? <a href={`tel:${cleanPhone}`} style={buttonStyle("#2563eb")}>Call customer</a> : <p style={{ margin: 0, color: "#667085", fontWeight: 800 }}>No phone number</p>}</div>
               <SafePlaceRequestCard note={customerSafePlaceNote} />
               <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 6px", fontWeight: 900 }}>{collectionStop ? "Collection address" : "Address"}</p><p style={{ margin: 0, lineHeight: 1.45, fontWeight: 700 }}>{address}</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 10 }}><button type="button" onClick={(event) => { navigator.clipboard.writeText(address); const target = event.currentTarget; target.innerText = "Copied"; setTimeout(() => { target.innerText = "Copy address"; }, 1200); }} style={secondaryButtonStyle()}>Copy address</button>{wazeUrl ? <a href={wazeUrl} target="_blank" rel="noreferrer" style={buttonStyle("#509AE6")}>Open map</a> : null}</div></div>
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 18, padding: 12 }}><p style={{ margin: "0 0 8px", fontWeight: 900 }}>{itemTitle}</p>{lineItems.length ? <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 7 }}>{lineItems.map((item, index) => <li key={`${item}-${index}`} style={{ fontSize: 16, lineHeight: 1.35 }}>{highlightItemText(item)}</li>)}</ul> : <p style={{ margin: 0, color: "#667085" }}>{emptyItemText}</p>}</div>
