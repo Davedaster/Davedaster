@@ -5,6 +5,7 @@ import type { NotificationMessage } from "./notificationTemplates.server";
 type SendSmsInput = {
   to: string;
   message: NotificationMessage;
+  includeHelpText?: boolean;
 };
 
 type SendEmailInput = {
@@ -78,11 +79,19 @@ function buildTwilioAuthHeader(accountSid: string, authToken: string) {
   return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
 }
 
+function isDriverRouteLinkSms(messageBody: string) {
+  return /\/driver\/routes\//i.test(messageBody);
+}
+
 function withSmsHelpText(messageBody: string) {
   const cleanBody = (messageBody || "").trim();
 
   if (!cleanBody) {
     return SMS_HELP_TEXT;
+  }
+
+  if (isDriverRouteLinkSms(cleanBody)) {
+    return cleanBody;
   }
 
   if (cleanBody.toLowerCase().includes(SMS_HELP_TEXT.toLowerCase())) {
@@ -166,10 +175,13 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
     throw new Error("Customer phone number is missing.");
   }
 
+  const messageBody = input.includeHelpText === false
+    ? (input.message.body || "").trim()
+    : withSmsHelpText(input.message.body);
   const body = new URLSearchParams();
   body.set("To", toNumber);
   body.set("From", fromNumber);
-  body.set("Body", withSmsHelpText(input.message.body));
+  body.set("Body", messageBody);
 
   const response = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",
