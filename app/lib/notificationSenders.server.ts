@@ -5,6 +5,7 @@ import type { NotificationMessage } from "./notificationTemplates.server";
 type SendSmsInput = {
   to: string;
   message: NotificationMessage;
+  includeHelpText?: boolean;
 };
 
 type SendEmailInput = {
@@ -166,10 +167,13 @@ export async function sendSmsWithTwilio(input: SendSmsInput): Promise<SendResult
     throw new Error("Customer phone number is missing.");
   }
 
+  const messageBody = input.includeHelpText === false
+    ? (input.message.body || "").trim()
+    : withSmsHelpText(input.message.body);
   const body = new URLSearchParams();
   body.set("To", toNumber);
   body.set("From", fromNumber);
-  body.set("Body", withSmsHelpText(input.message.body));
+  body.set("Body", messageBody);
 
   const response = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: "POST",
