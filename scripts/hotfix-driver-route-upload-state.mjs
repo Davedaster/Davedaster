@@ -60,12 +60,6 @@ async function proofPhotoUrlsFromForm(formData: FormData, stopId: string) {
 
 replaceOnce(
   "driver stop submitting state",
-  `  const podLat = useState("")[0];`,
-  `  const podLat = useState("")[0];`,
-);
-
-replaceOnce(
-  "driver stop submitting state",
   `  const [podLng, setPodLng] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
   const proofPhotoCount = (proofPhotoOneSelected ? 1 : 0) + (proofPhotoTwoSelected ? 1 : 0) + (proofPhotoUrl.trim() ? 1 : 0);
