@@ -59,6 +59,100 @@ async function proofPhotoUrlsFromForm(formData: FormData, stopId: string) {
 );
 
 replaceOnce(
+  "client proof photo compression",
+  `function ProofPhotoInput({ label, disabled, onChange }: { label: string; disabled: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
+  return <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{label}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={disabled} onChange={onChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>;
+}`,
+  `const DRIVER_PROOF_IMAGE_MAX_SIZE = 1600;
+const DRIVER_PROOF_IMAGE_QUALITY = 0.72;
+const DRIVER_PROOF_IMAGE_MIN_COMPRESS_BYTES = 700 * 1024;
+
+function loadImageFromFile(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Proof photo could not be prepared."));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToJpegBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, "image/jpeg", DRIVER_PROOF_IMAGE_QUALITY);
+  });
+}
+
+async function compressDriverProofPhoto(file: File) {
+  if (!file.type.startsWith("image/") || file.size < DRIVER_PROOF_IMAGE_MIN_COMPRESS_BYTES) {
+    return file;
+  }
+
+  try {
+    const image = await loadImageFromFile(file);
+    const largestSide = Math.max(image.width, image.height);
+    const scale = largestSide > DRIVER_PROOF_IMAGE_MAX_SIZE ? DRIVER_PROOF_IMAGE_MAX_SIZE / largestSide : 1;
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return file;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    context.drawImage(image, 0, 0, width, height);
+
+    const blob = await canvasToJpegBlob(canvas);
+
+    if (!blob || blob.size >= file.size) {
+      return file;
+    }
+
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+async function prepareProofInputFile(input: HTMLInputElement) {
+  const file = input.files?.[0];
+
+  if (!file) {
+    return;
+  }
+
+  const preparedFile = await compressDriverProofPhoto(file);
+
+  if (preparedFile === file || !("DataTransfer" in window)) {
+    return;
+  }
+
+  const dataTransfer = new DataTransfer();
+  dataTransfer.items.add(preparedFile);
+  input.files = dataTransfer.files;
+}
+
+function ProofPhotoInput({ label, disabled, onChange }: { label: string; disabled: boolean; onChange: (event: ChangeEvent<HTMLInputElement>) => void }) {
+  async function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    await prepareProofInputFile(event.currentTarget);
+    onChange(event);
+  }
+
+  return <label style={{ display: "grid", gap: 8, fontWeight: 900, maxWidth: "100%", minWidth: 0, overflow: "hidden" }}>{label}<input type="file" name="proofPhotoFiles" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" disabled={disabled} onChange={handleChange} style={{ width: "100%", maxWidth: "100%", minWidth: 0, fontSize: 14, padding: 10, border: "1px solid #d0d5dd", borderRadius: 14, background: "#ffffff", boxSizing: "border-box" }} /></label>;
+}`,
+);
+
+replaceOnce(
   "driver stop submitting state",
   `  const [podLng, setPodLng] = useState("");
   const updatesDisabled = isDisabled || !routeStarted;
