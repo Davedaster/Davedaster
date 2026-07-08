@@ -25,7 +25,7 @@ import { recalculateFirstPendingEtaFromPoint } from "../lib/trafficEta.server";
 const FIRST_OUT_FOR_DELIVERY_LEAD_MS = 60 * 60 * 1000;
 const DRIVER_ROUTE_REFRESH_MS = 15000;
 const COLLECTION_COLOUR = "#b42318";
-const CUSTOMER_NOTIFICATION_ACTIONS = ["Out for delivery sent", "You are next sent", "Delay update sent", "Booked slot recipient notified"];
+const CUSTOMER_NOTIFICATION_ACTIONS = ["Delivery follow up completed", "Out for delivery sent", "You are next sent", "Delay update sent", "Booked slot recipient notified"];
 
 type StopWithReturnTickets = {
   returnTickets?: Array<{
@@ -54,7 +54,8 @@ function numberFromFormValue(value: FormDataEntryValue | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function notificationStatusFromAction(action: string): CustomerNotificationStatus | null {
+function notificationStatusFromAction(action: string, details = ""): CustomerNotificationStatus | null {
+  if (action === "Delivery follow up completed" && /[1-9]\d* SMS sent/.test(details)) return { label: "Delivery complete SMS sent", tone: "green" };
   if (action === "You are next sent") return { label: "You are next sent", tone: "green" };
   if (action === "Out for delivery sent") return { label: "Out for delivery sent", tone: "blue" };
   if (action === "Delay update sent") return { label: "Delay update sent", tone: "amber" };
@@ -66,11 +67,16 @@ function detailsIncludeAnyOrderId(details: string, orderIds: string[]) {
   return orderIds.some((orderId) => details.includes(`orderId:${orderId}`));
 }
 
+function detailsIncludeAnyOrderNumber(details: string, orderNumbers: string[]) {
+  return orderNumbers.some((orderNumber) => orderNumber && details.includes(orderNumber));
+}
+
 async function loadCustomerNotificationStatuses(route: DriverRouteForPage) {
   const statuses: Record<string, CustomerNotificationStatus> = {};
   const stops = route.stops.map((stop) => ({
     id: stop.id,
     orderIds: stop.deliveryGroup?.orders.map((order) => order.id) || [],
+    orderNumbers: stop.deliveryGroup?.orders.map((order) => order.shopifyOrderNumber).filter(Boolean) || [],
   }));
 
   if (!stops.length) {
@@ -87,8 +93,8 @@ async function loadCustomerNotificationStatuses(route: DriverRouteForPage) {
   });
 
   for (const event of history) {
-    const status = notificationStatusFromAction(event.action);
     const details = event.details || "";
+    const status = notificationStatusFromAction(event.action, details);
 
     if (!status) {
       continue;
@@ -101,6 +107,13 @@ async function loadCustomerNotificationStatuses(route: DriverRouteForPage) {
 
       if (event.action === "Booked slot recipient notified") {
         if (detailsIncludeAnyOrderId(details, stop.orderIds)) {
+          statuses[stop.id] = status;
+        }
+        continue;
+      }
+
+      if (event.action === "Delivery follow up completed") {
+        if (details.includes(`stopId:${stop.id}`) || detailsIncludeAnyOrderNumber(details, stop.orderNumbers)) {
           statuses[stop.id] = status;
         }
         continue;
