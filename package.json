@@ -2,9 +2,9 @@
   "name": "bpd-delivery-planner",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-driver-route-form-guard.mjs && node scripts/hotfix-safe-place-note-optional.mjs",
+    "prebuild": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-driver-route-form-guard.mjs && node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-driver-pod-auto-retry.mjs",
     "build": "remix vite:build",
-    "pretypecheck": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-driver-route-form-guard.mjs && node scripts/hotfix-safe-place-note-optional.mjs",
+    "pretypecheck": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-driver-route-form-guard.mjs && node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-driver-pod-auto-retry.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
