@@ -269,4 +269,147 @@ updateFile("app/routes/app.routes.$routeId.tsx", (source) => {
   return source;
 });
 
+updateFile("app/routes/app.routes.tsx", (source) => {
+  source = replaceOnce(
+    source,
+    "add publish error helper",
+    block([
+      'function tick(value: boolean) {',
+      '  return value ? "✓" : "✗";',
+      '}',
+    ]),
+    block([
+      'function tick(value: boolean) {',
+      '  return value ? "✓" : "✗";',
+      '}',
+      '',
+      'function errorMessage(error: unknown) {',
+      '  return error instanceof Error ? error.message : "Unknown error";',
+      '}',
+    ]),
+  );
+
+  source = replaceOnce(
+    source,
+    "main routes publish keeps route published when notifications fail",
+    block([
+      '      await publishRoute(routeId);',
+      '      await calculateEtaSlots(routeId);',
+      '      await tagPublishedRouteOrders(admin, routeId);',
+      '',
+      '      const fulfilmentSettings = await getFulfilmentSettings();',
+      '      const fulfilOnPublish = fulfilmentSettings.routePublishFulfilmentMode === "on_publish" || fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered";',
+      '      const fulfilmentResult = fulfilOnPublish',
+      '        ? await fulfilRouteOrders(admin, routeId, {',
+      '          markDelivered: fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered",',
+      '          notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,',
+      '        })',
+      '        : { fulfilled: 0, skipped: 0, errors: [] };',
+      '      const driverResult = await sendDriverRouteLink({ routeId, request });',
+      '      const customerResult = await sendBookedSlotNotifications(routeId);',
+      '      const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];',
+      '      const fulfilmentToastTitle = fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered"',
+      '        ? "Shopify fulfilled and delivered on publish"',
+      '        : fulfilmentSettings.routePublishFulfilmentMode === "on_publish"',
+      '          ? "Shopify fulfilment on publish"',
+      '          : "Shopify fulfilment";',
+    ]),
+    block([
+      '      await publishRoute(routeId);',
+      '      await calculateEtaSlots(routeId);',
+      '',
+      '      const tagResult = { errors: [] as string[] };',
+      '      try {',
+      '        await tagPublishedRouteOrders(admin, routeId);',
+      '      } catch (error) {',
+      '        tagResult.errors.push(`Shopify tagging step failed: ${errorMessage(error)}`);',
+      '      }',
+      '',
+      '      let fulfilmentMode = "on_delivery_complete";',
+      '      let fulfilOnPublish = false;',
+      '      let fulfilmentResult = { fulfilled: 0, skipped: 0, errors: [] as string[] };',
+      '      try {',
+      '        const fulfilmentSettings = await getFulfilmentSettings();',
+      '        fulfilmentMode = fulfilmentSettings.routePublishFulfilmentMode;',
+      '        fulfilOnPublish = fulfilmentMode === "on_publish" || fulfilmentMode === "on_publish_delivered";',
+      '        fulfilmentResult = fulfilOnPublish',
+      '          ? await fulfilRouteOrders(admin, routeId, {',
+      '            markDelivered: fulfilmentMode === "on_publish_delivered",',
+      '            notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,',
+      '          })',
+      '          : fulfilmentResult;',
+      '      } catch (error) {',
+      '        fulfilmentResult.errors.push(`Shopify fulfilment step failed: ${errorMessage(error)}`);',
+      '      }',
+      '',
+      '      let driverResult = { smsSent: false, emailSent: false, errors: [] as string[] };',
+      '      try {',
+      '        driverResult = await sendDriverRouteLink({ routeId, request });',
+      '      } catch (error) {',
+      '        driverResult.errors.push(`Driver route link step failed: ${errorMessage(error)}`);',
+      '      }',
+      '',
+      '      let customerResult = { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] as string[] };',
+      '      try {',
+      '        customerResult = await sendBookedSlotNotifications(routeId);',
+      '      } catch (error) {',
+      '        customerResult.errors.push(`Customer booked slot notification step failed: ${errorMessage(error)}`);',
+      '      }',
+      '',
+      '      const errors = [...tagResult.errors, ...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];',
+      '      const fulfilmentToastTitle = fulfilmentMode === "on_publish_delivered"',
+      '        ? "Shopify fulfilled and delivered on publish"',
+      '        : fulfilmentMode === "on_publish"',
+      '          ? "Shopify fulfilment on publish"',
+      '          : "Shopify fulfilment";',
+    ]),
+  );
+
+  source = replaceOnce(
+    source,
+    "main routes publish uses guarded fulfilment mode",
+    'return json<RouteActionData>({ ok: true, message: publishMessage({ driverSms: driverResult.smsSent, driverEmail: driverResult.emailSent, customerSms: customerResult.smsSent, customerEmail: customerResult.emailsSent, customerSkipped: customerResult.skipped, fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode, fulfilmentFulfilled: fulfilmentResult.fulfilled, fulfilmentSkipped: fulfilmentResult.skipped, errors }), errors, toasts });',
+    'return json<RouteActionData>({ ok: true, message: publishMessage({ driverSms: driverResult.smsSent, driverEmail: driverResult.emailSent, customerSms: customerResult.smsSent, customerEmail: customerResult.emailsSent, customerSkipped: customerResult.skipped, fulfilmentMode, fulfilmentFulfilled: fulfilmentResult.fulfilled, fulfilmentSkipped: fulfilmentResult.skipped, errors }), errors, toasts });',
+  );
+
+  return source;
+});
+
+updateFile("app/routes/driver.routes.$token.tsx", (source) => {
+  source = replaceOnce(
+    source,
+    "driver start route does not fail on notification error",
+    block([
+      '      if (isEtaDueForFirstNotification(firstEta)) {',
+      '        await sendFirstOutForDeliveryNotification(route.id);',
+      '      }',
+      '',
+      '      return redirect(`/driver/routes/${token}`);',
+    ]),
+    block([
+      '      if (isEtaDueForFirstNotification(firstEta)) {',
+      '        try {',
+      '          await sendFirstOutForDeliveryNotification(route.id);',
+      '        } catch (error) {',
+      '          try {',
+      '            await prisma.routeHistory.create({',
+      '              data: {',
+      '                routeId: route.id,',
+      '                action: "Out for delivery failed",',
+      '                details: error instanceof Error ? error.message : "Out for delivery notification failed.",',
+      '              },',
+      '            });',
+      '          } catch {',
+      '            // Customer notification checks must not stop the driver starting the route.',
+      '          }',
+      '        }',
+      '      }',
+      '',
+      '      return redirect(`/driver/routes/${token}`);',
+    ]),
+  );
+
+  return source;
+});
+
 console.log("Customer notification result guard hotfix applied.");
