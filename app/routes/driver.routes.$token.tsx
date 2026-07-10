@@ -14,6 +14,12 @@ type DriverRouteErrorPayload = {
   error?: string;
 };
 
+type DriverRouteFormContext = {
+  intent: string;
+  stopId: string;
+};
+
+const UNKNOWN_DRIVER_ROUTE_CONTEXT: DriverRouteFormContext = { intent: "unknown", stopId: "" };
 const DELIVERY_RETRY_GUIDANCE = " Please check signal and press Complete delivery again. Proof is only saved after the app confirms the delivery.";
 
 function driverRouteErrorMessage(intent: string, message: string) {
@@ -26,7 +32,11 @@ function driverRouteErrorMessage(intent: string, message: string) {
   return message + DELIVERY_RETRY_GUIDANCE;
 }
 
-async function readDriverRouteFormContext(request: Request) {
+async function readDriverRouteFormContext(request: Request | null) {
+  if (!request) {
+    return UNKNOWN_DRIVER_ROUTE_CONTEXT;
+  }
+
   try {
     const formData = await request.formData();
 
@@ -35,12 +45,13 @@ async function readDriverRouteFormContext(request: Request) {
       stopId: String(formData.get("stopId") || "").trim(),
     };
   } catch {
-    return { intent: "unknown", stopId: "" };
+    return UNKNOWN_DRIVER_ROUTE_CONTEXT;
   }
 }
 
 export const action = async (args: ActionFunctionArgs) => {
-  const requestCopy = args.request.clone();
+  const isMultipartUpload = /multipart\/form-data/i.test(args.request.headers.get("content-type") || "");
+  const requestCopy = isMultipartUpload ? null : args.request.clone();
 
   try {
     const response = await runDriverRouteAction(args);
