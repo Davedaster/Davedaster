@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-const driverRoutePath = "app/routes/driver.routes.$token.tsx";
+const driverRoutePath = "app/routes/.driver.routes.$token.source.tsx";
 const proofOfDeliveryPath = "app/lib/proofOfDelivery.server.ts";
 
 function replaceOnce(source, label, from, to) {
@@ -36,9 +36,9 @@ proofOfDelivery = replaceOnce(
   if (leftInSafePlace && !input.safePlaceNote?.trim()) {
     throw new Error("Add a safe place note before marking delivered.");
   }
-`,
+ `,
   `
-`,
+ `,
 );
 
 writeFileSync(proofOfDeliveryPath, proofOfDelivery);
