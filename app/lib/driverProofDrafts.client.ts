@@ -165,6 +165,11 @@ function isDriverPodCompletionForm(form: HTMLFormElement) {
   return intent instanceof HTMLInputElement && intent.value === "completeStop";
 }
 
+function driverPodStopId(form: HTMLFormElement) {
+  const stopIdInput = form.elements.namedItem("stopId");
+  return stopIdInput instanceof HTMLInputElement ? stopIdInput.value.trim() : "";
+}
+
 function driverPodDraftKeyFromFormData(formData: FormData) {
   const stopId = String(formData.get("stopId") || "").trim();
   return stopId ? `driver-pod:${window.location.pathname}:${stopId}` : "";
@@ -205,7 +210,7 @@ function setDriverPodSubmitting(form: HTMLFormElement, isSubmitting: boolean) {
   }
 
   button.disabled = isSubmitting;
-  button.textContent = isSubmitting ? "Saving delivery..." : button.dataset.bpdOriginalLabel;
+  button.textContent = isSubmitting ? "Saving delivery..." : (button.dataset.bpdOriginalLabel || "Complete delivery");
 }
 
 function driverPodStatusElement(form: HTMLFormElement) {
@@ -310,7 +315,7 @@ function installDriverPodAutoRetry() {
   }
 
   window.__bpdDriverPodAutoRetryInstalled = true;
-  const activeForms = new WeakSet<HTMLFormElement>();
+  const activeStopIds = new Set<string>();
 
   document.addEventListener("submit", (event) => {
     const form = event.target;
@@ -322,12 +327,13 @@ function installDriverPodAutoRetry() {
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    if (activeForms.has(form)) {
+    const submissionKey = driverPodStopId(form) || `${window.location.pathname}:unknown-stop`;
+    if (activeStopIds.has(submissionKey)) {
       return;
     }
 
-    activeForms.add(form);
-    void submitDriverPodFormWithRetry(form).finally(() => activeForms.delete(form));
+    activeStopIds.add(submissionKey);
+    void submitDriverPodFormWithRetry(form).finally(() => activeStopIds.delete(submissionKey));
   }, true);
 }
 
