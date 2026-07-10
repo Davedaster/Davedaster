@@ -58,8 +58,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return json({ route, drivers, routexlEnabled: hasRouteXLCredentials(credentials), availableDraftOrders });
 };
 
-function notificationResultMessage(label: string, result: { smsSent: number; emailsSent: number; skipped: number; failed?: number }) {
-  return `${label}: ${result.smsSent} SMS, ${result.emailsSent} emails, ${result.skipped} skipped${result.failed ? `, ${result.failed} failed` : ""}.`;
+function notificationResultMessage(label: string, result: { smsSent: number; emailsSent: number; skipped: number; failed?: number; errors?: string[] }) {
+  const errorText = result.errors?.length ? ` Errors: ${result.errors.join(" | ")}` : "";
+
+  return `${label}: ${result.smsSent} SMS submitted to Twilio, ${result.emailsSent} emails, ${result.skipped} skipped${result.failed ? `, ${result.failed} failed` : ""}.${errorText}`;
 }
 
 function tick(value: boolean) {
@@ -98,9 +100,9 @@ function publishMessage(input: {
   return [
     `Route published`,
     `Shopify tags: ${input.shopifyTagged} tagged${input.shopifyTagFailed ? `, ${input.shopifyTagFailed} failed` : ""}`,
-    `Driver SMS ${tick(input.driverSms)}`,
+    `Driver SMS submitted ${tick(input.driverSms)}`,
     `Driver email ${tick(input.driverEmail)}`,
-    `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
+    `Customer SMS submitted ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} submitted)`,
     `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
     input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
     fulfilmentPublishLabel(input.fulfilmentMode, input.fulfilmentFulfilled, input.fulfilmentSkipped),
@@ -212,7 +214,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "sendNotifications") {
     try {
       const result = await sendBookedSlotNotifications(routeId);
-      return json({ ok: true, message: notificationResultMessage("Customer notifications sent", result), errors: result.errors });
+      return json({ ok: true, message: notificationResultMessage("Customer notifications submitted", result), errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Notifications failed." }, { status: 400 });
     }
@@ -221,7 +223,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "sendOutForDelivery") {
     try {
       const result = await sendManualRouteNotification({ routeId, templateId: "outForDelivery" });
-      return json({ ok: true, message: notificationResultMessage("Out for delivery sent", result), errors: result.errors });
+      return json({ ok: true, message: notificationResultMessage("Out for delivery submitted", result), errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Out for delivery message failed." }, { status: 400 });
     }
@@ -231,7 +233,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     try {
       const delayMinutes = Number(String(formData.get("delayMinutes") || "45"));
       const result = await sendManualRouteNotification({ routeId, templateId: "delayUpdate", delayMinutes, pendingOnly: true });
-      return json({ ok: true, message: notificationResultMessage("Delay update sent", result), errors: result.errors });
+      return json({ ok: true, message: notificationResultMessage("Delay update submitted", result), errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Delay update failed." }, { status: 400 });
     }
@@ -241,7 +243,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     try {
       const stopId = String(formData.get("stopId") || "").trim();
       const result = await sendManualRouteNotification({ routeId, templateId: "nextDropTracking", stopId });
-      return json({ ok: true, message: notificationResultMessage("Next drop message sent", result), errors: result.errors });
+      return json({ ok: true, message: notificationResultMessage("Next drop message submitted", result), errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Next drop message failed." }, { status: 400 });
     }
@@ -250,7 +252,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (intent === "sendDriverRouteLink") {
     try {
       const result = await sendDriverRouteLink({ routeId, request });
-      return json({ ok: true, message: `Driver route link sent: SMS ${tick(result.smsSent)}, email ${tick(result.emailSent)}.`, errors: result.errors });
+      return json({ ok: true, message: `Driver route link submitted: SMS ${tick(result.smsSent)}, email ${tick(result.emailSent)}.`, errors: result.errors });
     } catch (error) {
       return json({ ok: false, error: error instanceof Error ? error.message : "Driver route link failed." }, { status: 400 });
     }
@@ -487,6 +489,7 @@ export default function RouteDetails() {
               </InlineStack>
               {actionData && "message" in actionData ? <Text as="p" variant="bodyMd" tone="success">{actionData.message}</Text> : null}
               {actionData && "error" in actionData ? <Text as="p" variant="bodyMd" tone="critical">{actionData.error}</Text> : null}
+              {actionData && "errors" in actionData && Array.isArray(actionData.errors) && actionData.errors.length ? <Text as="p" variant="bodyMd" tone="critical">{actionData.errors.join(" | ")}</Text> : null}
             </BlockStack>
           </LegacyCard>
 

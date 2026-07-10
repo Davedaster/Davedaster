@@ -269,11 +269,13 @@ export async function saveProofOfDelivery(input: {
       ? `. Notification errors: ${notificationResult.errors.join(" | ")}`
       : "";
 
+    const customerMessagesSent = notificationResult.smsSent + notificationResult.emailsSent;
+
     await prisma.routeHistory.create({
       data: {
         routeId: stop.routeId,
-        action: "Delivery follow up completed",
-        details: `stopId:${input.stopId}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS sent, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
+        action: customerMessagesSent > 0 ? "Delivery follow up completed" : "Delivery follow up skipped",
+        details: `stopId:${input.stopId}. Shopify: ${shopifyResults.join(", ")}. Delivery complete notifications: ${notificationResult.smsSent} SMS submitted to Twilio, ${notificationResult.emailsSent} emails sent, ${notificationResult.skipped} skipped, ${notificationResult.failed} failed${notificationErrorDetails}`,
       },
     });
   } catch (error) {

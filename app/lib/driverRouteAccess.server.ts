@@ -412,8 +412,30 @@ async function sendDueFirstOutForDeliveryNotification(route: DriverRouteWithStop
 
   try {
     await sendFirstOutForDeliveryNotification(route.id);
-  } catch {
-    // Customer notification checks must not stop the driver POD from loading.
+  } catch (error) {
+    try {
+      const existingFailure = await prisma.routeHistory.findFirst({
+        where: {
+          routeId: route.id,
+          action: "Out for delivery failed",
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      if (!existingFailure) {
+        await prisma.routeHistory.create({
+          data: {
+            routeId: route.id,
+            action: "Out for delivery failed",
+            details: error instanceof Error ? error.message : "Out for delivery notification failed.",
+          },
+        });
+      }
+    } catch {
+      // Customer notification checks must not stop the driver POD from loading.
+    }
   }
 }
 
@@ -799,7 +821,7 @@ export async function sendDriverRouteLink(input: {
   }
 
   const routeUrl = buildDriverRouteUrl(input.request, token);
-  const smsBody = `Bathroom Panels Direct route ${route.name} for ${formatDate(route.date)}. Start ${formatTime(route.plannedStartTime)}. Open: ${routeUrl}`;
+  const smsBody = `Bathroom Panels Direct: Driver route ${route.name} is ready for ${formatDate(route.date)}. Start ${formatTime(route.plannedStartTime)}. Open driver POD: ${routeUrl}. Need help? Call 01803 222784. Reply STOP to unsubscribe.`;
   const emailSubject = `Bathroom Panels Direct route ${route.name}`;
   const emailBody = [
     `Hi ${driver.name},`,
@@ -847,7 +869,7 @@ export async function sendDriverRouteLink(input: {
     data: {
       routeId: route.id,
       action: "Driver route link sent",
-      details: `Secure driver route link sent. SMS: ${smsSent ? "sent" : "not sent"}. Email: ${emailSent ? "sent" : "not sent"}.${errors.length ? ` Errors: ${errors.join(" | ")}` : ""}`,
+      details: `Secure driver route link sent. SMS: ${smsSent ? "submitted to Twilio" : "not submitted"}. Email: ${emailSent ? "sent" : "not sent"}.${errors.length ? ` Errors: ${errors.join(" | ")}` : ""}`,
     },
   });
 

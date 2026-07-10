@@ -200,7 +200,21 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
 
       if (isEtaDueForFirstNotification(firstEta)) {
-        await sendFirstOutForDeliveryNotification(route.id);
+        try {
+          await sendFirstOutForDeliveryNotification(route.id);
+        } catch (error) {
+          try {
+            await prisma.routeHistory.create({
+              data: {
+                routeId: route.id,
+                action: "Out for delivery failed",
+                details: error instanceof Error ? error.message : "Out for delivery notification failed.",
+              },
+            });
+          } catch {
+            // Customer notification checks must not stop the driver starting the route.
+          }
+        }
       }
 
       return redirect(`/driver/routes/${token}`);
