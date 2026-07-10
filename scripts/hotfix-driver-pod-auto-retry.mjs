@@ -46,6 +46,14 @@ replaceOnce(
     });
   }
 
+  function shouldRetryPodResponse(status: number, message: string) {
+    if (status === 408 || status === 425 || status === 429 || status >= 500) {
+      return true;
+    }
+
+    return /failed to fetch|network error|network request failed|connection (?:lost|failed|reset)|timed? out|offline|signal weak/i.test(message);
+  }
+
   async function submitDeliveryFormWithRetry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -97,7 +105,7 @@ replaceOnce(
           // Keep the simple message if the response was not JSON.
         }
 
-        retryThisFailure = response.status >= 500 || /signal|upload|connection|network|fetch|form/i.test(message);
+        retryThisFailure = shouldRetryPodResponse(response.status, message);
         throw new Error(message);
       } catch (error) {
         if (!retryThisFailure || attempt >= DRIVER_POD_AUTO_RETRY_ATTEMPTS) {
