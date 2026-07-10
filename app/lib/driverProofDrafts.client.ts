@@ -6,6 +6,9 @@
 
 const DRIVER_POD_DRAFT_DB = "bpd-driver-pod-drafts";
 const DRIVER_POD_DRAFT_STORE = "drafts";
+const DRIVER_POD_AUTO_RETRY_ATTEMPTS = 3;
+const DRIVER_POD_AUTO_RETRY_DELAY_MS = 3500;
+const DRIVER_POD_RETRY_STATUS_ATTRIBUTE = "data-bpd-pod-upload-status";
 
 export type DriverPodDraft = {
   stopId: string;
@@ -138,3 +141,200 @@ export function fileFromDriverPodDraft(value: File | Blob | null | undefined, fa
 export function isDriverPodDraftUploadFile(value: FormDataEntryValue): value is File {
   return typeof value === "object" && value !== null && "size" in value && Number(value.size) > 0;
 }
+
+function waitForDriverPodRetry(attempt: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, DRIVER_POD_AUTO_RETRY_DELAY_MS * attempt);
+  });
+}
+
+function shouldRetryDriverPodResponse(status: number, message: string) {
+  if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    return true;
+  }
+
+  return /failed to fetch|network error|network request failed|connection (?:lost|failed|reset)|timed? out|offline|signal weak/i.test(message);
+}
+
+function isDriverPodCompletionForm(form: HTMLFormElement) {
+  if (!window.location.pathname.startsWith("/driver/routes/")) {
+    return false;
+  }
+
+  const intent = form.elements.namedItem("intent");
+  return intent instanceof HTMLInputElement && intent.value === "completeStop";
+}
+
+function driverPodDraftKeyFromFormData(formData: FormData) {
+  const stopId = String(formData.get("stopId") || "").trim();
+  return stopId ? `driver-pod:${window.location.pathname}:${stopId}` : "";
+}
+
+async function appendRestoredDriverPodFiles(formData: FormData, draftKey: string) {
+  const draft = await readDriverPodDraft(draftKey);
+
+  if (!draft) {
+    return;
+  }
+
+  const selectedProofFiles = formData.getAll("proofPhotoFiles").filter(isDriverPodDraftUploadFile);
+  const leftInSafePlace = String(formData.get("leftInSafePlace") || "") === "true";
+  const restoredProofFiles = [
+    fileFromDriverPodDraft(draft.proofPhotoOne, "proof-photo-1.jpg"),
+    leftInSafePlace ? fileFromDriverPodDraft(draft.proofPhotoTwo, "proof-photo-2.jpg") : null,
+  ].filter((file): file is File => Boolean(file));
+
+  for (const restoredFile of restoredProofFiles.slice(selectedProofFiles.length)) {
+    formData.append("proofPhotoFiles", restoredFile, restoredFile.name);
+  }
+}
+
+function driverPodSubmitButton(form: HTMLFormElement) {
+  return form.querySelector<HTMLButtonElement>('button[type="submit"]');
+}
+
+function setDriverPodSubmitting(form: HTMLFormElement, isSubmitting: boolean) {
+  const button = driverPodSubmitButton(form);
+
+  if (!button) {
+    return;
+  }
+
+  if (!button.dataset.bpdOriginalLabel) {
+    button.dataset.bpdOriginalLabel = button.textContent || "Complete delivery";
+  }
+
+  button.disabled = isSubmitting;
+  button.textContent = isSubmitting ? "Saving delivery..." : button.dataset.bpdOriginalLabel;
+}
+
+function driverPodStatusElement(form: HTMLFormElement) {
+  const existing = form.querySelector<HTMLElement>(`[${DRIVER_POD_RETRY_STATUS_ATTRIBUTE}]`);
+
+  if (existing) {
+    return existing;
+  }
+
+  const element = document.createElement("p");
+  element.setAttribute(DRIVER_POD_RETRY_STATUS_ATTRIBUTE, "true");
+  element.style.margin = "0";
+  element.style.fontWeight = "800";
+  element.style.fontSize = "13px";
+
+  const button = driverPodSubmitButton(form);
+  if (button) {
+    form.insertBefore(element, button);
+  } else {
+    form.appendChild(element);
+  }
+
+  return element;
+}
+
+function setDriverPodStatus(form: HTMLFormElement, message: string, failed: boolean) {
+  const element = driverPodStatusElement(form);
+  element.textContent = message;
+  element.style.color = failed ? "#b42318" : "#667085";
+  element.hidden = !message;
+}
+
+async function driverPodErrorMessage(response: Response) {
+  let message = "Delivery could not be saved yet.";
+
+  try {
+    const data = await response.clone().json() as { error?: string };
+    if (data.error) {
+      message = data.error;
+    }
+  } catch {
+    // Keep the simple message if the response was not JSON.
+  }
+
+  return message;
+}
+
+async function submitDriverPodFormWithRetry(form: HTMLFormElement) {
+  setDriverPodSubmitting(form, true);
+  setDriverPodStatus(form, "", false);
+
+  for (let attempt = 1; attempt <= DRIVER_POD_AUTO_RETRY_ATTEMPTS; attempt += 1) {
+    let retryThisFailure = true;
+
+    try {
+      const formData = new FormData(form);
+      const draftKey = driverPodDraftKeyFromFormData(formData);
+      await appendRestoredDriverPodFiles(formData, draftKey);
+
+      const response = await fetch(form.action || window.location.href, {
+        method: "POST",
+        body: formData,
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+
+      if (response.redirected) {
+        await clearDriverPodDraft(draftKey);
+        window.location.assign(response.url);
+        return;
+      }
+
+      if (response.ok) {
+        await clearDriverPodDraft(draftKey);
+        window.location.assign(`${window.location.pathname}#next-stop`);
+        return;
+      }
+
+      const message = await driverPodErrorMessage(response);
+      retryThisFailure = shouldRetryDriverPodResponse(response.status, message);
+      throw new Error(message);
+    } catch (error) {
+      if (!retryThisFailure || attempt >= DRIVER_POD_AUTO_RETRY_ATTEMPTS) {
+        setDriverPodSubmitting(form, false);
+        setDriverPodStatus(
+          form,
+          error instanceof Error ? error.message : "Delivery could not be saved. Please try again when signal improves.",
+          true,
+        );
+        return;
+      }
+
+      setDriverPodStatus(form, "Signal weak. Retrying quietly...", false);
+      await waitForDriverPodRetry(attempt);
+    }
+  }
+}
+
+function installDriverPodAutoRetry() {
+  if (typeof window === "undefined" || window.__bpdDriverPodAutoRetryInstalled) {
+    return;
+  }
+
+  window.__bpdDriverPodAutoRetryInstalled = true;
+  const activeForms = new WeakSet<HTMLFormElement>();
+
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+
+    if (!(form instanceof HTMLFormElement) || !isDriverPodCompletionForm(form)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    if (activeForms.has(form)) {
+      return;
+    }
+
+    activeForms.add(form);
+    void submitDriverPodFormWithRetry(form).finally(() => activeForms.delete(form));
+  }, true);
+}
+
+declare global {
+  interface Window {
+    __bpdDriverPodAutoRetryInstalled?: boolean;
+  }
+}
+
+installDriverPodAutoRetry();
