@@ -1,22 +1,26 @@
 name: Generate permanent driver upload state
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/permanent-driver-upload-state
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   generate:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'agent/permanent-driver-upload-state'
     runs-on: ubuntu-latest
     steps:
       - name: Check out migration branch
         uses: actions/checkout@v4
         with:
-          ref: agent/permanent-driver-upload-state
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
       - name: Set up Node
@@ -105,4 +109,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Move driver upload state into permanent source"
-          git push origin HEAD:agent/permanent-driver-upload-state
+          git push origin HEAD:${{ github.head_ref }}
