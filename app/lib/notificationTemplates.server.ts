@@ -43,7 +43,7 @@ export type EditableNotificationTemplate = {
 
 const SETTING_KEY = "notification_templates";
 const EMAIL_TEMPLATE_VERSION = "clean_logo_delivery_emails_2026_07_01_logo_default";
-const SMS_TEMPLATE_VERSION = "customer_sms_restore_2026_07_08";
+const SMS_TEMPLATE_VERSION = "customer_sms_filter_safe_2026_07_09";
 const COMPANY_NAME = "Bathroom Panels Direct";
 const COMPANY_PHONE = "01803 222784";
 const COMPANY_EMAIL = "deliveries@bathroompanelsdirect.co.uk";
@@ -127,11 +127,7 @@ function collectionShell(title: string, intro: string, highlight: string, extra 
 
 const proofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Delivery photo</p><img src="{{ proof.photo_url }}" alt="Delivery photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer signature</p><img src="{{ proof.signature_url }}" alt="Customer signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
 const collectionProofImagesHtml = `{% if proof.photo_url %}<div style="margin-top:22px;padding-top:18px;border-top:1px solid #edf1f5;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Return photo</p><img src="{{ proof.photo_url }}" alt="Return photo" style="display:block;width:100%;max-width:520px;border-radius:18px;"></div>{% endif %}{% if proof.signature_url %}<div style="margin-top:20px;"><p style="margin:0 0 10px;color:#7b8794;font-size:12px;text-transform:uppercase;letter-spacing:.45px;font-weight:700;">Customer return signature</p><img src="{{ proof.signature_url }}" alt="Customer return signature" style="display:block;width:100%;max-width:360px;border-radius:14px;background:#ffffff;"></div>{% endif %}`;
-const safePlaceDeliveryCompleteSmsBody = `Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed and left safely at the property. View delivery proof here: {{ tracking.url }}
-
-If you're happy with the service, a quick Google review really helps our family business: ${GOOGLE_REVIEW_URL}
-
-Need help? Call {{ company.phone }}`;
+const safePlaceDeliveryCompleteSmsBody = `Bathroom Panels Direct: Your delivery for order {{ order.number }} has been completed and left safely at the property. View delivery details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.`;
 
 const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
   bookedSlot: {
@@ -140,7 +136,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when a delivery slot is confirmed for a customer.",
     emailSubject: "Your panel order delivery, {{ order.number }}",
     emailHtml: shell("Your panel delivery is planned", "Your panel order has been booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your delivery for order {{ order.number }} is planned for {{ delivery.date }}, {{ delivery.eta_slot }}. View delivery details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   outForDelivery: {
     id: "outForDelivery",
@@ -148,7 +144,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when the route is out for delivery.",
     emailSubject: "Your panel order is out for delivery, {{ order.number }}",
     emailHtml: shell("Your panels are out for delivery", "Your order is now with our delivery team and is booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your order is out for delivery. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your order {{ order.number }} is out for delivery today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Delivery window: {{ delivery.eta_slot }}. View delivery details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   nextDropTracking: {
     id: "nextDropTracking",
@@ -156,7 +152,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent when the customer is the next delivery stop.",
     emailSubject: "You are next for delivery, {{ order.number }}",
     emailHtml: shell("You are the next delivery", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next drop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: You are the next delivery stop for order {{ order.number }}. Please keep access clear. View delivery details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   delayUpdate: {
     id: "delayUpdate",
@@ -164,7 +160,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "SMS only. Sent when a route is running behind schedule.",
     emailSubject: "",
     emailHtml: "",
-    smsBody: "Hi {{ customer.name }}, sorry, your delivery is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your delivery for order {{ order.number }} is running about {{ delay.minutes }} minutes later than planned. Updated window: {{ delivery.eta_slot }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   deliveryComplete: {
     id: "deliveryComplete",
@@ -172,11 +168,7 @@ const defaults: Record<NotificationTemplateId, EditableNotificationTemplate> = {
     description: "Sent after a stop has been completed.",
     emailSubject: "Your panel order has been delivered, {{ order.number }}",
     emailHtml: shell("Your panels have been delivered", "Your panel order has been delivered. Thank you for your order.", "Completed today", proofImagesHtml),
-    smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + `{% else %}Hi {{ customer.name }}, your Bathroom Panels Direct delivery for {{ order.number }} has been completed. Thank you for your order.
-
-If you're happy with the service, a quick Google review really helps our family business: ${GOOGLE_REVIEW_URL}
-
-Need help? Call {{ company.phone }}{% endif %}`,
+    smsBody: "{% if delivery.left_in_safe_place %}" + safePlaceDeliveryCompleteSmsBody + `{% else %}Bathroom Panels Direct: Your delivery for order {{ order.number }} has been completed. Thank you for your order. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.{% endif %}`,
   },
 };
 
@@ -185,29 +177,29 @@ const collectionDefaults: Record<NotificationTemplateId, EditableNotificationTem
     ...defaults.bookedSlot,
     emailSubject: "Your return, {{ order.number }}",
     emailHtml: collectionShell("Your return is planned", "Your return has been booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your Bathroom Panels Direct return for {{ order.number }} is booked for {{ delivery.date }}, {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your return for order {{ order.number }} is planned for {{ delivery.date }}, {{ delivery.eta_slot }}. View return details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   outForDelivery: {
     ...defaults.outForDelivery,
     emailSubject: "Your return is out today, {{ order.number }}",
     emailHtml: collectionShell("Your return is out today", "Your return is now with our driver and is booked for the slot below.", "{{ delivery.eta_slot }}"),
-    smsBody: "Hi {{ customer.name }}, your return is out today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Current slot: {{ delivery.eta_slot }}. Track it here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your return for order {{ order.number }} is scheduled for today. {% if driver.name %}Your driver is {{ driver.name }}. {% endif %}Return window: {{ delivery.eta_slot }}. View return details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   nextDropTracking: {
     ...defaults.nextDropTracking,
     emailSubject: "You are next for your return, {{ order.number }}",
     emailHtml: collectionShell("You are next for your return", "Good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return.", "Live tracking is ready", "<p style=\"margin:12px 0 0;color:#667085;font-size:14px;line-height:1.55;\">Live tracking is only shown while you are the next stop.</p>"),
-    smsBody: "Hi {{ customer.name }}, good news, {% if driver.name %}{{ driver.name }} is{% else %}our driver is{% endif %} heading to you next for your return. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: You are the next return stop for order {{ order.number }}. Please keep access clear. View return details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   delayUpdate: {
     ...defaults.delayUpdate,
-    smsBody: "Hi {{ customer.name }}, sorry, your return is running around {{ delay.minutes }} minutes later than planned. Updated slot: {{ delivery.eta_slot }}. Track here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your return for order {{ order.number }} is running about {{ delay.minutes }} minutes later than planned. Updated window: {{ delivery.eta_slot }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
   deliveryComplete: {
     ...defaults.deliveryComplete,
     emailSubject: "Your return has been completed, {{ order.number }}",
     emailHtml: collectionShell("Your return is complete", "Your returned items will be checked before any refund, replacement or further action is confirmed.", "Returned today", collectionProofImagesHtml),
-    smsBody: "Hi {{ customer.name }}, your return for {{ order.number }} has been completed. The items will be checked before any refund, replacement or further action is confirmed. View proof here: {{ tracking.url }}\n\nNeed help? Call {{ company.phone }}",
+    smsBody: "Bathroom Panels Direct: Your return for order {{ order.number }} has been completed. We will check the returned items before confirming the next step. View return details: {{ tracking.url }}. Need help? Call {{ company.phone }}. Reply STOP to unsubscribe.",
   },
 };
 

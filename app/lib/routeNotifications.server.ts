@@ -306,13 +306,21 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
     }
   }
 
-  const summaryAction = failed ? "Notifications partially sent" : "Notifications sent";
-  const summaryDetails = `${smsSent} SMS sent, ${emailsSent} emails sent, ${skipped} orders skipped${failed ? `, ${failed} failed. Errors: ${errors.join(" | ")}` : ""}`;
+  const sentCount = smsSent + emailsSent;
+  const zeroSentError = sentCount === 0
+    ? "No customer notifications were sent. Check customer phone/email details and notification provider settings."
+    : "";
+  const resultErrors = zeroSentError ? [...errors, zeroSentError] : errors;
+  const summaryAction = failed
+    ? (sentCount > 0 ? "Notifications partially sent" : "Notifications failed")
+    : (sentCount > 0 ? "Notifications sent" : "Notifications skipped");
+  const summaryDetails = `${smsSent} SMS submitted to Twilio, ${emailsSent} emails sent, ${skipped} orders skipped${failed ? `, ${failed} failed` : ""}${resultErrors.length ? `. Errors: ${resultErrors.join(" | ")}` : ""}`;
+  const shouldMarkNotificationsSent = sentCount > 0 && failed === 0;
 
   await prisma.route.update({
     where: { id: routeId },
     data: {
-      ...(failed ? {} : { status: "NOTIFICATIONS_SENT", notificationsSent: true }),
+      ...(shouldMarkNotificationsSent ? { status: "NOTIFICATIONS_SENT", notificationsSent: true } : {}),
       history: {
         create: [
           ...successfulRecipientLogs,
@@ -325,7 +333,7 @@ export async function sendBookedSlotNotifications(routeId: string): Promise<Send
     },
   });
 
-  return { smsSent, emailsSent, skipped, failed, errors };
+  return { smsSent, emailsSent, skipped, failed, errors: resultErrors };
 }
 
 export async function sendManualRouteNotification({
@@ -442,20 +450,26 @@ export async function sendManualRouteNotification({
 
   const label = manualNotificationLabel(templateId);
   const stopIds = marker?.stopIds?.length ? marker.stopIds : stops.map((stop) => stop.id);
+  const sentCount = smsSent + emailsSent;
+  const zeroSentError = sentCount === 0
+    ? `No ${label.toLowerCase()} messages were sent. Check customer phone/email details and notification provider settings.`
+    : "";
+  const resultErrors = zeroSentError ? [...errors, zeroSentError] : errors;
+  const historyAction = sentCount > 0 ? `${label} sent` : `${label} failed`;
 
   await prisma.route.update({
     where: { id: routeId },
     data: {
       history: {
         create: {
-          action: `${label} sent`,
-          details: `${smsSent} SMS sent, ${emailsSent} emails sent, ${skipped} orders skipped${failed ? `, ${failed} failed` : ""}${notificationMarkerDetails({ ...marker, stopIds })}`,
+          action: historyAction,
+          details: `${smsSent} SMS submitted to Twilio, ${emailsSent} emails sent, ${skipped} orders skipped${failed ? `, ${failed} failed` : ""}${resultErrors.length ? `. Errors: ${resultErrors.join(" | ")}` : ""}${notificationMarkerDetails({ ...marker, stopIds })}`,
         },
       },
     },
   });
 
-  return { smsSent, emailsSent, skipped, failed, errors };
+  return { smsSent, emailsSent, skipped, failed, errors: resultErrors };
 }
 
 export async function sendFirstOutForDeliveryNotification(routeId: string) {

@@ -61,6 +61,10 @@ function tick(value: boolean) {
   return value ? "✓" : "✗";
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
 function fulfilmentPublishLabel(mode: string, fulfilled: number, skipped: number) {
   if (mode === "on_publish_delivered") return `Shopify fulfilment on publish: ${fulfilled} fulfilled and marked delivered, ${skipped} skipped`;
   if (mode === "on_publish") return `Shopify fulfilment on publish: ${fulfilled} fulfilled, ${skipped} skipped`;
@@ -80,9 +84,9 @@ function publishMessage(input: {
 }) {
   return [
     "Route published",
-    `Driver SMS ${tick(input.driverSms)}`,
+    `Driver SMS submitted ${tick(input.driverSms)}`,
     `Driver email ${tick(input.driverEmail)}`,
-    `Customer SMS ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} sent)`,
+    `Customer SMS submitted ${input.customerSms > 0 ? "✓" : "✗"} (${input.customerSms} submitted)`,
     `Customer email ${input.customerEmail > 0 ? "✓" : "✗"} (${input.customerEmail} sent)`,
     input.customerSkipped ? `${input.customerSkipped} customer orders skipped` : "No customer orders skipped",
     fulfilmentPublishLabel(input.fulfilmentMode, input.fulfilmentFulfilled, input.fulfilmentSkipped),
@@ -167,35 +171,62 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       await publishRoute(routeId);
       await calculateEtaSlots(routeId);
-      await tagPublishedRouteOrders(admin, routeId);
 
-      const fulfilmentSettings = await getFulfilmentSettings();
-      const fulfilOnPublish = fulfilmentSettings.routePublishFulfilmentMode === "on_publish" || fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered";
-      const fulfilmentResult = fulfilOnPublish
-        ? await fulfilRouteOrders(admin, routeId, {
-          markDelivered: fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered",
-          notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
-        })
-        : { fulfilled: 0, skipped: 0, errors: [] };
-      const driverResult = await sendDriverRouteLink({ routeId, request });
-      const customerResult = await sendBookedSlotNotifications(routeId);
-      const errors = [...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
-      const fulfilmentToastTitle = fulfilmentSettings.routePublishFulfilmentMode === "on_publish_delivered"
+      const tagResult = { errors: [] as string[] };
+      try {
+        await tagPublishedRouteOrders(admin, routeId);
+      } catch (error) {
+        tagResult.errors.push(`Shopify tagging step failed: ${errorMessage(error)}`);
+      }
+
+      let fulfilmentMode = "on_delivery_complete";
+      let fulfilOnPublish = false;
+      let fulfilmentResult = { fulfilled: 0, skipped: 0, errors: [] as string[] };
+      try {
+        const fulfilmentSettings = await getFulfilmentSettings();
+        fulfilmentMode = fulfilmentSettings.routePublishFulfilmentMode;
+        fulfilOnPublish = fulfilmentMode === "on_publish" || fulfilmentMode === "on_publish_delivered";
+        fulfilmentResult = fulfilOnPublish
+          ? await fulfilRouteOrders(admin, routeId, {
+            markDelivered: fulfilmentMode === "on_publish_delivered",
+            notifyCustomer: fulfilmentSettings.notifyCustomerOnFulfilment,
+          })
+          : fulfilmentResult;
+      } catch (error) {
+        fulfilmentResult.errors.push(`Shopify fulfilment step failed: ${errorMessage(error)}`);
+      }
+
+      let driverResult = { smsSent: false, emailSent: false, errors: [] as string[] };
+      try {
+        driverResult = await sendDriverRouteLink({ routeId, request });
+      } catch (error) {
+        driverResult.errors.push(`Driver route link step failed: ${errorMessage(error)}`);
+      }
+
+      let customerResult = { smsSent: 0, emailsSent: 0, skipped: 0, failed: 0, errors: [] as string[] };
+      try {
+        customerResult = await sendBookedSlotNotifications(routeId);
+      } catch (error) {
+        customerResult.errors.push(`Customer booked slot notification step failed: ${errorMessage(error)}`);
+      }
+
+      const errors = [...tagResult.errors, ...fulfilmentResult.errors, ...driverResult.errors, ...customerResult.errors];
+      const fulfilmentToastTitle = fulfilmentMode === "on_publish_delivered"
         ? "Shopify fulfilled and delivered on publish"
-        : fulfilmentSettings.routePublishFulfilmentMode === "on_publish"
+        : fulfilmentMode === "on_publish"
           ? "Shopify fulfilment on publish"
           : "Shopify fulfilment";
       const toasts: AdminToastMessage[] = [
         actionToast("Route published", route.name),
-        actionToast(driverResult.smsSent ? "Driver SMS sent" : "Driver SMS not sent", `${route.name} sent to ${driverName}`, driverResult.smsSent ? "success" : "info"),
+        actionToast(driverResult.smsSent ? "Driver SMS submitted" : "Driver SMS not submitted", `${route.name} sent to ${driverName}`, driverResult.smsSent ? "success" : "info"),
         actionToast(driverResult.emailSent ? "Driver email sent" : "Driver email not sent", `${route.name} sent to ${driverName}`, driverResult.emailSent ? "success" : "info"),
-        actionToast("Customer SMS update", `${customerResult.smsSent} sent, ${customerResult.skipped} skipped`, customerResult.smsSent ? "success" : "info"),
+        actionToast("Customer SMS update", `${customerResult.smsSent} submitted, ${customerResult.skipped} skipped`, customerResult.smsSent ? "success" : "info"),
         actionToast("Customer email update", `${customerResult.emailsSent} sent, ${customerResult.skipped} skipped`, customerResult.emailsSent ? "success" : "info"),
         fulfilOnPublish ? actionToast(fulfilmentToastTitle, `${fulfilmentResult.fulfilled} fulfilled, ${fulfilmentResult.skipped} skipped`, fulfilmentResult.errors.length ? "info" : "success") : actionToast("Shopify fulfilment", "Will run when each delivery is completed", "info"),
         ...errors.map((error) => actionToast("Publish detail", error, "critical")),
       ];
 
-      return json<RouteActionData>({ ok: true, message: publishMessage({ driverSms: driverResult.smsSent, driverEmail: driverResult.emailSent, customerSms: customerResult.smsSent, customerEmail: customerResult.emailsSent, customerSkipped: customerResult.skipped, fulfilmentMode: fulfilmentSettings.routePublishFulfilmentMode, fulfilmentFulfilled: fulfilmentResult.fulfilled, fulfilmentSkipped: fulfilmentResult.skipped, errors }), errors, toasts });
+      return json<RouteActionData>({ ok: true, message: publishMessage({ driverSms: driverResult.smsSent, driverEmail: driverResult.emailSent, customerSms: customerResult.smsSent, customerEmail: customerResult.emailsSent, customerSkipped: customerResult.skipped, fulfilmentMode, fulfilmentFulfilled: fulfilmentResult.fulfilled, fulfilmentSkipped: fulfilmentResult.skipped, errors }), errors, toasts });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Route could not be published.";
       return json<RouteActionData>({ ok: false, error: message, toasts: [actionToast("Route could not be published", message, "critical")] }, { status: 400 });

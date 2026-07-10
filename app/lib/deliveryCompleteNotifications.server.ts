@@ -51,7 +51,7 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
       emailsSent: 0,
       skipped: input.orders.length,
       failed: 0,
-      errors: [],
+      errors: ["No delivery complete messages were sent because Twilio and Resend are not enabled."],
     };
   }
 
@@ -115,11 +115,16 @@ export async function sendDeliveryCompleteNotifications(input: DeliveryCompleteI
     }
   }
 
+  const sentCount = smsSent + emailsSent;
+  const resultErrors = sentCount === 0
+    ? [...errors, "No delivery complete messages were sent. Check customer phone/email details and notification provider settings."]
+    : errors;
+
   return {
     smsSent,
     emailsSent,
     skipped,
     failed,
-    errors,
+    errors: resultErrors,
   };
 }
