@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-const routePath = "app/routes/driver.routes.$token.tsx";
+const routePath = "app/routes/.driver.routes.$token.source.tsx";
 let source = readFileSync(routePath, "utf8");
 
 function replaceOnce(label, from, to) {
