@@ -10,108 +10,16 @@ function replaceOnce(label, from, to) {
 }
 
 replaceOnce(
-  "add local draft helpers",
-  `function ProofPreview({ src, alt }: { src: string; alt: string }) {
-  return src ? <img src={src} alt={alt} style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null;
-}`,
-  `function ProofPreview({ src, alt }: { src: string; alt: string }) {
-  return src ? <img src={src} alt={alt} style={{ width: "min(150px, 100%)", height: 150, borderRadius: 14, objectFit: "cover", border: "1px solid #d0d5dd", maxWidth: "100%" }} /> : null;
-}
-
-const DRIVER_POD_DRAFT_DB = "bpd-driver-pod-drafts";
-const DRIVER_POD_DRAFT_STORE = "drafts";
-
-type DriverPodDraft = {
-  stopId: string;
-  deliveryMode: "customer" | "safe" | null;
-  deliveryNote: string;
-  safePlaceNote: string;
-  proofPhotoUrl: string;
-  podImage: string;
-  proofPhotoOne?: File | Blob | null;
-  proofPhotoTwo?: File | Blob | null;
-  updatedAt: number;
-};
-
-function openDriverPodDraftDb() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof window === "undefined" || !("indexedDB" in window)) {
-      reject(new Error("Local proof storage is unavailable."));
-      return;
-    }
-
-    const request = window.indexedDB.open(DRIVER_POD_DRAFT_DB, 1);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(DRIVER_POD_DRAFT_STORE)) {
-        db.createObjectStore(DRIVER_POD_DRAFT_STORE);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Local proof storage failed."));
-  });
-}
-
-async function readDriverPodDraft(key: string) {
-  if (!key) return null;
-
-  try {
-    const db = await openDriverPodDraftDb();
-    return await new Promise<DriverPodDraft | null>((resolve) => {
-      const tx = db.transaction(DRIVER_POD_DRAFT_STORE, "readonly");
-      const request = tx.objectStore(DRIVER_POD_DRAFT_STORE).get(key);
-      request.onsuccess = () => resolve((request.result as DriverPodDraft | undefined) || null);
-      request.onerror = () => resolve(null);
-      tx.oncomplete = () => db.close();
-      tx.onerror = () => db.close();
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function writeDriverPodDraft(key: string, draft: DriverPodDraft) {
-  if (!key) return;
-
-  try {
-    const db = await openDriverPodDraftDb();
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(DRIVER_POD_DRAFT_STORE, "readwrite");
-      tx.objectStore(DRIVER_POD_DRAFT_STORE).put(draft, key);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); resolve(); };
-    });
-  } catch {
-    // Local draft storage is best-effort and must never block the POD.
-  }
-}
-
-async function clearDriverPodDraft(key: string) {
-  if (!key) return;
-
-  try {
-    const db = await openDriverPodDraftDb();
-    await new Promise<void>((resolve) => {
-      const tx = db.transaction(DRIVER_POD_DRAFT_STORE, "readwrite");
-      tx.objectStore(DRIVER_POD_DRAFT_STORE).delete(key);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); resolve(); };
-    });
-  } catch {
-    // Ignore local cleanup errors. Server confirmation is still the source of truth.
-  }
-}
-
-function fileFromDriverPodDraft(value: File | Blob | null | undefined, fallbackName: string) {
-  if (!value) return null;
-  if (value instanceof File) return value;
-  return new File([value], fallbackName, { type: value.type || "image/jpeg" });
-}
-
-function isDriverPodDraftUploadFile(value: FormDataEntryValue): value is File {
-  return typeof value === "object" && value !== null && "size" in value && Number(value.size) > 0;
-}`,
+  "import local draft helpers",
+  `import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";`,
+  `import {
+  clearDriverPodDraft,
+  fileFromDriverPodDraft,
+  isDriverPodDraftUploadFile,
+  readDriverPodDraft,
+  writeDriverPodDraft,
+} from "../lib/driverProofDrafts.client";
+import { isProofPhotoStorageEnabled, uploadProofPhoto } from "../lib/proofPhotoStorage.server";`,
 );
 
 replaceOnce(
@@ -284,4 +192,4 @@ replaceOnce(
 );
 
 writeFileSync(routePath, source);
-console.log("Driver POD local draft hotfix applied.");
+console.log("Driver POD local draft hotfix applied using shared client helpers.");
