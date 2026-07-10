@@ -36,9 +36,9 @@ proofOfDelivery = replaceOnce(
   if (leftInSafePlace && !input.safePlaceNote?.trim()) {
     throw new Error("Add a safe place note before marking delivered.");
   }
- `,
+`,
   `
- `,
+`,
 );
 
 writeFileSync(proofOfDeliveryPath, proofOfDelivery);
