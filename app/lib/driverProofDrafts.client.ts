@@ -1,11 +1,7 @@
 /**
- * Driver Proof of Delivery Draft Storage
- * 
- * Manages local IndexedDB storage for proof of delivery form state.
- * Allows drivers to recover partial submissions if the browser is refreshed
- * or connection is lost during the completion workflow.
- * 
- * Drafts are automatically cleared only after confirmed server success.
+ * IndexedDB-backed draft storage for driver proof of delivery.
+ * Stores photos, notes, delivery mode, and other proof data locally
+ * to survive page refreshes and network interruptions.
  */
 
 const DRIVER_POD_DRAFT_DB = "bpd-driver-pod-drafts";
@@ -24,8 +20,8 @@ export type DriverPodDraft = {
 };
 
 /**
- * Opens or initializes the IndexedDB database for driver proof drafts.
- * Creates the object store on first use.
+ * Opens or initializes the IndexedDB database for driver POD drafts.
+ * Creates the object store if it does not exist.
  */
 function openDriverPodDraftDb(): Promise<IDBDatabase> {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -42,15 +38,15 @@ function openDriverPodDraftDb(): Promise<IDBDatabase> {
         db.createObjectStore(DRIVER_POD_DRAFT_STORE);
       }
     };
-
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error("Local proof storage failed."));
   });
 }
 
 /**
- * Reads a draft from IndexedDB by key.
- * Returns null if the draft does not exist or an error occurs.
+ * Reads a draft from local storage by its key.
+ * Returns null if the draft does not exist or if storage is unavailable.
+ * Errors are swallowed gracefully since storage is best-effort.
  */
 export async function readDriverPodDraft(key: string): Promise<DriverPodDraft | null> {
   if (!key) return null;
@@ -71,8 +67,9 @@ export async function readDriverPodDraft(key: string): Promise<DriverPodDraft | 
 }
 
 /**
- * Writes a draft to IndexedDB.
- * Best-effort operation that silently fails if storage is unavailable.
+ * Writes a draft to local storage by its key.
+ * If storage is unavailable, the error is silently suppressed.
+ * This ensures the POD workflow never blocks on local storage failure.
  */
 export async function writeDriverPodDraft(key: string, draft: DriverPodDraft): Promise<void> {
   if (!key) return;
@@ -82,8 +79,14 @@ export async function writeDriverPodDraft(key: string, draft: DriverPodDraft): P
     await new Promise<void>((resolve) => {
       const tx = db.transaction(DRIVER_POD_DRAFT_STORE, "readwrite");
       tx.objectStore(DRIVER_POD_DRAFT_STORE).put(draft, key);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); resolve(); };
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
     });
   } catch {
     // Local draft storage is best-effort and must never block the POD.
@@ -91,8 +94,9 @@ export async function writeDriverPodDraft(key: string, draft: DriverPodDraft): P
 }
 
 /**
- * Clears a draft from IndexedDB by key.
- * Called after confirmed server success to prevent stale recovery.
+ * Deletes a draft from local storage by its key.
+ * Called after successful server confirmation to free local storage.
+ * Errors are silently suppressed since this is cleanup.
  */
 export async function clearDriverPodDraft(key: string): Promise<void> {
   if (!key) return;
@@ -102,8 +106,14 @@ export async function clearDriverPodDraft(key: string): Promise<void> {
     await new Promise<void>((resolve) => {
       const tx = db.transaction(DRIVER_POD_DRAFT_STORE, "readwrite");
       tx.objectStore(DRIVER_POD_DRAFT_STORE).delete(key);
-      tx.oncomplete = () => { db.close(); resolve(); };
-      tx.onerror = () => { db.close(); resolve(); };
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
     });
   } catch {
     // Ignore local cleanup errors. Server confirmation is still the source of truth.
@@ -111,8 +121,9 @@ export async function clearDriverPodDraft(key: string): Promise<void> {
 }
 
 /**
- * Converts a Blob or File from draft storage into a File object.
- * Falls back to creating a new File if the value is a Blob.
+ * Converts a stored Blob or File back into a File with the given name.
+ * If the value is already a File, returns it as-is.
+ * Returns null if the value is falsy.
  */
 export function fileFromDriverPodDraft(value: File | Blob | null | undefined, fallbackName: string): File | null {
   if (!value) return null;
@@ -121,7 +132,8 @@ export function fileFromDriverPodDraft(value: File | Blob | null | undefined, fa
 }
 
 /**
- * Type guard to check if a FormDataEntryValue is a valid uploaded File.
+ * Type guard for FormDataEntryValue to safely identify File objects.
+ * Used when filtering uploaded proof photos from FormData.
  */
 export function isDriverPodDraftUploadFile(value: FormDataEntryValue): value is File {
   return typeof value === "object" && value !== null && "size" in value && Number(value.size) > 0;
