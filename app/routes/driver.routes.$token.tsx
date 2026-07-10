@@ -26,21 +26,30 @@ function driverRouteErrorMessage(intent: string, message: string) {
   return message + DELIVERY_RETRY_GUIDANCE;
 }
 
+async function readDriverRouteFormContext(request: Request) {
+  try {
+    const formData = await request.formData();
+
+    return {
+      intent: String(formData.get("intent") || "startRoute"),
+      stopId: String(formData.get("stopId") || "").trim(),
+    };
+  } catch {
+    return { intent: "unknown", stopId: "" };
+  }
+}
+
 export const action = async (args: ActionFunctionArgs) => {
-  let intent = "unknown";
-  let stopId = "";
+  const requestCopy = args.request.clone();
 
   try {
-    const formData = await args.request.clone().formData();
-    intent = String(formData.get("intent") || "startRoute");
-    stopId = String(formData.get("stopId") || "").trim();
-
     const response = await runDriverRouteAction(args);
 
     if (response.status !== 400) {
       return response;
     }
 
+    const { intent, stopId } = await readDriverRouteFormContext(requestCopy);
     let payload: DriverRouteErrorPayload = {};
 
     try {
@@ -63,6 +72,7 @@ export const action = async (args: ActionFunctionArgs) => {
       throw error;
     }
 
+    const { intent, stopId } = await readDriverRouteFormContext(requestCopy);
     const message = error instanceof Error ? error.message : "Driver route action failed.";
 
     return json({
