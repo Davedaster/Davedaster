@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-const driverRoutePath = "app/routes/.driver.routes.$token.source.tsx";
+const driverRoutePath = "app/routes/driver.routes.$token.tsx";
 const proofOfDeliveryPath = "app/lib/proofOfDelivery.server.ts";
 
 function replaceOnce(source, label, from, to) {
