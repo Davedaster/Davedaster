@@ -70,6 +70,7 @@ export default function App() {
         <Link to="/app/pod-search">Proof of Delivery</Link>
         <Link to="/app/returns">Returns</Link>
         <Link to="/app/notifications">Notifications</Link>
+        <Link to="/app/sms-status">SMS Status</Link>
         <Link to="/app/fulfilment-settings">Fulfilment Settings</Link>
         <Link to="/app/settings">Settings</Link>
       </NavMenu>

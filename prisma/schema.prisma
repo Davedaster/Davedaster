@@ -228,3 +228,24 @@ model RouteHistory {
   details           String?
   createdAt         DateTime @default(now())
 }
+
+model SmsDelivery {
+  id                String   @id @default(cuid())
+  twilioSid         String?  @unique
+  recipient         String
+  sender            String
+  bodyHash          String
+  bodyPreview       String
+  status            String   @default("CREATED")
+  errorCode         String?
+  errorMessage      String?
+  numSegments       Int?
+  duplicateKey      String   @unique
+  submittedAt       DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([recipient, createdAt])
+  @@index([status, createdAt])
+}
