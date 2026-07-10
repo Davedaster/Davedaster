@@ -6,6 +6,11 @@ import type { ChangeEvent, FormEvent, PointerEvent } from "react";
 
 import prisma from "../db.server";
 import { RouteMap } from "../components/RouteMap";
+import {
+  fileFromDriverPodDraft,
+  readDriverPodDraft,
+  writeDriverPodDraft,
+} from "../lib/driverProofDrafts.client";
 import { getOfflineShopifyAdmin } from "../lib/driverShopifyAdmin.server";
 import { buildWazeUrl } from "../lib/waze";
 import {
@@ -545,6 +550,10 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
   const proofPhotoCount = (proofPhotoOneSelected ? 1 : 0) + (proofPhotoTwoSelected ? 1 : 0) + (proofPhotoUrl.trim() ? 1 : 0);
   const canCompleteCustomer = !updatesDisabled && deliveryMode === "customer" && proofPhotoCount >= 1 && podImage.length > 0;
   const canCompleteSafePlace = !updatesDisabled && deliveryMode === "safe" && proofPhotoCount >= 2 && safePlaceNote.trim().length > 0;
+  const [proofPhotoOneDraftFile, setProofPhotoOneDraftFile] = useState<File | null>(null);
+  const [proofPhotoTwoDraftFile, setProofPhotoTwoDraftFile] = useState<File | null>(null);
+  const [proofDraftRestored, setProofDraftRestored] = useState(false);
+  const driverPodDraftKey = typeof window === "undefined" ? "" : `driver-pod:${window.location.pathname}:${stopId}`;
 
   useEffect(() => {
     if (!customerSafePlaceNote || safePlaceNote.trim()) return;
@@ -559,6 +568,68 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
     }, () => undefined, { enableHighAccuracy: true, timeout: 5000 });
   }, [routeStarted]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreDraft() {
+      const draft = await readDriverPodDraft(driverPodDraftKey);
+
+      if (cancelled || !draft || draft.stopId !== stopId) {
+        return;
+      }
+
+      const firstPhoto = fileFromDriverPodDraft(draft.proofPhotoOne, "proof-photo-1.jpg");
+      const secondPhoto = fileFromDriverPodDraft(draft.proofPhotoTwo, "proof-photo-2.jpg");
+      const hasRestoredProof = Boolean(firstPhoto || secondPhoto || draft.podImage || draft.deliveryNote || draft.safePlaceNote || draft.proofPhotoUrl);
+
+      setDeliveryMode(draft.deliveryMode || null);
+      setDeliveryNote(draft.deliveryNote || "");
+      setSafePlaceNote(draft.safePlaceNote || customerSafePlaceNote || "");
+      setProofPhotoUrl(draft.proofPhotoUrl || "");
+      setPodImage(draft.podImage || "");
+
+      if (firstPhoto) {
+        setProofPhotoOneDraftFile(firstPhoto);
+        setProofPhotoOneSelected(true);
+        setProofPreviewOne(URL.createObjectURL(firstPhoto));
+      }
+
+      if (secondPhoto) {
+        setProofPhotoTwoDraftFile(secondPhoto);
+        setProofPhotoTwoSelected(true);
+        setProofPreviewTwo(URL.createObjectURL(secondPhoto));
+      }
+
+      setProofDraftRestored(hasRestoredProof);
+    }
+
+    void restoreDraft();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [customerSafePlaceNote, driverPodDraftKey, stopId]);
+
+  useEffect(() => {
+    if (!driverPodDraftKey || (deliveryMode !== "customer" && deliveryMode !== "safe")) return;
+
+    const timeout = window.setTimeout(() => {
+      void writeDriverPodDraft(driverPodDraftKey, {
+        stopId,
+        deliveryMode,
+        deliveryNote,
+        safePlaceNote,
+        proofPhotoUrl,
+        podImage,
+        proofPhotoOne: proofPhotoOneDraftFile,
+        proofPhotoTwo: proofPhotoTwoDraftFile,
+        updatedAt: Date.now(),
+      });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [deliveryMode, deliveryNote, driverPodDraftKey, podImage, proofPhotoOneDraftFile, proofPhotoTwoDraftFile, proofPhotoUrl, safePlaceNote, stopId]);
+
   function handleProofPhotoChange(event: ChangeEvent<HTMLInputElement>, slot: 1 | 2) {
     const file = event.currentTarget.files?.[0];
     const nextPreview = file ? URL.createObjectURL(file) : "";
@@ -566,12 +637,14 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
     if (slot === 1) {
       if (proofPreviewOne) URL.revokeObjectURL(proofPreviewOne);
       setProofPhotoOneSelected(Boolean(file));
+      setProofPhotoOneDraftFile(file || null);
       setProofPreviewOne(nextPreview);
       return;
     }
 
     if (proofPreviewTwo) URL.revokeObjectURL(proofPreviewTwo);
     setProofPhotoTwoSelected(Boolean(file));
+    setProofPhotoTwoDraftFile(file || null);
     setProofPreviewTwo(nextPreview);
   }
 
@@ -603,6 +676,7 @@ function DriverStopActions({ stopId, customerName, isDisabled, routeStarted, pro
           {deliveryMode === "customer" ? <div style={{ display: "grid", gap: 8, maxWidth: "100%", overflow: "hidden" }}><button type="button" onClick={() => setSignatureOpen(true)} style={buttonStyle(podImage ? "#16a34a" : "#323841")}>{podImage ? "Signature added" : "Get customer signature"}</button>{podImage ? <img src={podImage} alt="Customer signature" style={{ width: "100%", maxWidth: "100%", maxHeight: 110, objectFit: "contain", borderRadius: 12, background: "#ffffff", border: "1px solid #d0d5dd", boxSizing: "border-box" }} /> : null}{signatureOpen ? <SignatureModal customerName={customerName} disabled={updatesDisabled} onSave={setPodImage} onClose={() => setSignatureOpen(false)} /> : null}</div> : null}
           {deliveryMode === "safe" ? <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Safe place note<textarea name="safePlaceNote" rows={2} value={safePlaceNote} onChange={(event) => setSafePlaceNote(event.currentTarget.value)} placeholder="Example: Behind side gate, under covered porch" style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label> : null}
           <label style={{ display: "grid", gap: 8, fontWeight: 900 }}>Driver note optional<textarea name="deliveryNote" rows={2} value={deliveryNote} onChange={(event) => setDeliveryNote(event.currentTarget.value)} style={{ width: "100%", maxWidth: "100%", fontSize: 16, padding: 12, border: "1px solid #d0d5dd", borderRadius: 14, boxSizing: "border-box" }} /></label>
+          {proofDraftRestored ? <p style={{ margin: 0, color: "#667085", fontWeight: 800, fontSize: 13 }}>Proof restored from this phone.</p> : null}
           <button type="submit" disabled={deliveryMode === "customer" ? !canCompleteCustomer : !canCompleteSafePlace} style={{ width: "100%", ...buttonStyle((deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#16a34a" : "#d0d5dd", (deliveryMode === "customer" ? canCompleteCustomer : canCompleteSafePlace) ? "#ffffff" : "#667085") }}>Complete delivery</button>
           <p style={{ margin: 0, color: "#667085", fontWeight: 700, fontSize: 13 }}>{deliveryMode === "customer" ? "Needs 1 photo and customer signature." : "Needs 2 photos and a safe place note."}</p>
         </Form>
