@@ -49,7 +49,6 @@ const COMPANY_PHONE = "01803 222784";
 const COMPANY_EMAIL = "deliveries@bathroompanelsdirect.co.uk";
 const COMPANY_ACCENT = "#509AE6";
 const COMPANY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/bathroom-panels-direct-logo-dark.png?v=1723113120";
-const GOOGLE_REVIEW_URL = "https://g.page/r/CZDHYoyjIf6CEAE/review";
 
 export function notificationTemplateSupportsEmail(id: string) {
   return id !== "delayUpdate";
