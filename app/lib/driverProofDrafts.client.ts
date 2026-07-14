@@ -17,6 +17,7 @@ export type DriverPodDraft = {
   intent?: "completeStop" | "completeCollectionStop";
   driverNote?: string;
   collectionSignature?: string;
+  submissionId?: string;
 };
 
 function openDriverPodDraftDb(): Promise<IDBDatabase> {
@@ -153,15 +154,25 @@ function driverPodDraftKeyFromFormData(formData: FormData) {
   return stopId ? `driver-pod:${window.location.pathname}:${stopId}` : "";
 }
 
+function createDriverPodSubmissionId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function persistDriverPodSubmission(formData: FormData, draftKey: string) {
-  if (!draftKey) return;
+  if (!draftKey) return "";
 
   const intent = String(formData.get("intent") || "");
-  if (intent !== "completeStop" && intent !== "completeCollectionStop") return;
+  if (intent !== "completeStop" && intent !== "completeCollectionStop") return "";
 
   const proofFiles = formData.getAll("proofPhotoFiles").filter(isDriverPodDraftUploadFile);
   const leftInSafePlace = String(formData.get("leftInSafePlace") || "") === "true";
   const existing = await readDriverPodDraft(draftKey);
+  const submissionId = existing?.submissionId || createDriverPodSubmissionId();
+  formData.set("submissionId", submissionId);
 
   await writeDriverPodDraft(draftKey, {
     stopId: String(formData.get("stopId") || "").trim(),
@@ -176,7 +187,10 @@ async function persistDriverPodSubmission(formData: FormData, draftKey: string) 
     intent,
     driverNote: String(formData.get("driverNote") || existing?.driverNote || ""),
     collectionSignature: String(formData.get("collectionSignature") || existing?.collectionSignature || ""),
+    submissionId,
   });
+
+  return submissionId;
 }
 
 async function appendRestoredDriverPodProof(formData: FormData, draftKey: string) {
@@ -263,6 +277,32 @@ function setDriverPodStatus(form: HTMLFormElement, message: string, failed: bool
   element.hidden = !message;
 }
 
+async function checkDriverPodCompletionStatus(formData: FormData) {
+  const stopId = String(formData.get("stopId") || "").trim();
+  const intent = String(formData.get("intent") || "").trim();
+  const submissionId = String(formData.get("submissionId") || "").trim();
+
+  if (!stopId || (intent !== "completeStop" && intent !== "completeCollectionStop")) {
+    return false;
+  }
+
+  const token = window.location.pathname.split("/").filter(Boolean).at(-1) || "";
+  const query = new URLSearchParams({ stopId, intent, submissionId });
+  const response = await fetch(`/driver/routes/${encodeURIComponent(token)}/completion-status?${query.toString()}`, {
+    method: "GET",
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    const message = await driverPodErrorMessage(response);
+    throw new Error(message);
+  }
+
+  const data = await response.json() as { completed?: boolean };
+  return Boolean(data.completed);
+}
+
 async function driverPodErrorMessage(response: Response) {
   let message = "Proof could not be saved yet.";
 
@@ -292,6 +332,12 @@ async function submitDriverPodFormWithRetry(form: HTMLFormElement): Promise<Driv
       const draftKey = driverPodDraftKeyFromFormData(formData);
       await persistDriverPodSubmission(formData, draftKey);
       await appendRestoredDriverPodProof(formData, draftKey);
+
+      if (await checkDriverPodCompletionStatus(formData)) {
+        await clearDriverPodDraft(draftKey);
+        window.location.assign(`${window.location.pathname}#next-stop`);
+        return "success";
+      }
 
       const response = await fetch(form.action || window.location.href, {
         method: "POST",
