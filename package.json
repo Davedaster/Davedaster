@@ -2,9 +2,9 @@
   "name": "bpd-delivery-planner",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-route-map-hover-tooltip.mjs && node scripts/hotfix-planning-map-hover-and-context.mjs && node scripts/hotfix-route-map-pin-touch-target.mjs && node scripts/hotfix-planning-eta-consistency.mjs",
+    "prebuild": "node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-route-map-hover-tooltip.mjs && node scripts/hotfix-planning-map-hover-and-context.mjs && node scripts/hotfix-route-map-pin-touch-target.mjs && node scripts/hotfix-planning-eta-consistency.mjs",
     "build": "remix vite:build",
-    "pretypecheck": "node scripts/hotfix-driver-route-upload-state.mjs && node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-route-map-hover-tooltip.mjs && node scripts/hotfix-planning-map-hover-and-context.mjs && node scripts/hotfix-route-map-pin-touch-target.mjs && node scripts/hotfix-planning-eta-consistency.mjs",
+    "pretypecheck": "node scripts/hotfix-safe-place-note-optional.mjs && node scripts/hotfix-route-map-hover-tooltip.mjs && node scripts/hotfix-planning-map-hover-and-context.mjs && node scripts/hotfix-route-map-pin-touch-target.mjs && node scripts/hotfix-planning-eta-consistency.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
