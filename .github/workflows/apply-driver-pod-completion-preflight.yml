@@ -1,0 +1,46 @@
+name: Apply driver POD completion preflight
+
+on:
+  push:
+    branches:
+      - agent/offline-pod-master-build
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-check:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/offline-pod-master-build
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - run: npm ci
+      - run: node scripts/apply-driver-pod-completion-preflight.mjs
+
+      - name: Verify only intended source files changed
+        run: |
+          changed="$(git diff --name-only)"
+          printf '%s\n' "$changed"
+          test "$changed" = $'app/lib/driverProofDrafts.client.ts\napp/routes/driver.routes.$token.completion-status.ts'
+
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: Commit verified source and remove temporary files
+        run: |
+          git rm scripts/apply-driver-pod-completion-preflight.mjs
+          git rm .github/workflows/apply-driver-pod-completion-preflight.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/lib/driverProofDrafts.client.ts 'app/routes/driver.routes.$token.completion-status.ts'
+          git commit -m "Protect POD retries before proof upload"
+          git push origin HEAD:agent/offline-pod-master-build
