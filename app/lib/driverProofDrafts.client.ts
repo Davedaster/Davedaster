@@ -14,6 +14,9 @@ export type DriverPodDraft = {
   proofPhotoOne?: File | Blob | null;
   proofPhotoTwo?: File | Blob | null;
   updatedAt: number;
+  intent?: "completeStop" | "completeCollectionStop";
+  driverNote?: string;
+  collectionSignature?: string;
 };
 
 function openDriverPodDraftDb(): Promise<IDBDatabase> {
@@ -150,17 +153,40 @@ function driverPodDraftKeyFromFormData(formData: FormData) {
   return stopId ? `driver-pod:${window.location.pathname}:${stopId}` : "";
 }
 
-async function appendRestoredDriverPodFiles(formData: FormData, draftKey: string) {
-  if (String(formData.get("intent") || "") !== "completeStop") {
-    return;
-  }
+async function persistDriverPodSubmission(formData: FormData, draftKey: string) {
+  if (!draftKey) return;
 
+  const intent = String(formData.get("intent") || "");
+  if (intent !== "completeStop" && intent !== "completeCollectionStop") return;
+
+  const proofFiles = formData.getAll("proofPhotoFiles").filter(isDriverPodDraftUploadFile);
+  const leftInSafePlace = String(formData.get("leftInSafePlace") || "") === "true";
+  const existing = await readDriverPodDraft(draftKey);
+
+  await writeDriverPodDraft(draftKey, {
+    stopId: String(formData.get("stopId") || "").trim(),
+    deliveryMode: leftInSafePlace ? "safe" : "customer",
+    deliveryNote: String(formData.get("deliveryNote") || existing?.deliveryNote || ""),
+    safePlaceNote: String(formData.get("safePlaceNote") || existing?.safePlaceNote || ""),
+    proofPhotoUrl: String(formData.get("proofPhotoUrl") || existing?.proofPhotoUrl || ""),
+    podImage: String(formData.get("podImage") || existing?.podImage || ""),
+    proofPhotoOne: proofFiles[0] || existing?.proofPhotoOne || null,
+    proofPhotoTwo: proofFiles[1] || existing?.proofPhotoTwo || null,
+    updatedAt: Date.now(),
+    intent,
+    driverNote: String(formData.get("driverNote") || existing?.driverNote || ""),
+    collectionSignature: String(formData.get("collectionSignature") || existing?.collectionSignature || ""),
+  });
+}
+
+async function appendRestoredDriverPodProof(formData: FormData, draftKey: string) {
   const draft = await readDriverPodDraft(draftKey);
 
   if (!draft) {
     return;
   }
 
+  const intent = String(formData.get("intent") || "");
   const selectedProofFiles = formData.getAll("proofPhotoFiles").filter(isDriverPodDraftUploadFile);
   const leftInSafePlace = String(formData.get("leftInSafePlace") || "") === "true";
   const restoredProofFiles = [
@@ -170,6 +196,21 @@ async function appendRestoredDriverPodFiles(formData: FormData, draftKey: string
 
   for (const restoredFile of restoredProofFiles.slice(selectedProofFiles.length)) {
     formData.append("proofPhotoFiles", restoredFile, restoredFile.name);
+  }
+
+  if (intent === "completeCollectionStop") {
+    if (!String(formData.get("driverNote") || "").trim() && draft.driverNote) {
+      formData.set("driverNote", draft.driverNote);
+    }
+    if (!String(formData.get("safePlaceNote") || "").trim() && draft.safePlaceNote) {
+      formData.set("safePlaceNote", draft.safePlaceNote);
+    }
+    if (!String(formData.get("collectionSignature") || "").trim() && draft.collectionSignature) {
+      formData.set("collectionSignature", draft.collectionSignature);
+    }
+    if (!String(formData.get("proofPhotoUrl") || "").trim() && draft.proofPhotoUrl) {
+      formData.set("proofPhotoUrl", draft.proofPhotoUrl);
+    }
   }
 }
 
@@ -249,7 +290,8 @@ async function submitDriverPodFormWithRetry(form: HTMLFormElement): Promise<Driv
     try {
       const formData = new FormData(form);
       const draftKey = driverPodDraftKeyFromFormData(formData);
-      await appendRestoredDriverPodFiles(formData, draftKey);
+      await persistDriverPodSubmission(formData, draftKey);
+      await appendRestoredDriverPodProof(formData, draftKey);
 
       const response = await fetch(form.action || window.location.href, {
         method: "POST",
