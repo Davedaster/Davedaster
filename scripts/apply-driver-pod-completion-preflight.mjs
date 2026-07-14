@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+// Temporary deterministic migration. The workflow removes this file after checks pass.
 const helperPath = "app/lib/driverProofDrafts.client.ts";
 const helper = fs.readFileSync(helperPath, "utf8");
 
