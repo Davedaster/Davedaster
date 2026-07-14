@@ -56,26 +56,25 @@ jobs:
           rm scripts/hotfix-driver-route-upload-state.mjs
           rm -f package-lock.json
 
-      - name: Verify intended files only
+      - name: Stage and verify migration files
         run: |
+          git add -- "app/routes/driver.routes.$token.tsx" package.json scripts/hotfix-driver-route-upload-state.mjs
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
 
-          const required = new Set([
+          const expected = [
             "app/routes/driver.routes.$token.tsx",
             "package.json",
             "scripts/hotfix-driver-route-upload-state.mjs",
-          ]);
-          const output = execFileSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" }).trim();
-          const actual = output ? output.split("\n").map((line) => line.slice(3)) : [];
-          const unexpected = actual.filter((path) => !required.has(path));
-          const missing = [...required].filter((path) => !actual.includes(path));
+          ].sort();
+          const output = execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim();
+          const actual = output ? output.split("\n").sort() : [];
 
-          if (unexpected.length || missing.length) {
-            throw new Error(`Migration file check failed. Unexpected: ${JSON.stringify(unexpected)} Missing: ${JSON.stringify(missing)} Actual: ${JSON.stringify(actual)}`);
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`Staged migration files did not match. Actual: ${JSON.stringify(actual)}`);
           }
           NODE
-          git diff --check
+          git diff --cached --check
 
       - name: Type check permanent source
         run: npx tsc --noEmit
@@ -83,7 +82,7 @@ jobs:
       - name: Build permanent source
         run: npx remix vite:build
 
-      - name: Confirm checks did not change tracked files
+      - name: Confirm staged migration is unchanged
         run: |
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
@@ -93,11 +92,11 @@ jobs:
             "package.json",
             "scripts/hotfix-driver-route-upload-state.mjs",
           ].sort();
-          const output = execFileSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" }).trim();
-          const actual = output ? output.split("\n").map((line) => line.slice(3)).sort() : [];
+          const output = execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim();
+          const actual = output ? output.split("\n").sort() : [];
 
           if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-            throw new Error(`Checks changed unexpected files: ${JSON.stringify(actual)}`);
+            throw new Error(`Checks altered staged migration files: ${JSON.stringify(actual)}`);
           }
           NODE
 
@@ -105,6 +104,5 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
           git commit -m "Move driver upload state into permanent source"
           git push origin HEAD:${{ github.head_ref }}
