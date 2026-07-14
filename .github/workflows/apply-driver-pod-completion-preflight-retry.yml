@@ -18,10 +18,9 @@ jobs:
           ref: agent/offline-pod-master-build-retry
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20.19.0
-          cache: npm
 
       - run: npm ci
       - run: node scripts/apply-driver-pod-completion-preflight.mjs
