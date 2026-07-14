@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 20.19.0
 
-      - run: npm ci
+      - run: npm install
       - run: node scripts/apply-driver-pod-completion-preflight.mjs
 
       - name: Verify intended source files changed
