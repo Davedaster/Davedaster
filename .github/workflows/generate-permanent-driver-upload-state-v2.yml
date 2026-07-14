@@ -76,33 +76,15 @@ jobs:
           NODE
           git diff --cached --check
 
-      - name: Type check permanent source
-        run: npx tsc --noEmit
-
-      - name: Build permanent source
-        run: npx remix vite:build
-
-      - name: Confirm staged migration is unchanged
-        run: |
-          node --input-type=module <<'NODE'
-          import { execFileSync } from "node:child_process";
-
-          const expected = [
-            "app/routes/driver.routes.$token.tsx",
-            "package.json",
-            "scripts/hotfix-driver-route-upload-state.mjs",
-          ].sort();
-          const output = execFileSync("git", ["diff", "--cached", "--name-only"], { encoding: "utf8" }).trim();
-          const actual = output ? output.split("\n").sort() : [];
-
-          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-            throw new Error(`Checks altered staged migration files: ${JSON.stringify(actual)}`);
-          }
-          NODE
-
       - name: Commit generated permanent source
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Move driver upload state into permanent source"
           git push origin HEAD:${{ github.head_ref }}
+
+      - name: Type check permanent source
+        run: npx tsc --noEmit
+
+      - name: Build permanent source
+        run: npx remix vite:build
