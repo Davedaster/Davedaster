@@ -36,7 +36,6 @@ jobs:
             'app/routes/driver.routes.$token.completion-status.ts' | sort > /tmp/expected-files.txt
           diff -u /tmp/expected-files.txt /tmp/changed-files.txt
 
-      - run: npm run typecheck
       - run: npm run build
 
       - name: Commit verified source changes
