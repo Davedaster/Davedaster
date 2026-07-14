@@ -66,6 +66,8 @@ model Route {
   finishAddress     String?
   finishLatitude    Float?
   finishLongitude   Float?
+  firstLockedStopId String?
+  lastLockedStopId  String?
   plannedStartTime  String   @default("05:00")
   timePerDropMinutes Int     @default(10)
   customerSlotMinutes Int    @default(60)
