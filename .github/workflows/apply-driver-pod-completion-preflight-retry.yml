@@ -27,7 +27,10 @@ jobs:
 
       - name: Verify intended source files changed
         run: |
-          git diff --name-only | sort > /tmp/changed-files.txt
+          {
+            git diff --name-only
+            git ls-files --others --exclude-standard
+          } | sort -u > /tmp/changed-files.txt
           printf '%s\n' \
             'app/lib/driverProofDrafts.client.ts' \
             'app/routes/driver.routes.$token.completion-status.ts' | sort > /tmp/expected-files.txt
