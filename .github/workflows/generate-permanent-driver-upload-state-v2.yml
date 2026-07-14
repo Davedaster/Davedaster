@@ -58,7 +58,7 @@ jobs:
 
       - name: Stage and verify migration files
         run: |
-          git add -- "app/routes/driver.routes.$token.tsx" package.json scripts/hotfix-driver-route-upload-state.mjs
+          git add -- 'app/routes/driver.routes.$token.tsx' package.json scripts/hotfix-driver-route-upload-state.mjs
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
 
