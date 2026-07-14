@@ -54,24 +54,25 @@ jobs:
           writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
           NODE
           rm scripts/hotfix-driver-route-upload-state.mjs
+          rm -f package-lock.json
 
       - name: Verify intended files only
         run: |
           node --input-type=module <<'NODE'
           import { execFileSync } from "node:child_process";
 
-          const expected = [
+          const required = new Set([
             "app/routes/driver.routes.$token.tsx",
             "package.json",
             "scripts/hotfix-driver-route-upload-state.mjs",
-          ].sort();
+          ]);
           const output = execFileSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" }).trim();
-          const actual = output
-            ? output.split("\n").map((line) => line.slice(3)).sort()
-            : [];
+          const actual = output ? output.split("\n").map((line) => line.slice(3)) : [];
+          const unexpected = actual.filter((path) => !required.has(path));
+          const missing = [...required].filter((path) => !actual.includes(path));
 
-          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-            throw new Error(`Unexpected generated files: ${JSON.stringify(actual)}`);
+          if (unexpected.length || missing.length) {
+            throw new Error(`Migration file check failed. Unexpected: ${JSON.stringify(unexpected)} Missing: ${JSON.stringify(missing)} Actual: ${JSON.stringify(actual)}`);
           }
           NODE
           git diff --check
@@ -93,9 +94,7 @@ jobs:
             "scripts/hotfix-driver-route-upload-state.mjs",
           ].sort();
           const output = execFileSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" }).trim();
-          const actual = output
-            ? output.split("\n").map((line) => line.slice(3)).sort()
-            : [];
+          const actual = output ? output.split("\n").map((line) => line.slice(3)).sort() : [];
 
           if (JSON.stringify(actual) !== JSON.stringify(expected)) {
             throw new Error(`Checks changed unexpected files: ${JSON.stringify(actual)}`);
