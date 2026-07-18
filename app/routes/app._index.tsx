@@ -19,7 +19,7 @@ import {
   FormLayout,
 } from "@shopify/polaris";
 import { LockIcon, DeleteIcon, DragHandleIcon } from "@shopify/polaris-icons";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -38,13 +38,13 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-import { RouteMap } from "../components/RouteMap";
+import { RouteMap, type MapContextAction, type MapContextLocation, type PointContextAction } from "../components/RouteMap";
 import { defaultCountry, emptyStructuredAddress, formatStructuredAddress, isStructuredAddressReady, normaliseStructuredAddress, type StructuredAddress } from "../lib/addressFields";
 import { getAppCredentials, hasGetAddressCredentials, hasRouteXLCredentials } from "../lib/appCredentials.server";
 import { fulfilByDateFromOrderDate } from "../lib/bankHolidays.server";
 import { listActiveDrivers } from "../lib/drivers.server";
 import { lookupAddress } from "../lib/getAddress.server";
-import { assignDriverToRoute, createRouteDraft } from "../lib/routeDrafts.server";
+import { assignDriverToRoute, createRouteDraft, getRoute, updateRouteDraft } from "../lib/routeDrafts.server";
 import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { linkPlannedReturnTicketsToRoute, listOpenReturnPlanningOrders } from "../lib/returns.server";
@@ -60,9 +60,23 @@ interface Stop {
   isLocked: boolean;
 }
 
+type FixedStopPosition = "first" | "last" | null;
+
+type SelectedRouteEndpoint = {
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+type MapEndpointSelection = SelectedRouteEndpoint;
+
 type ManualPlanningOrder = ManualDeliveryOrderInput & {
   id: string;
 };
+
+type DraftRouteRecord = NonNullable<Awaited<ReturnType<typeof getRoute>>>;
+type DraftDeliveryGroup = NonNullable<DraftRouteRecord["stops"][number]["deliveryGroup"]>;
+type DraftOrder = DraftDeliveryGroup["orders"][number];
 
 type StopEta = {
   id: string;
@@ -85,6 +99,7 @@ type PlanningOptimisationResult = {
 
 type PlanningEtaPreviewResult = {
   ok: true;
+  requestKey: string;
   stopEtas: StopEta[];
   totalTravelMinutes: number;
   totalHandlingMinutes: number;
@@ -147,6 +162,167 @@ async function addFulfilByDates(orders: DeliveryOrder[], fulfilmentWindowDays: n
   }));
 }
 
+function routeDateInputValue(value: string | Date | null | undefined) {
+  const date = value ? new Date(value) : new Date();
+
+  return Number.isNaN(date.getTime()) ? new Date().toISOString().slice(0, 10) : date.toISOString().slice(0, 10);
+}
+
+function quantityLine(quantity: number, title: string) {
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+
+  return `${safeQuantity} x ${title}`;
+}
+
+function normaliseStoredLineItemLine(line: string) {
+  const cleanLine = line.replace(/\s+/g, " ").trim();
+
+  if (!cleanLine) {
+    return "";
+  }
+
+  const leadingQuantity = cleanLine.match(/^(\d+)(?:\s*[x×]\s+)(.+)$/i);
+  if (leadingQuantity) {
+    return quantityLine(Number(leadingQuantity[1]), leadingQuantity[2].trim());
+  }
+
+  const trailingQuantity = cleanLine.match(/^(.+?)(?:\s+[x×]\s*)(\d+)$/i);
+  if (trailingQuantity) {
+    return quantityLine(Number(trailingQuantity[2]), trailingQuantity[1].trim());
+  }
+
+  return quantityLine(1, cleanLine);
+}
+
+function normaliseStoredLineItemLines(summary?: string | null) {
+  return (summary || "")
+    .split(/,|\n/)
+    .map(normaliseStoredLineItemLine)
+    .filter(Boolean);
+}
+
+function routeOrderToDeliveryOrder(order: DraftOrder, group: DraftDeliveryGroup): DeliveryOrder {
+  const lines = normaliseStoredLineItemLines(order.lineItemSummary);
+  const lineItemSummary = lines.join(", ") || "Items not listed";
+
+  return {
+    id: order.shopifyOrderId,
+    name: order.shopifyOrderNumber,
+    createdAt: order.createdAt.toISOString(),
+    customerName: order.customerName || "Customer",
+    email: order.customerEmail,
+    phone: order.customerPhone,
+    shippingMethod: order.orderSource === "manual" ? "Manual route entry" : order.orderSource === "return" ? "Return collection" : "Own fleet delivery",
+    fulfilmentStatus: order.orderSource === "return" ? "return_collection" : "unfulfilled",
+    financialStatus: order.orderSource === "manual" ? "manual" : order.orderSource === "return" ? "return" : "paid",
+    postcode: group.postcode || order.postcode,
+    addressSummary: group.formattedAddress || group.manualAddress || group.address,
+    formattedAddress: group.formattedAddress || group.manualAddress || group.address,
+    hasDeliveryAddress: true,
+    hasPanel: true,
+    isSampleOnly: false,
+    addressStatus: group.latitude !== null && group.longitude !== null ? "READY" : "NEEDS_LOCATION_CHECK",
+    addressConfidence: group.latitude !== null && group.longitude !== null ? "HIGH" : "LOW",
+    latitude: group.latitude,
+    longitude: group.longitude,
+    lineItemSummary,
+    lineItemLines: lines.length ? lines : [lineItemSummary],
+    fulfilByDate: null,
+    hasManualOverride: group.useManualAddress,
+    manualAddress: group.manualAddress,
+    manualAddressNotes: group.useManualAddress ? "Loaded from draft route" : null,
+    orderSource: order.orderSource === "manual" ? "manual" : order.orderSource === "return" ? "return" : "shopify",
+    routeAllocation: null,
+  };
+}
+
+function draftOrders(route: DraftRouteRecord) {
+  return route.stops.flatMap((stop) => (
+    stop.deliveryGroup
+      ? stop.deliveryGroup.orders.map((order) => routeOrderToDeliveryOrder(order, stop.deliveryGroup!))
+      : []
+  ));
+}
+
+function mergeOrders(...groups: DeliveryOrder[][]) {
+  const ordersById = new Map<string, DeliveryOrder>();
+
+  for (const group of groups) {
+    for (const order of group) {
+      const existing = ordersById.get(order.id);
+      ordersById.set(order.id, existing ? { ...existing, ...order } : order);
+    }
+  }
+
+  return [...ordersById.values()];
+}
+
+function stopOrderId(stop: DraftRouteRecord["stops"][number]) {
+  return stop.deliveryGroup?.orders[0]?.shopifyOrderId || "";
+}
+
+function draftRouteStops(route: DraftRouteRecord): Stop[] {
+  return route.stops
+    .map((stop, index) => {
+      const order = stop.deliveryGroup?.orders[0];
+
+      if (!order) {
+        return null;
+      }
+
+      return {
+        id: order.shopifyOrderId,
+        orderNumber: order.shopifyOrderNumber,
+        customerName: order.customerName || "Customer",
+        postcode: stop.deliveryGroup?.postcode || order.postcode || "",
+        eta: stop.estimatedArrival
+          ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.estimatedArrival))
+          : formatEtaTime(route.plannedStartTime || "05:00", index * (route.timePerDropMinutes || fallbackRoutePlanningSettings.timePerDropMinutes)),
+        isLocked: stop.isLocked,
+      };
+    })
+    .filter((stop): stop is Stop => Boolean(stop));
+}
+
+function draftLockOrderId(route: DraftRouteRecord, stopId: string | null | undefined) {
+  if (!stopId) {
+    return null;
+  }
+
+  const stop = route.stops.find((candidate) => candidate.id === stopId);
+
+  return stop ? stopOrderId(stop) || null : null;
+}
+
+function draftManualOrders(route: DraftRouteRecord): ManualPlanningOrder[] {
+  return draftOrders(route)
+    .filter((order) => order.orderSource === "manual")
+    .map((order) => ({
+      id: order.id,
+      customerName: order.customerName,
+      address: order.formattedAddress || order.addressSummary,
+      email: order.email || "",
+      phone: order.phone || "",
+      lineItemSummary: order.lineItemSummary,
+    }));
+}
+
+function endpointFromDraft(route: DraftRouteRecord, type: "start" | "finish"): SelectedRouteEndpoint {
+  return {
+    address: (type === "start" ? route.startAddress : route.finishAddress) || fallbackRoutePlanningSettings.startAddress,
+    latitude: type === "start" ? route.startLatitude : route.finishLatitude,
+    longitude: type === "start" ? route.startLongitude : route.finishLongitude,
+  };
+}
+
+function sameEndpoint(start: SelectedRouteEndpoint, finish: SelectedRouteEndpoint) {
+  const sameAddress = start.address.trim().toLowerCase() === finish.address.trim().toLowerCase();
+  const sameLatitude = start.latitude !== null && finish.latitude !== null && Math.abs(start.latitude - finish.latitude) < 0.000001;
+  const sameLongitude = start.longitude !== null && finish.longitude !== null && Math.abs(start.longitude - finish.longitude) < 0.000001;
+
+  return sameAddress || (sameLatitude && sameLongitude);
+}
+
 async function listReturnPlanningOrdersSafely() {
   try {
     return await listOpenReturnPlanningOrders();
@@ -158,24 +334,39 @@ async function listReturnPlanningOrdersSafely() {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const [orders, returnPlanningOrders, drivers, defaults, credentials] = await Promise.all([
+  const url = new URL(request.url);
+  const draftRouteId = url.searchParams.get("draftRouteId")?.trim() || "";
+  const [orders, returnPlanningOrders, drivers, defaults, credentials, draftRoute] = await Promise.all([
     getDeliveryOrders(admin),
     listReturnPlanningOrdersSafely(),
     listActiveDrivers(),
     getRoutePlanningDefaults(),
     getAppCredentials(),
+    draftRouteId ? getRoute(draftRouteId) : Promise.resolve(null),
   ]);
+
+  if (draftRouteId && !draftRoute) {
+    throw new Response("Draft route not found", { status: 404 });
+  }
+
+  if (draftRoute && draftRoute.status !== "DRAFT") {
+    return redirect(`/app/routes/${draftRoute.id}`);
+  }
+
   const mergedDefaults = {
     ...fallbackRoutePlanningSettings,
     ...defaults,
     routeDate: new Date().toISOString().slice(0, 10),
     startStructuredAddress: normaliseStructuredAddress(defaults.startStructuredAddress, fallbackRoutePlanningSettings.startStructuredAddress),
   };
+  const draftDeliveryOrders = draftRoute ? draftOrders(draftRoute) : [];
   const ordersWithFulfilByDates = await addFulfilByDates(
-    orders,
+    mergeOrders(orders, draftDeliveryOrders),
     mergedDefaults.fulfilmentWindowDays,
     mergedDefaults.useWorkingDaysOnly,
   );
+  const draftStart = draftRoute ? endpointFromDraft(draftRoute, "start") : null;
+  const draftFinish = draftRoute ? endpointFromDraft(draftRoute, "finish") : null;
 
   return json({
     orders: [...ordersWithFulfilByDates, ...returnPlanningOrders],
@@ -184,6 +375,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     routexlEnabled: hasRouteXLCredentials(credentials),
     tomtomApiKey: credentials.tomtomApiKey,
     defaults: mergedDefaults,
+    draftRoute: draftRoute ? {
+      id: draftRoute.id,
+      name: draftRoute.name,
+      date: routeDateInputValue(draftRoute.date),
+      driverId: draftRoute.driverId || "",
+      plannedStartTime: draftRoute.plannedStartTime || mergedDefaults.plannedStartTime,
+      timePerDropMinutes: draftRoute.timePerDropMinutes || mergedDefaults.timePerDropMinutes,
+      customerSlotMinutes: draftRoute.customerSlotMinutes || mergedDefaults.customerSlotMinutes,
+      stops: draftRouteStops(draftRoute),
+      manualOrders: draftManualOrders(draftRoute),
+      start: draftStart,
+      finish: draftFinish,
+      returnToBase: draftStart && draftFinish ? sameEndpoint(draftStart, draftFinish) : mergedDefaults.returnToBaseDefault,
+      firstLockedOrderId: draftLockOrderId(draftRoute, draftRoute.firstLockedStopId),
+      lastLockedOrderId: draftLockOrderId(draftRoute, draftRoute.lastLockedStopId),
+    } : null,
   });
 };
 
@@ -313,23 +520,64 @@ function routeArrivalToMinutes(value: number | null | undefined) {
   return rounded > 24 * 60 ? Math.round(rounded / 60) : rounded;
 }
 
-async function getSelectedPlanningOrders(admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"], selectedOrderIds: string[], manualOrders: ManualPlanningOrder[]) {
+async function getSelectedPlanningOrders(
+  admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"],
+  selectedOrderIds: string[],
+  manualOrders: ManualPlanningOrder[],
+  draftRoute?: DraftRouteRecord | null,
+) {
   const [shopifyOrders, returnPlanningOrders, manualDeliveryOrders] = await Promise.all([
     getDeliveryOrders(admin),
     listReturnPlanningOrdersSafely(),
     Promise.all(manualOrders.map((order) => toManualDeliveryOrder(order))),
   ]);
-  const ordersById = new Map([...shopifyOrders, ...returnPlanningOrders, ...manualDeliveryOrders].map((order) => [order.id, order]));
+  const ordersById = new Map([
+    ...shopifyOrders,
+    ...returnPlanningOrders,
+    ...manualDeliveryOrders,
+    ...(draftRoute ? draftOrders(draftRoute) : []),
+  ].map((order) => [order.id, order]));
 
   return selectedOrderIds
     .map((id) => ordersById.get(id))
     .filter((order): order is DeliveryOrder => Boolean(order));
 }
 
+function normaliseFixedOrderId(value: FormDataEntryValue | null, selectedOrderIds: Set<string>) {
+  const id = typeof value === "string" ? value.trim() : "";
+
+  return id && selectedOrderIds.has(id) ? id : null;
+}
+
+function assertUniqueOrderedIds(ids: string[], expectedIds: string[]) {
+  const expected = new Set(expectedIds);
+  const actual = new Set(ids);
+
+  if (actual.size !== ids.length) {
+    throw new Error("RouteXL returned the same stop more than once. Please try optimising again.");
+  }
+
+  const missing = expectedIds.filter((id) => !actual.has(id));
+  const unexpected = ids.filter((id) => !expected.has(id));
+
+  if (missing.length || unexpected.length || ids.length !== expectedIds.length) {
+    throw new Error("RouteXL returned a route with missing or unknown stops. Please try optimising again.");
+  }
+}
+
+function routeXLStopIds(waypoints: Array<{ name: string }>) {
+  return waypoints.map((waypoint) => extractPlanningStopId(waypoint.name));
+}
+
+function orderById(orders: DeliveryOrder[]) {
+  return new Map(orders.map((order) => [order.id, order]));
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const intent = String(formData.get("intent") || "saveRoute");
+  const draftRouteId = String(formData.get("draftRouteId") || "").trim();
   const routeName = String(formData.get("routeName") || "").trim();
   const routeDate = String(formData.get("routeDate") || "").trim();
   const plannedStartTime = String(formData.get("plannedStartTime") || "").trim();
@@ -350,15 +598,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean);
+  const selectedOrderIdSet = new Set(selectedOrderIds);
+  const firstLockedOrderId = normaliseFixedOrderId(formData.get("firstLockedOrderId"), selectedOrderIdSet);
+  const lastLockedOrderId = normaliseFixedOrderId(formData.get("lastLockedOrderId"), selectedOrderIdSet);
+
+  if (firstLockedOrderId && lastLockedOrderId && firstLockedOrderId === lastLockedOrderId) {
+    return json({ ok: false, error: "The same stop cannot be fixed as both first and last." }, { status: 400 });
+  }
 
   if (!selectedOrderIds.length) {
     return json({ ok: false, error: "Select at least one order before saving or optimising a route." }, { status: 400 });
   }
 
-  const selectedOrders = await getSelectedPlanningOrders(admin, selectedOrderIds, manualOrders);
+  const draftRoute = draftRouteId ? await getRoute(draftRouteId) : null;
 
-  if (!selectedOrders.length) {
-    return json({ ok: false, error: "Selected orders could not be found." }, { status: 400 });
+  if (draftRouteId && !draftRoute) {
+    return json({ ok: false, error: "Draft route could not be found." }, { status: 404 });
+  }
+
+  if (draftRoute && draftRoute.status !== "DRAFT") {
+    return json({ ok: false, error: "Only draft routes can be edited in the planner." }, { status: 400 });
+  }
+
+  const selectedOrders = await getSelectedPlanningOrders(admin, selectedOrderIds, manualOrders, draftRoute);
+
+  if (selectedOrders.length !== selectedOrderIds.length) {
+    return json({ ok: false, error: "Selected orders could not all be found." }, { status: 400 });
   }
 
   if (intent === "optimisePlanning") {
@@ -373,28 +638,87 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         throw new Error("Every selected stop needs latitude and longitude before RouteXL can optimise the planning route.");
       }
 
-      const locations = [
-        buildRouteXLLocation("Route start", start.address, start.latitude, start.longitude, 0),
-        ...optimisableStops.map((order) => buildRouteXLLocation(
-          planningStopKey(order.id),
-          order.formattedAddress || order.addressSummary,
-          order.latitude!,
-          order.longitude!,
-          Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : fallbackRoutePlanningSettings.timePerDropMinutes,
-        )),
-        buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0),
-      ];
-      const optimised = await optimiseLocations(locations);
+      const selectedOrderById = orderById(selectedOrders);
+      const stopServiceMinutes = Number.isFinite(timePerDropMinutes) ? timePerDropMinutes : fallbackRoutePlanningSettings.timePerDropMinutes;
+      const stopLocation = (order: DeliveryOrder) => buildRouteXLLocation(
+        planningStopKey(order.id),
+        order.formattedAddress || order.addressSummary,
+        order.latitude!,
+        order.longitude!,
+        stopServiceMinutes,
+      );
+      const startLocation = buildRouteXLLocation("Route start", start.address, start.latitude, start.longitude, 0);
+      const finishLocation = buildRouteXLLocation("Route finish", finish.address, finish.latitude, finish.longitude, 0);
+      let orderedIds: string[];
+      let timedRoute: Awaited<ReturnType<typeof optimiseLocations>>;
 
-      if (!optimised.feasible) {
-        throw new Error("RouteXL returned an infeasible route. Check the selected stops and try again.");
+      if (!firstLockedOrderId && !lastLockedOrderId) {
+        const optimised = await optimiseLocations([
+          startLocation,
+          ...optimisableStops.map(stopLocation),
+          finishLocation,
+        ]);
+
+        if (!optimised.feasible) {
+          throw new Error("RouteXL returned an infeasible route. Check the selected stops and try again.");
+        }
+
+        orderedIds = routeXLStopIds(optimised.waypoints.slice(1, -1));
+        assertUniqueOrderedIds(orderedIds, selectedOrderIds);
+        timedRoute = optimised;
+      } else {
+        const firstLockedOrder = firstLockedOrderId ? selectedOrderById.get(firstLockedOrderId) : null;
+        const lastLockedOrder = lastLockedOrderId ? selectedOrderById.get(lastLockedOrderId) : null;
+        const middleOrders = selectedOrders.filter((order) => order.id !== firstLockedOrderId && order.id !== lastLockedOrderId);
+        const segmentStart = firstLockedOrder ? stopLocation(firstLockedOrder) : startLocation;
+        const segmentFinish = lastLockedOrder ? stopLocation(lastLockedOrder) : finishLocation;
+        let middleOrderedIds = middleOrders.map((order) => order.id);
+
+        if (middleOrders.length > 1) {
+          const middleOptimised = await optimiseLocations([
+            segmentStart,
+            ...middleOrders.map(stopLocation),
+            segmentFinish,
+          ]);
+
+          if (!middleOptimised.feasible) {
+            throw new Error("RouteXL returned an infeasible route. Check the selected stops and try again.");
+          }
+
+          middleOrderedIds = routeXLStopIds(middleOptimised.waypoints.slice(1, -1));
+          assertUniqueOrderedIds(middleOrderedIds, middleOrders.map((order) => order.id));
+        }
+
+        orderedIds = [
+          ...(firstLockedOrderId ? [firstLockedOrderId] : []),
+          ...middleOrderedIds,
+          ...(lastLockedOrderId ? [lastLockedOrderId] : []),
+        ];
+        assertUniqueOrderedIds(orderedIds, selectedOrderIds);
+
+        timedRoute = await optimiseLocations([
+          startLocation,
+          ...orderedIds.map((id) => {
+            const order = selectedOrderById.get(id);
+
+            if (!order) {
+              throw new Error("Optimised route included a stop that is no longer selected.");
+            }
+
+            return stopLocation(order);
+          }),
+          finishLocation,
+        ], true);
+
+        if (!timedRoute.feasible) {
+          throw new Error("RouteXL returned an infeasible fixed-position route. Check the selected stops and try again.");
+        }
       }
 
-      const stopWaypoints = optimised.waypoints
+      const stopWaypoints = timedRoute.waypoints
         .slice(1, -1)
-        .map((waypoint) => ({ ...waypoint, id: extractPlanningStopId(waypoint.name) }))
-        .filter((waypoint) => selectedOrderIds.includes(waypoint.id));
-      const orderedIds = stopWaypoints.map((waypoint) => waypoint.id);
+        .map((waypoint) => ({ ...waypoint, id: extractPlanningStopId(waypoint.name) }));
+      assertUniqueOrderedIds(stopWaypoints.map((waypoint) => waypoint.id), orderedIds);
       const stopEtas = stopWaypoints.map((waypoint) => {
         const arrivalMinutes = routeArrivalToMinutes(waypoint.arrivalMinutes);
 
@@ -404,15 +728,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           eta: formatEtaTime(plannedStartTime, arrivalMinutes),
         };
       });
-      const finalWaypoint = optimised.waypoints[optimised.waypoints.length - 1];
-      const totalDurationMinutes = routeArrivalToMinutes(finalWaypoint?.arrivalMinutes ?? optimised.totalDurationMinutes);
+      const finalWaypoint = timedRoute.waypoints[timedRoute.waypoints.length - 1];
+      const totalDurationMinutes = routeArrivalToMinutes(finalWaypoint?.arrivalMinutes ?? timedRoute.totalDurationMinutes);
 
       return json<PlanningOptimisationResult>({
         ok: true,
         orderedIds,
         stopEtas,
         routeFinishEta: finalWaypoint ? formatEtaTime(plannedStartTime, totalDurationMinutes) : null,
-        totalDistanceKm: optimised.totalDistanceKm,
+        totalDistanceKm: timedRoute.totalDistanceKm,
         totalDurationMinutes,
         returnToBase,
       });
@@ -421,7 +745,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  const draftRoute = await createRouteDraft({
+  if (draftRoute) {
+    try {
+      const updatedRoute = await updateRouteDraft({
+        routeId: draftRoute.id,
+        orders: selectedOrders,
+        routeName,
+        routeDate,
+        plannedStartTime,
+        timePerDropMinutes,
+        customerSlotMinutes,
+        startAddress,
+        startLatitude,
+        startLongitude,
+        finishAddress: returnToBase ? startAddress : finishAddress || startAddress,
+        finishLatitude,
+        finishLongitude,
+        driverId,
+        firstLockedOrderId,
+        lastLockedOrderId,
+      });
+
+      return json({
+        ok: true,
+        routeId: updatedRoute?.id || draftRoute.id,
+        routeName: updatedRoute?.name || routeName || draftRoute.name,
+        message: "Draft route saved.",
+      });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : "Draft route could not be saved." }, { status: 400 });
+    }
+  }
+
+  const newDraftRoute = await createRouteDraft({
     orders: selectedOrders,
     routeName,
     routeDate,
@@ -434,18 +790,50 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     finishAddress: returnToBase ? startAddress : finishAddress || startAddress,
     finishLatitude,
     finishLongitude,
+    firstLockedOrderId,
+    lastLockedOrderId,
   });
 
-  if (driverId) {
-    await assignDriverToRoute(draftRoute.id, driverId);
+  if (!newDraftRoute) {
+    throw new Error("Draft route could not be created.");
   }
 
-  await linkPlannedReturnTicketsToRoute(draftRoute.id);
+  if (driverId) {
+    await assignDriverToRoute(newDraftRoute.id, driverId);
+  }
+
+  await linkPlannedReturnTicketsToRoute(newDraftRoute.id);
 
   return redirect("/app/routes");
 };
 
-function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: (id: string) => void; onToggleLock: (id: string) => void }) {
+function fixedStopLabel(position: FixedStopPosition) {
+  if (position === "first") {
+    return "1 🔒";
+  }
+
+  if (position === "last") {
+    return "Last 🔒";
+  }
+
+  return null;
+}
+
+function SortableStop({
+  stop,
+  fixedPosition,
+  onRemove,
+  onSetFirst,
+  onSetLast,
+  onClearFixed,
+}: {
+  stop: Stop;
+  fixedPosition: FixedStopPosition;
+  onRemove: (id: string) => void;
+  onSetFirst: (id: string) => void;
+  onSetLast: (id: string) => void;
+  onClearFixed: (id: string) => void;
+}) {
   const {
     attributes,
     listeners,
@@ -461,6 +849,7 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
     zIndex: isDragging ? 1 : 0,
     position: "relative" as const,
   };
+  const fixedLabel = fixedStopLabel(fixedPosition);
 
   return (
     <div ref={setNodeRef} style={style}>
@@ -472,7 +861,7 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
             </div>
             <BlockStack gap="050">
               <Text as="span" variant="bodyMd" fontWeight="bold">
-                {stop.orderNumber} · {stop.customerName}
+                {fixedLabel ? `${fixedLabel} ` : ""}{stop.orderNumber} · {stop.customerName}
               </Text>
               <Text as="span" variant="bodySm" tone="subdued">
                 {stop.postcode || "No postcode"} · ETA: {stop.eta}
@@ -480,7 +869,9 @@ function SortableStop({ stop, onRemove, onToggleLock }: { stop: Stop; onRemove: 
             </BlockStack>
           </InlineStack>
           <InlineStack gap="100">
-            <Button icon={LockIcon} variant="tertiary" pressed={stop.isLocked} onClick={() => onToggleLock(stop.id)} />
+            <Button icon={LockIcon} variant="tertiary" pressed={fixedPosition === "first"} onClick={() => onSetFirst(stop.id)} accessibilityLabel={`Set ${stop.orderNumber} as first drop`} />
+            <Button icon={LockIcon} variant="tertiary" pressed={fixedPosition === "last"} onClick={() => onSetLast(stop.id)} accessibilityLabel={`Set ${stop.orderNumber} as last drop`} />
+            {fixedPosition ? <Button variant="tertiary" onClick={() => onClearFixed(stop.id)}>Clear</Button> : null}
             <Button icon={DeleteIcon} variant="tertiary" tone="critical" onClick={() => onRemove(stop.id)} />
           </InlineStack>
         </InlineStack>
@@ -509,6 +900,22 @@ function refreshStopEtas(stops: Stop[], plannedStartTime: string, timePerDropMin
     ...stop,
     eta: formatEtaTime(plannedStartTime, index * dropMinutes),
   }));
+}
+
+function applyFixedStopPositions(stops: Stop[], firstLockedOrderId: string | null, lastLockedOrderId: string | null) {
+  const firstStop = firstLockedOrderId ? stops.find((stop) => stop.id === firstLockedOrderId) : null;
+  const lastStop = lastLockedOrderId && lastLockedOrderId !== firstLockedOrderId ? stops.find((stop) => stop.id === lastLockedOrderId) : null;
+  const middleStops = stops.filter((stop) => stop.id !== firstStop?.id && stop.id !== lastStop?.id);
+
+  return [
+    ...(firstStop ? [firstStop] : []),
+    ...middleStops,
+    ...(lastStop ? [lastStop] : []),
+  ];
+}
+
+function sameStopOrder(left: Stop[], right: Stop[]) {
+  return left.length === right.length && left.every((stop, index) => stop.id === right[index]?.id);
 }
 
 function manualOrderToDeliveryOrder(order: ManualPlanningOrder): DeliveryOrder {
@@ -571,7 +978,7 @@ function addressLabel(order: DeliveryOrder) {
   return order.addressConfidence === "HIGH" ? "Location ready" : "Ready";
 }
 
-function hasCoordinates(order: DeliveryOrder) {
+function hasCoordinates(order: DeliveryOrder): order is DeliveryOrder & { latitude: number; longitude: number } {
   return typeof order.latitude === "number" && typeof order.longitude === "number";
 }
 
@@ -691,6 +1098,10 @@ function DeliveryMap({
   returnToBase,
   fulfilmentWindowDays,
   onToggleOrder,
+  firstLockedOrderId,
+  lastLockedOrderId,
+  onMapContextAction,
+  onPointContextAction,
 }: {
   orders: DeliveryOrder[];
   selectedIds: Set<string>;
@@ -705,6 +1116,10 @@ function DeliveryMap({
   returnToBase: boolean;
   fulfilmentWindowDays: number;
   onToggleOrder: (order: DeliveryOrder) => void;
+  firstLockedOrderId: string | null;
+  lastLockedOrderId: string | null;
+  onMapContextAction: (action: MapContextAction, location: MapContextLocation) => void;
+  onPointContextAction: (action: PointContextAction, orderId: string) => void;
 }) {
   const ordersWithCoordinates = orders.filter(hasCoordinates);
   const ordersWithoutCoordinates = orders.filter((order) => !hasCoordinates(order));
@@ -712,14 +1127,14 @@ function DeliveryMap({
   const routeStopSet = new Set(routeStopIds);
   const routePoints = routeStopIds
     .map((id) => ordersById.get(id))
-    .filter((order): order is DeliveryOrder => Boolean(order) && hasCoordinates(order))
+    .filter((order): order is DeliveryOrder & { latitude: number; longitude: number } => order !== undefined && hasCoordinates(order))
     .map((order, index) => {
       const isReturn = order.orderSource === "return";
       const heading = `${index + 1}. ${order.name} · ${order.customerName}`;
 
       return {
         id: order.id,
-        label: String(index + 1),
+        label: fixedStopLabel(order.id === firstLockedOrderId ? "first" : order.id === lastLockedOrderId ? "last" : null) || String(index + 1),
         title: `${heading} · ${order.postcode || "No postcode"}`,
         latitude: order.latitude,
         longitude: order.longitude,
@@ -756,6 +1171,17 @@ function DeliveryMap({
         showRouteLine={routePoints.length > 0}
         routeStart={{ address: startAddress, label: "START", latitude: startLatitude, longitude: startLongitude, status: "START" }}
         routeFinish={{ address: returnToBase ? startAddress : finishAddress || startAddress, label: "FINISH", latitude: returnToBase ? startLatitude : finishLatitude, longitude: returnToBase ? startLongitude : finishLongitude, status: "FINISH" }}
+        onMapContextAction={onMapContextAction}
+        onPointContextAction={(action, point) => {
+          if ((action === "setFirstDrop" || action === "setLastDrop") && !selectedIds.has(point.id)) {
+            const order = ordersById.get(point.id);
+            if (order) {
+              onToggleOrder(order);
+            }
+          }
+
+          onPointContextAction(action, point.id);
+        }}
         onSelectPoint={(point) => {
           const order = ordersById.get(point.id);
           if (order) {
@@ -784,12 +1210,7 @@ function DeliveryMap({
 function OptimiseRouteButton({ onClick, loading, disabled }: { onClick: () => void; loading: boolean; disabled: boolean }) {
   return (
     <Button onClick={onClick} loading={loading} disabled={disabled} variant="primary" tone="critical">
-      <InlineStack gap="100" blockAlign="center" align="center">
-        <svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8.9 1.3 3.4 8.5h4.2L6.8 14.7l5.8-7.9H8.2l.7-5.5Z" />
-        </svg>
-        <span>Optimise selected route</span>
-      </InlineStack>
+      Optimise selected route
     </Button>
   );
 }
@@ -898,44 +1319,61 @@ function CollapsibleAddressEditor({
 }
 
 export default function OrdersMap() {
-  const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults, tomtomApiKey } = useLoaderData<typeof loader>();
+  const { orders, drivers, addressLookupEnabled, routexlEnabled, defaults, tomtomApiKey, draftRoute } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const optimisationFetcher = useFetcher<PlanningOptimisationResult>();
   const etaPreviewFetcher = useFetcher<PlanningEtaPreviewResult>();
-  const [stops, setStops] = useState<Stop[]>([]);
-  const [routeName, setRouteName] = useState("");
-  const [selectedDriverId, setSelectedDriverId] = useState("");
-  const [routeDate, setRouteDate] = useState(defaults.routeDate);
-  const [plannedStartTime, setPlannedStartTime] = useState(defaults.plannedStartTime);
-  const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(defaults.timePerDropMinutes));
-  const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(defaults.customerSlotMinutes));
-  const [returnToBase, setReturnToBase] = useState(defaults.returnToBaseDefault);
-  const [useCustomStartPoint, setUseCustomStartPoint] = useState(false);
+  const saveFetcher = useFetcher<{ ok: boolean; error?: string; message?: string; routeName?: string }>();
+  const defaultStartEndpoint = {
+    address: defaults.startAddress,
+    latitude: typeof defaults.startLatitude === "number" ? defaults.startLatitude : null,
+    longitude: typeof defaults.startLongitude === "number" ? defaults.startLongitude : null,
+  };
+  const isEditingDraft = Boolean(draftRoute);
+  const draftUsesCustomStart = draftRoute?.start ? !sameEndpoint(draftRoute.start, defaultStartEndpoint) : false;
+  const [stops, setStops] = useState<Stop[]>(draftRoute?.stops || []);
+  const [routeName, setRouteName] = useState(draftRoute?.name || "");
+  const [selectedDriverId, setSelectedDriverId] = useState(draftRoute?.driverId || "");
+  const [routeDate, setRouteDate] = useState(draftRoute?.date || defaults.routeDate);
+  const [plannedStartTime, setPlannedStartTime] = useState(draftRoute?.plannedStartTime || defaults.plannedStartTime);
+  const [timePerDropMinutes, setTimePerDropMinutes] = useState(String(draftRoute?.timePerDropMinutes || defaults.timePerDropMinutes));
+  const [customerSlotMinutes, setCustomerSlotMinutes] = useState(String(draftRoute?.customerSlotMinutes || defaults.customerSlotMinutes));
+  const [returnToBase, setReturnToBase] = useState(draftRoute?.returnToBase ?? defaults.returnToBaseDefault);
+  const [useCustomStartPoint, setUseCustomStartPoint] = useState(draftUsesCustomStart);
   const [customStartAddress, setCustomStartAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
   const [customFinishAddress, setCustomFinishAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
-  const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>([]);
+  const [customStartPoint, setCustomStartPoint] = useState<SelectedRouteEndpoint | null>(draftRoute?.start || null);
+  const [customFinishPoint, setCustomFinishPoint] = useState<SelectedRouteEndpoint | null>(draftRoute?.finish || null);
+  const [manualOrders, setManualOrders] = useState<ManualPlanningOrder[]>(draftRoute?.manualOrders || []);
   const [manualCustomerName, setManualCustomerName] = useState("");
   const [manualAddress, setManualAddress] = useState<StructuredAddress>(normaliseStructuredAddress(emptyStructuredAddress));
   const [manualEmail, setManualEmail] = useState("");
   const [manualPhone, setManualPhone] = useState("");
   const [manualItems, setManualItems] = useState("");
+  const [firstLockedOrderId, setFirstLockedOrderId] = useState<string | null>(draftRoute?.firstLockedOrderId || null);
+  const [lastLockedOrderId, setLastLockedOrderId] = useState<string | null>(draftRoute?.lastLockedOrderId || null);
   const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
   const [routeFinishEta, setRouteFinishEta] = useState<string | null>(null);
   const [routeDurationMinutes, setRouteDurationMinutes] = useState<number | null>(null);
   const [routeOptimised, setRouteOptimised] = useState(false);
+  const [savedDraftSnapshot, setSavedDraftSnapshot] = useState("");
+  const [submittedDraftSnapshot, setSubmittedDraftSnapshot] = useState("");
+  const [pendingNavigationHref, setPendingNavigationHref] = useState<string | null>(null);
+  const [navigateAfterSaveHref, setNavigateAfterSaveHref] = useState<string | null>(null);
+  const allowNavigationRef = useRef(false);
 
   const defaultStartAddress = defaults.startAddress;
-  const defaultStartLatitude = typeof defaults.startLatitude === "number" ? defaults.startLatitude : null;
-  const defaultStartLongitude = typeof defaults.startLongitude === "number" ? defaults.startLongitude : null;
+  const defaultStartLatitude = defaultStartEndpoint.latitude;
+  const defaultStartLongitude = defaultStartEndpoint.longitude;
   const fulfilmentWindowDays = Number(defaults.fulfilmentWindowDays) || fallbackRoutePlanningSettings.fulfilmentWindowDays;
   const customStartSummary = formatStructuredAddress(customStartAddress);
   const customFinishSummary = formatStructuredAddress(customFinishAddress);
-  const startAddress = useCustomStartPoint && customStartSummary ? customStartSummary : defaultStartAddress;
-  const startLatitude = useCustomStartPoint ? null : defaultStartLatitude;
-  const startLongitude = useCustomStartPoint ? null : defaultStartLongitude;
-  const finishAddress = returnToBase ? startAddress : customFinishSummary;
-  const finishLatitude = returnToBase ? startLatitude : null;
-  const finishLongitude = returnToBase ? startLongitude : null;
+  const startAddress = customStartPoint?.address || (useCustomStartPoint && customStartSummary ? customStartSummary : defaultStartAddress);
+  const startLatitude = customStartPoint?.latitude ?? (useCustomStartPoint ? null : defaultStartLatitude);
+  const startLongitude = customStartPoint?.longitude ?? (useCustomStartPoint ? null : defaultStartLongitude);
+  const finishAddress = returnToBase ? startAddress : customFinishPoint?.address || customFinishSummary;
+  const finishLatitude = returnToBase ? startLatitude : customFinishPoint?.latitude ?? null;
+  const finishLongitude = returnToBase ? startLongitude : customFinishPoint?.longitude ?? null;
 
   const driverOptions = useMemo(() => [
     { label: "Select driver later", value: "" },
@@ -943,14 +1381,136 @@ export default function OrdersMap() {
   ], [drivers]);
   const selectedDriver = drivers.find((driver) => driver.id === selectedDriverId);
   const manualDeliveryOrders = useMemo(() => manualOrders.map(manualOrderToDeliveryOrder), [manualOrders]);
-  const allOrders = useMemo(() => [...orders, ...manualDeliveryOrders], [orders, manualDeliveryOrders]);
+  const allOrders = useMemo(() => mergeOrders(manualDeliveryOrders, orders), [orders, manualDeliveryOrders]);
   const selectedIds = useMemo(() => new Set(stops.map((stop) => stop.id)), [stops]);
   const selectedOrderIds = stops.map((stop) => stop.id).join(",");
   const manualOrdersJson = JSON.stringify(manualOrders);
+  const etaPreviewKey = [
+    selectedOrderIds,
+    manualOrdersJson,
+    routeDate,
+    plannedStartTime,
+    timePerDropMinutes,
+    customerSlotMinutes,
+    startAddress,
+    startLatitude ?? "",
+    startLongitude ?? "",
+    finishAddress,
+    finishLatitude ?? "",
+    finishLongitude ?? "",
+    returnToBase ? "1" : "0",
+  ].join("|");
   const optimisationRunning = optimisationFetcher.state !== "idle";
   const optimisationError = optimisationFetcher.data && !optimisationFetcher.data.ok ? optimisationFetcher.data.error : null;
   const etaPreviewRunning = etaPreviewFetcher.state !== "idle";
   const etaPreviewError = etaPreviewFetcher.data && !etaPreviewFetcher.data.ok ? etaPreviewFetcher.data.error : null;
+  const draftSaveRunning = saveFetcher.state !== "idle";
+  const draftSaveError = saveFetcher.data && !saveFetcher.data.ok ? saveFetcher.data.error : null;
+  const draftSaveMessage = saveFetcher.data?.ok ? saveFetcher.data.message || "Draft route saved." : null;
+  const currentDraftSnapshot = useMemo(() => JSON.stringify({
+    routeName,
+    selectedDriverId,
+    routeDate,
+    plannedStartTime,
+    timePerDropMinutes,
+    customerSlotMinutes,
+    returnToBase,
+    startAddress,
+    startLatitude,
+    startLongitude,
+    finishAddress,
+    finishLatitude,
+    finishLongitude,
+    manualOrders,
+    stopIds: stops.map((stop) => stop.id),
+    firstLockedOrderId,
+    lastLockedOrderId,
+  }), [
+    routeName,
+    selectedDriverId,
+    routeDate,
+    plannedStartTime,
+    timePerDropMinutes,
+    customerSlotMinutes,
+    returnToBase,
+    startAddress,
+    startLatitude,
+    startLongitude,
+    finishAddress,
+    finishLatitude,
+    finishLongitude,
+    manualOrders,
+    stops,
+    firstLockedOrderId,
+    lastLockedOrderId,
+  ]);
+  const draftIsDirty = isEditingDraft && Boolean(savedDraftSnapshot) && savedDraftSnapshot !== currentDraftSnapshot;
+
+  useEffect(() => {
+    if (isEditingDraft && !savedDraftSnapshot) {
+      setSavedDraftSnapshot(currentDraftSnapshot);
+    }
+  }, [currentDraftSnapshot, isEditingDraft, savedDraftSnapshot]);
+
+  useEffect(() => {
+    if (!saveFetcher.data?.ok) {
+      return;
+    }
+
+    setSavedDraftSnapshot(submittedDraftSnapshot || currentDraftSnapshot);
+
+    if (navigateAfterSaveHref) {
+      allowNavigationRef.current = true;
+      window.location.href = navigateAfterSaveHref;
+    }
+  }, [currentDraftSnapshot, navigateAfterSaveHref, saveFetcher.data, submittedDraftSnapshot]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!draftIsDirty || allowNavigationRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [draftIsDirty]);
+
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!draftIsDirty || allowNavigationRef.current || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target instanceof Element ? event.target.closest("a[href]") : null;
+
+      if (!(target instanceof HTMLAnchorElement) || target.target === "_blank" || target.hasAttribute("download")) {
+        return;
+      }
+
+      const href = target.href;
+
+      if (!href || new URL(href).origin !== window.location.origin) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setPendingNavigationHref(href);
+    };
+
+    document.addEventListener("click", handleDocumentClick, true);
+
+    return () => {
+      document.removeEventListener("click", handleDocumentClick, true);
+    };
+  }, [draftIsDirty]);
 
   useEffect(() => {
     if (!optimisationFetcher.data?.ok) {
@@ -965,14 +1525,14 @@ export default function OrdersMap() {
     const missingStops = stops.filter((stop) => !optimisationFetcher.data?.ok || !optimisationFetcher.data.orderedIds.includes(stop.id));
 
     setStops([...orderedStops, ...missingStops]);
-    setRouteDistanceKm(optimisationFetcher.data.totalDistanceKm);
-    setRouteFinishEta(optimisationFetcher.data.routeFinishEta);
-    setRouteDurationMinutes(optimisationFetcher.data.totalDurationMinutes);
+    setRouteDistanceKm(null);
+    setRouteFinishEta(null);
+    setRouteDurationMinutes(null);
     setRouteOptimised(true);
   }, [optimisationFetcher.data]);
 
   useEffect(() => {
-    if (!etaPreviewFetcher.data?.ok) {
+    if (!etaPreviewFetcher.data?.ok || etaPreviewFetcher.data.requestKey !== etaPreviewKey) {
       return;
     }
 
@@ -985,11 +1545,23 @@ export default function OrdersMap() {
     setRouteDistanceKm(etaPreviewFetcher.data.totalDistanceKm);
     setRouteFinishEta(etaPreviewFetcher.data.routeFinishEta);
     setRouteDurationMinutes(etaPreviewFetcher.data.totalRouteMinutes);
-  }, [etaPreviewFetcher.data]);
+  }, [etaPreviewFetcher.data, etaPreviewKey]);
 
   useEffect(() => {
     setStops((currentStops) => refreshStopEtas(currentStops, plannedStartTime, timePerDropMinutes));
   }, [plannedStartTime, timePerDropMinutes]);
+
+  useEffect(() => {
+    setStops((currentStops) => {
+      const orderedStops = applyFixedStopPositions(currentStops, firstLockedOrderId, lastLockedOrderId);
+
+      if (sameStopOrder(currentStops, orderedStops)) {
+        return currentStops;
+      }
+
+      return refreshStopEtas(orderedStops, plannedStartTime, timePerDropMinutes);
+    });
+  }, [firstLockedOrderId, lastLockedOrderId, plannedStartTime, selectedOrderIds, timePerDropMinutes]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -1007,11 +1579,17 @@ export default function OrdersMap() {
     setUseCustomStartPoint(false);
     setCustomStartAddress(normaliseStructuredAddress(emptyStructuredAddress));
     setCustomFinishAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    setCustomStartPoint(null);
+    setCustomFinishPoint(null);
     setManualAddress(normaliseStructuredAddress(emptyStructuredAddress));
     setReturnToBase(defaults.returnToBaseDefault);
   };
 
   useEffect(() => {
+    if (isEditingDraft) {
+      return;
+    }
+
     resetTransientAddressFields();
 
     const handlePageShow = (event: PageTransitionEvent) => {
@@ -1025,7 +1603,7 @@ export default function OrdersMap() {
     return () => {
       window.removeEventListener("pageshow", handlePageShow);
     };
-  }, []);
+  }, [isEditingDraft]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -1035,7 +1613,7 @@ export default function OrdersMap() {
         const oldIndex = items.findIndex((i) => i.id === active.id);
         const newIndex = items.findIndex((i) => i.id === over.id);
 
-        return refreshStopEtas(arrayMove(items, oldIndex, newIndex), plannedStartTime, timePerDropMinutes);
+        return refreshStopEtas(applyFixedStopPositions(arrayMove(items, oldIndex, newIndex), firstLockedOrderId, lastLockedOrderId), plannedStartTime, timePerDropMinutes);
       });
       clearOptimisedStats();
     }
@@ -1048,6 +1626,13 @@ export default function OrdersMap() {
 
     setStops((currentStops) => {
       if (currentStops.some((stop) => stop.id === order.id)) {
+        if (firstLockedOrderId === order.id) {
+          setFirstLockedOrderId(null);
+        }
+        if (lastLockedOrderId === order.id) {
+          setLastLockedOrderId(null);
+        }
+
         return refreshStopEtas(currentStops.filter((stop) => stop.id !== order.id), plannedStartTime, timePerDropMinutes);
       }
 
@@ -1058,11 +1643,39 @@ export default function OrdersMap() {
 
   const removeStop = (id: string) => {
     setStops(refreshStopEtas(stops.filter((s) => s.id !== id), plannedStartTime, timePerDropMinutes));
+    if (firstLockedOrderId === id) {
+      setFirstLockedOrderId(null);
+    }
+    if (lastLockedOrderId === id) {
+      setLastLockedOrderId(null);
+    }
     clearOptimisedStats();
   };
 
-  const toggleLock = (id: string) => {
-    setStops(stops.map((s) => s.id === id ? { ...s, isLocked: !s.isLocked } : s));
+  const setFirstFixedStop = (id: string) => {
+    setFirstLockedOrderId(id);
+    setLastLockedOrderId((current) => current === id ? null : current);
+    setStops((currentStops) => refreshStopEtas(applyFixedStopPositions(currentStops, id, lastLockedOrderId === id ? null : lastLockedOrderId), plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
+  };
+
+  const setLastFixedStop = (id: string) => {
+    setLastLockedOrderId(id);
+    setFirstLockedOrderId((current) => current === id ? null : current);
+    setStops((currentStops) => refreshStopEtas(applyFixedStopPositions(currentStops, firstLockedOrderId === id ? null : firstLockedOrderId, id), plannedStartTime, timePerDropMinutes));
+    clearOptimisedStats();
+  };
+
+  const clearFixedStop = (id: string) => {
+    if (firstLockedOrderId === id) {
+      setFirstLockedOrderId(null);
+    }
+
+    if (lastLockedOrderId === id) {
+      setLastLockedOrderId(null);
+    }
+
+    clearOptimisedStats();
   };
 
   const appendEndpointFields = (formData: FormData) => {
@@ -1072,6 +1685,87 @@ export default function OrdersMap() {
     formData.set("startLongitude", startLongitude === null ? "" : String(startLongitude));
     formData.set("finishLatitude", returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude)));
     formData.set("finishLongitude", returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude)));
+  };
+
+  const buildSaveFormData = () => {
+    const formData = new FormData();
+    formData.set("intent", "saveRoute");
+    formData.set("draftRouteId", draftRoute?.id || "");
+    formData.set("selectedOrderIds", selectedOrderIds);
+    formData.set("manualOrdersJson", manualOrdersJson);
+    formData.set("requestKey", etaPreviewKey);
+    formData.set("driverId", selectedDriverId);
+    formData.set("routeDate", routeDate);
+    formData.set("plannedStartTime", plannedStartTime);
+    formData.set("timePerDropMinutes", timePerDropMinutes);
+    formData.set("customerSlotMinutes", customerSlotMinutes);
+    formData.set("returnToBase", returnToBase ? "true" : "false");
+    formData.set("firstLockedOrderId", firstLockedOrderId || "");
+    formData.set("lastLockedOrderId", lastLockedOrderId || "");
+    formData.set("routeName", routeName);
+    appendEndpointFields(formData);
+
+    return formData;
+  };
+
+  const saveDraftChanges = (afterSaveHref?: string | null) => {
+    if (!isEditingDraft || !draftRoute) {
+      return;
+    }
+
+    setNavigateAfterSaveHref(afterSaveHref || null);
+    setSubmittedDraftSnapshot(currentDraftSnapshot);
+    saveFetcher.submit(buildSaveFormData(), { method: "post" });
+  };
+
+  const discardDraftChanges = () => {
+    allowNavigationRef.current = true;
+
+    if (pendingNavigationHref) {
+      window.location.href = pendingNavigationHref;
+      return;
+    }
+
+    window.location.reload();
+  };
+
+  const continueEditingDraft = () => {
+    setPendingNavigationHref(null);
+    setNavigateAfterSaveHref(null);
+  };
+
+  const setMapEndpoint = (action: MapContextAction, location: MapContextLocation) => {
+    const endpoint = {
+      address: location.address,
+      latitude: location.latitude,
+      longitude: location.longitude,
+    };
+
+    if (action === "setStart") {
+      setUseCustomStartPoint(true);
+      setCustomStartPoint(endpoint);
+      setCustomStartAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    } else {
+      setReturnToBase(false);
+      setCustomFinishPoint(endpoint);
+      setCustomFinishAddress(normaliseStructuredAddress(emptyStructuredAddress));
+    }
+
+    clearOptimisedStats();
+  };
+
+  const handlePointContextAction = (action: PointContextAction, orderId: string) => {
+    if (action === "setFirstDrop") {
+      setFirstFixedStop(orderId);
+      return;
+    }
+
+    if (action === "setLastDrop") {
+      setLastFixedStop(orderId);
+      return;
+    }
+
+    clearFixedStop(orderId);
   };
 
   const submitEtaPreview = () => {
@@ -1104,7 +1798,7 @@ export default function OrdersMap() {
     return () => {
       window.clearTimeout(timer);
     };
-  }, [selectedOrderIds, manualOrdersJson, routeDate, plannedStartTime, timePerDropMinutes, customerSlotMinutes, startAddress, startLatitude, startLongitude, finishAddress, returnToBase]);
+  }, [selectedOrderIds, manualOrdersJson, routeDate, plannedStartTime, timePerDropMinutes, customerSlotMinutes, startAddress, startLatitude, startLongitude, finishAddress, finishLatitude, finishLongitude, returnToBase]);
 
   const optimisePlanningRoute = () => {
     const formData = new FormData();
@@ -1116,6 +1810,8 @@ export default function OrdersMap() {
     formData.set("timePerDropMinutes", timePerDropMinutes);
     formData.set("customerSlotMinutes", customerSlotMinutes);
     formData.set("returnToBase", returnToBase ? "true" : "false");
+    formData.set("firstLockedOrderId", firstLockedOrderId || "");
+    formData.set("lastLockedOrderId", lastLockedOrderId || "");
     appendEndpointFields(formData);
 
     optimisationFetcher.submit(formData, { method: "post" });
@@ -1154,6 +1850,12 @@ export default function OrdersMap() {
   const removeManualOrder = (id: string) => {
     setManualOrders((currentOrders) => currentOrders.filter((order) => order.id !== id));
     setStops((currentStops) => refreshStopEtas(currentStops.filter((stop) => stop.id !== id), plannedStartTime, timePerDropMinutes));
+    if (firstLockedOrderId === id) {
+      setFirstLockedOrderId(null);
+    }
+    if (lastLockedOrderId === id) {
+      setLastLockedOrderId(null);
+    }
     clearOptimisedStats();
   };
 
@@ -1172,8 +1874,11 @@ export default function OrdersMap() {
             <Box padding="400" borderBlockEndWidth="025" borderColor="border">
               <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h1" variant="headingLg">Planning Map</Text>
-                  <Badge tone="info">{allOrders.length} orders</Badge>
+                  <Text as="h1" variant="headingLg">{isEditingDraft ? "Edit Draft Route" : "Planning Map"}</Text>
+                  <InlineStack gap="100">
+                    {isEditingDraft ? <Badge tone={draftIsDirty ? "attention" : "success"}>{draftIsDirty ? "Unsaved changes" : "Draft loaded"}</Badge> : null}
+                    <Badge tone="info">{`${allOrders.length} orders`}</Badge>
+                  </InlineStack>
                 </InlineStack>
 
                 <BlockStack gap="100">
@@ -1192,6 +1897,18 @@ export default function OrdersMap() {
                   {actionData && "error" in actionData ? (
                     <Text as="p" variant="bodySm" tone="critical">
                       {actionData.error}
+                    </Text>
+                  ) : null}
+
+                  {draftSaveError ? (
+                    <Text as="p" variant="bodySm" tone="critical">
+                      {draftSaveError}
+                    </Text>
+                  ) : null}
+
+                  {draftSaveMessage && !draftIsDirty ? (
+                    <Text as="p" variant="bodySm" tone="success">
+                      {draftSaveMessage}
                     </Text>
                   ) : null}
                 </BlockStack>
@@ -1217,6 +1934,10 @@ export default function OrdersMap() {
                   returnToBase={returnToBase}
                   fulfilmentWindowDays={fulfilmentWindowDays}
                   onToggleOrder={toggleOrder}
+                  firstLockedOrderId={firstLockedOrderId}
+                  lastLockedOrderId={lastLockedOrderId}
+                  onMapContextAction={setMapEndpoint}
+                  onPointContextAction={handlePointContextAction}
                   tomtomApiKey={tomtomApiKey}
                 />
               )}
@@ -1251,6 +1972,13 @@ export default function OrdersMap() {
                     <Text as="p" variant="bodySm" tone="subdued">
                       Driver selected: {selectedDriver.name}
                     </Text>
+                  ) : null}
+
+                  {firstLockedOrderId || lastLockedOrderId ? (
+                    <InlineStack gap="100">
+                      {firstLockedOrderId ? <Badge tone="attention">1 🔒</Badge> : null}
+                      {lastLockedOrderId ? <Badge tone="attention">Last 🔒</Badge> : null}
+                    </InlineStack>
                   ) : null}
 
                   {etaPreviewRunning && stops.length ? (
@@ -1288,11 +2016,11 @@ export default function OrdersMap() {
                     </BlockStack>
                   </Box>
 
-                  <Checkbox label="Use custom start point" checked={useCustomStartPoint} onChange={(checked) => { setUseCustomStartPoint(checked); clearOptimisedStats(); }} />
-                  {useCustomStartPoint ? <CollapsibleAddressEditor title="Custom start point" address={customStartAddress} onChange={(value) => { setCustomStartAddress(value); clearOptimisedStats(); }} summary={customStartSummary} /> : null}
+                  <Checkbox label="Use custom start point" checked={useCustomStartPoint} onChange={(checked) => { setUseCustomStartPoint(checked); if (!checked) setCustomStartPoint(null); clearOptimisedStats(); }} />
+                  {useCustomStartPoint ? <CollapsibleAddressEditor title="Custom start point" address={customStartAddress} onChange={(value) => { setCustomStartAddress(value); setCustomStartPoint(null); clearOptimisedStats(); }} summary={customStartPoint?.address || customStartSummary} /> : null}
 
-                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); clearOptimisedStats(); }} />
-                  {!returnToBase ? <CollapsibleAddressEditor title="Custom finish location" address={customFinishAddress} onChange={(value) => { setCustomFinishAddress(value); clearOptimisedStats(); }} summary={customFinishSummary} /> : null}
+                  <Checkbox label="Return to base after last drop" checked={returnToBase} onChange={(checked) => { setReturnToBase(checked); if (checked) setCustomFinishPoint(null); clearOptimisedStats(); }} />
+                  {!returnToBase ? <CollapsibleAddressEditor title="Custom finish location" address={customFinishAddress} onChange={(value) => { setCustomFinishAddress(value); setCustomFinishPoint(null); clearOptimisedStats(); }} summary={customFinishPoint?.address || customFinishSummary} /> : null}
                   <OptimiseRouteButton onClick={optimisePlanningRoute} loading={optimisationRunning} disabled={!routexlEnabled || stops.length === 0} />
                 </BlockStack>
               </BlockStack>
@@ -1337,35 +2065,87 @@ export default function OrdersMap() {
 
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={stops} strategy={verticalListSortingStrategy}>
-                {stops.map((stop) => <SortableStop key={stop.id} stop={stop} onRemove={removeStop} onToggleLock={toggleLock} />)}
+                {stops.map((stop) => (
+                  <SortableStop
+                    key={stop.id}
+                    stop={stop}
+                    fixedPosition={stop.id === firstLockedOrderId ? "first" : stop.id === lastLockedOrderId ? "last" : null}
+                    onRemove={removeStop}
+                    onSetFirst={setFirstFixedStop}
+                    onSetLast={setLastFixedStop}
+                    onClearFixed={clearFixedStop}
+                  />
+                ))}
               </SortableContext>
             </DndContext>
             <Box padding="300">
-              <Form method="post">
-                <input type="hidden" name="intent" value="saveRoute" />
-                <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
-                <input type="hidden" name="manualOrdersJson" value={manualOrdersJson} />
-                <input type="hidden" name="driverId" value={selectedDriverId} />
-                <input type="hidden" name="routeDate" value={routeDate} />
-                <input type="hidden" name="plannedStartTime" value={plannedStartTime} />
-                <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
-                <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
-                <input type="hidden" name="startAddress" value={startAddress} />
-                <input type="hidden" name="finishAddress" value={returnToBase ? startAddress : finishAddress} />
-                <input type="hidden" name="startLatitude" value={startLatitude === null ? "" : String(startLatitude)} />
-                <input type="hidden" name="startLongitude" value={startLongitude === null ? "" : String(startLongitude)} />
-                <input type="hidden" name="finishLatitude" value={returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude))} />
-                <input type="hidden" name="finishLongitude" value={returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude))} />
-                <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
+              {isEditingDraft ? (
                 <BlockStack gap="300">
-                  <TextField label="Draft route name, optional" name="routeName" value={routeName} onChange={setRouteName} autoComplete="off" placeholder="Example, Chris, North Route" />
-                  <Button fullWidth submit variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
+                  <TextField label="Draft route name" value={routeName} onChange={setRouteName} autoComplete="off" placeholder="Example, Chris, North Route" />
+                  <Button fullWidth variant="primary" loading={draftSaveRunning} disabled={stops.length === 0 || !draftIsDirty} onClick={() => saveDraftChanges()}>Save changes</Button>
                 </BlockStack>
-              </Form>
+              ) : (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="saveRoute" />
+                  <input type="hidden" name="selectedOrderIds" value={selectedOrderIds} />
+                  <input type="hidden" name="manualOrdersJson" value={manualOrdersJson} />
+                  <input type="hidden" name="driverId" value={selectedDriverId} />
+                  <input type="hidden" name="routeDate" value={routeDate} />
+                  <input type="hidden" name="plannedStartTime" value={plannedStartTime} />
+                  <input type="hidden" name="timePerDropMinutes" value={timePerDropMinutes} />
+                  <input type="hidden" name="customerSlotMinutes" value={customerSlotMinutes} />
+                  <input type="hidden" name="startAddress" value={startAddress} />
+                  <input type="hidden" name="finishAddress" value={returnToBase ? startAddress : finishAddress} />
+                  <input type="hidden" name="startLatitude" value={startLatitude === null ? "" : String(startLatitude)} />
+                  <input type="hidden" name="startLongitude" value={startLongitude === null ? "" : String(startLongitude)} />
+                  <input type="hidden" name="finishLatitude" value={returnToBase ? (startLatitude === null ? "" : String(startLatitude)) : (finishLatitude === null ? "" : String(finishLatitude))} />
+                  <input type="hidden" name="finishLongitude" value={returnToBase ? (startLongitude === null ? "" : String(startLongitude)) : (finishLongitude === null ? "" : String(finishLongitude))} />
+                  <input type="hidden" name="returnToBase" value={returnToBase ? "true" : "false"} />
+                  <input type="hidden" name="firstLockedOrderId" value={firstLockedOrderId || ""} />
+                  <input type="hidden" name="lastLockedOrderId" value={lastLockedOrderId || ""} />
+                  <BlockStack gap="300">
+                    <TextField label="Draft route name, optional" name="routeName" value={routeName} onChange={setRouteName} autoComplete="off" placeholder="Example, Chris, North Route" />
+                    <Button fullWidth submit variant="primary" disabled={stops.length === 0}>Save Draft Route</Button>
+                  </BlockStack>
+                </Form>
+              )}
             </Box>
           </LegacyCard>
         </Layout.Section>
       </Layout>
+      {draftIsDirty && !pendingNavigationHref ? (
+        <div style={{ position: "fixed", right: 18, bottom: 18, zIndex: 50, width: "min(420px, calc(100vw - 36px))" }}>
+          <LegacyCard sectioned>
+            <BlockStack gap="200">
+              <Text as="p" variant="bodyMd" fontWeight="bold">Unsaved draft changes</Text>
+              <InlineStack gap="200" wrap>
+                <Button variant="primary" loading={draftSaveRunning} disabled={stops.length === 0} onClick={() => saveDraftChanges(pendingNavigationHref)}>Save changes</Button>
+                <Button tone="critical" onClick={discardDraftChanges}>Discard changes</Button>
+                <Button onClick={continueEditingDraft}>Continue editing</Button>
+              </InlineStack>
+            </BlockStack>
+          </LegacyCard>
+        </div>
+      ) : null}
+      {pendingNavigationHref ? (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,23,42,0.42)", display: "grid", placeItems: "center", padding: 18 }}>
+          <div style={{ width: "min(460px, 100%)" }}>
+            <LegacyCard sectioned>
+              <BlockStack gap="300">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Unsaved draft changes</Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">Save this draft before leaving, discard the changes, or stay on the planner.</Text>
+                </BlockStack>
+                <InlineStack gap="200" wrap>
+                  <Button variant="primary" loading={draftSaveRunning} disabled={stops.length === 0} onClick={() => saveDraftChanges(pendingNavigationHref)}>Save changes</Button>
+                  <Button tone="critical" onClick={discardDraftChanges}>Discard changes</Button>
+                  <Button onClick={continueEditingDraft}>Continue editing</Button>
+                </InlineStack>
+              </BlockStack>
+            </LegacyCard>
+          </div>
+        </div>
+      ) : null}
     </Page>
   );
 }

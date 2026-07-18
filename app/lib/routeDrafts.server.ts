@@ -18,6 +18,8 @@ type CreateRouteDraftInput = {
   startLongitude?: number | null;
   finishLatitude?: number | null;
   finishLongitude?: number | null;
+  firstLockedOrderId?: string | null;
+  lastLockedOrderId?: string | null;
 };
 
 type RoutePlanningSettingsInput = {
@@ -31,6 +33,11 @@ type RoutePlanningSettingsInput = {
   startLongitude?: number | null;
   finishLatitude?: number | null;
   finishLongitude?: number | null;
+};
+
+type UpdateRouteDraftInput = CreateRouteDraftInput & {
+  routeId: string;
+  driverId?: string | null;
 };
 
 const DEFAULT_SHOP_LOCATION = {
@@ -133,6 +140,93 @@ function shopifyOrderIds(orders: DeliveryOrder[]) {
     .filter(Boolean);
 }
 
+function normaliseLockOrderId(value: string | null | undefined, orderIds: Set<string>) {
+  const trimmed = value?.trim();
+
+  return trimmed && orderIds.has(trimmed) ? trimmed : null;
+}
+
+function normaliseEndpointLocks(input: {
+  firstLockedOrderId?: string | null;
+  lastLockedOrderId?: string | null;
+}, orders: DeliveryOrder[]) {
+  const orderIds = new Set(orders.map((order) => order.id));
+  const firstLockedOrderId = normaliseLockOrderId(input.firstLockedOrderId, orderIds);
+  const lastLockedOrderId = normaliseLockOrderId(input.lastLockedOrderId, orderIds);
+
+  if (firstLockedOrderId && lastLockedOrderId && firstLockedOrderId === lastLockedOrderId) {
+    throw new Error("The same stop cannot be fixed as both first and last.");
+  }
+
+  return {
+    firstLockedOrderId,
+    lastLockedOrderId,
+  };
+}
+
+function orderStopData(order: DeliveryOrder) {
+  return {
+    shopifyOrderId: order.id,
+    shopifyOrderNumber: order.name,
+    orderSource: order.orderSource || "shopify",
+    customerName: order.customerName,
+    customerEmail: order.email,
+    customerPhone: order.phone,
+    postcode: order.postcode,
+    lineItemSummary: order.lineItemSummary,
+  };
+}
+
+function deliveryGroupData(order: DeliveryOrder) {
+  return {
+    address: order.formattedAddress || order.addressSummary,
+    formattedAddress: order.formattedAddress,
+    postcode: order.postcode,
+    latitude: order.latitude,
+    longitude: order.longitude,
+    addressStatus: order.addressStatus,
+    addressSource: order.orderSource === "manual" ? "manual" : order.hasManualOverride ? "manual" : "getaddress",
+    addressConfidence: order.addressConfidence,
+    manualAddress: order.manualAddress,
+    useManualAddress: order.hasManualOverride || order.orderSource === "manual",
+  };
+}
+
+function createStopData(order: DeliveryOrder, index: number, lockedOrderIds: Set<string>) {
+  return {
+    orderIndex: index + 1,
+    isLocked: lockedOrderIds.has(order.id),
+    deliveryGroup: {
+      create: {
+        ...deliveryGroupData(order),
+        orders: {
+          create: orderStopData(order),
+        },
+      },
+    },
+  };
+}
+
+function stopOrderIds(stop: {
+  deliveryGroup?: {
+    orders: Array<{ shopifyOrderId: string }>;
+  } | null;
+}) {
+  return stop.deliveryGroup?.orders.map((order) => order.shopifyOrderId) || [];
+}
+
+function stopHasOrder(stop: {
+  deliveryGroup?: {
+    orders: Array<{ shopifyOrderId: string }>;
+  } | null;
+}, orderId: string) {
+  return stopOrderIds(stop).includes(orderId);
+}
+
+function returnTicketIdFromPlanningOrderId(value: string) {
+  return value.startsWith("return:") ? value.slice("return:".length) : "";
+}
+
 async function resolveRouteEndpoint(address: string | undefined, latitude?: number | null, longitude?: number | null) {
   const trimmedAddress = address?.trim() || DEFAULT_SHOP_LOCATION.address;
   const lockedLatitude = normaliseCoordinate(latitude);
@@ -188,6 +282,11 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
 
   const planning = await buildPlanningData(input);
   const name = buildRouteName(input.orders, input.routeName, planning.date);
+  const endpointLocks = normaliseEndpointLocks(input, input.orders);
+  const lockedOrderIds = new Set([
+    endpointLocks.firstLockedOrderId,
+    endpointLocks.lastLockedOrderId,
+  ].filter((id): id is string => Boolean(id)));
 
   const draftRoute = await prisma.route.create({
     data: {
@@ -204,36 +303,7 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
       finishLatitude: planning.finishLatitude,
       finishLongitude: planning.finishLongitude,
       stops: {
-        create: input.orders.map((order, index) => ({
-          orderIndex: index + 1,
-          isLocked: false,
-          deliveryGroup: {
-            create: {
-              address: order.formattedAddress || order.addressSummary,
-              formattedAddress: order.formattedAddress,
-              postcode: order.postcode,
-              latitude: order.latitude,
-              longitude: order.longitude,
-              addressStatus: order.addressStatus,
-              addressSource: order.orderSource === "manual" ? "manual" : order.hasManualOverride ? "manual" : "getaddress",
-              addressConfidence: order.addressConfidence,
-              manualAddress: order.manualAddress,
-              useManualAddress: order.hasManualOverride || order.orderSource === "manual",
-              orders: {
-                create: {
-                  shopifyOrderId: order.id,
-                  shopifyOrderNumber: order.name,
-                  orderSource: order.orderSource || "shopify",
-                  customerName: order.customerName,
-                  customerEmail: order.email,
-                  customerPhone: order.phone,
-                  postcode: order.postcode,
-                  lineItemSummary: order.lineItemSummary,
-                },
-              },
-            },
-          },
-        })),
+        create: input.orders.map((order, index) => createStopData(order, index, lockedOrderIds)),
       },
       history: {
         create: {
@@ -259,8 +329,273 @@ export async function createRouteDraft(input: CreateRouteDraftInput) {
     },
   });
 
+  const stopIdByOrderId = new Map<string, string>();
+
+  for (const stop of draftRoute.stops) {
+    for (const orderId of stopOrderIds(stop)) {
+      stopIdByOrderId.set(orderId, stop.id);
+    }
+  }
+
+  const firstLockedStopId = endpointLocks.firstLockedOrderId
+    ? stopIdByOrderId.get(endpointLocks.firstLockedOrderId) || null
+    : null;
+  const lastLockedStopId = endpointLocks.lastLockedOrderId
+    ? stopIdByOrderId.get(endpointLocks.lastLockedOrderId) || null
+    : null;
+
+  if (firstLockedStopId || lastLockedStopId) {
+    await prisma.route.update({
+      where: {
+        id: draftRoute.id,
+      },
+      data: {
+        firstLockedStopId,
+        lastLockedStopId,
+      },
+    });
+  }
+
   return calculateEtaSlots(
     draftRoute.id,
+    planning.plannedStartTime,
+    planning.timePerDropMinutes,
+    planning.customerSlotMinutes,
+  );
+}
+
+export async function updateRouteDraft(input: UpdateRouteDraftInput) {
+  const route = await prisma.route.findUnique({
+    where: {
+      id: input.routeId,
+    },
+    include: {
+      stops: {
+        include: {
+          returnTickets: true,
+          deliveryGroup: {
+            include: {
+              orders: true,
+            },
+          },
+        },
+        orderBy: {
+          orderIndex: "asc",
+        },
+      },
+    },
+  });
+
+  if (!route) {
+    throw new Error("Draft route could not be found.");
+  }
+
+  if (route.status !== "DRAFT") {
+    throw new Error("Only draft routes can be edited in the planner.");
+  }
+
+  const orderIds = input.orders.map((order) => order.id);
+  const uniqueOrderIds = new Set(orderIds);
+
+  if (uniqueOrderIds.size !== orderIds.length) {
+    throw new Error("A stop appears more than once in this draft. Remove the duplicate before saving.");
+  }
+
+  await assertOrdersAvailableForRoute(shopifyOrderIds(input.orders), route.id);
+
+  const planning = await buildPlanningData(input);
+  const endpointLocks = normaliseEndpointLocks(input, input.orders);
+  const lockedOrderIds = new Set([
+    endpointLocks.firstLockedOrderId,
+    endpointLocks.lastLockedOrderId,
+  ].filter((id): id is string => Boolean(id)));
+  const existingStopByOrderId = new Map<string, typeof route.stops[number]>();
+
+  for (const stop of route.stops) {
+    for (const orderId of stopOrderIds(stop)) {
+      if (!existingStopByOrderId.has(orderId)) {
+        existingStopByOrderId.set(orderId, stop);
+      }
+    }
+  }
+
+  const stopIdByOrderId = new Map<string, string>();
+  const routeName = buildRouteName(input.orders, input.routeName || route.name, planning.date);
+
+  await prisma.$transaction(async (tx) => {
+    for (const stop of route.stops) {
+      const stillSelected = orderIds.some((orderId) => stopHasOrder(stop, orderId));
+
+      if (stillSelected) {
+        continue;
+      }
+
+      await tx.returnTicket.updateMany({
+        where: {
+          stopId: stop.id,
+        },
+        data: {
+          status: "OPEN",
+          routeId: null,
+          stopId: null,
+        },
+      });
+
+      await tx.stop.delete({
+        where: {
+          id: stop.id,
+        },
+      });
+
+      if (stop.deliveryGroupId) {
+        const remainingStops = await tx.stop.count({
+          where: {
+            deliveryGroupId: stop.deliveryGroupId,
+          },
+        });
+
+        if (remainingStops === 0) {
+          await tx.orderStop.deleteMany({
+            where: {
+              deliveryGroupId: stop.deliveryGroupId,
+            },
+          });
+
+          await tx.deliveryGroup.delete({
+            where: {
+              id: stop.deliveryGroupId,
+            },
+          }).catch(() => null);
+        }
+      }
+    }
+
+    for (const [index, order] of input.orders.entries()) {
+      const existingStop = existingStopByOrderId.get(order.id);
+
+      if (existingStop) {
+        stopIdByOrderId.set(order.id, existingStop.id);
+
+        await tx.stop.update({
+          where: {
+            id: existingStop.id,
+          },
+          data: {
+            orderIndex: index + 1,
+            isLocked: lockedOrderIds.has(order.id),
+          },
+        });
+
+        if (existingStop.deliveryGroupId) {
+          await tx.deliveryGroup.update({
+            where: {
+              id: existingStop.deliveryGroupId,
+            },
+            data: deliveryGroupData(order),
+          });
+
+          const existingOrderStop = existingStop.deliveryGroup?.orders.find((storedOrder) => storedOrder.shopifyOrderId === order.id);
+
+          if (existingOrderStop) {
+            await tx.orderStop.update({
+              where: {
+                id: existingOrderStop.id,
+              },
+              data: orderStopData(order),
+            });
+          } else {
+            await tx.orderStop.create({
+              data: {
+                deliveryGroupId: existingStop.deliveryGroupId,
+                ...orderStopData(order),
+              },
+            });
+          }
+        }
+
+        continue;
+      }
+
+      const deliveryGroup = await tx.deliveryGroup.create({
+        data: {
+          ...deliveryGroupData(order),
+          orders: {
+            create: orderStopData(order),
+          },
+        },
+      });
+      const stop = await tx.stop.create({
+        data: {
+          routeId: route.id,
+          orderIndex: index + 1,
+          isLocked: lockedOrderIds.has(order.id),
+          deliveryGroupId: deliveryGroup.id,
+        },
+      });
+
+      stopIdByOrderId.set(order.id, stop.id);
+    }
+
+    for (const order of input.orders) {
+      const ticketId = returnTicketIdFromPlanningOrderId(order.id);
+      const stopId = stopIdByOrderId.get(order.id);
+
+      if (!ticketId || !stopId) {
+        continue;
+      }
+
+      await tx.returnTicket.updateMany({
+        where: {
+          id: ticketId,
+          status: {
+            in: ["OPEN", "ASSIGNED"],
+          },
+          OR: [
+            { routeId: null },
+            { routeId: route.id },
+          ],
+        },
+        data: {
+          status: "ASSIGNED",
+          routeId: route.id,
+          stopId,
+        },
+      });
+    }
+
+    await tx.route.update({
+      where: {
+        id: route.id,
+      },
+      data: {
+        name: routeName,
+        date: planning.date,
+        driverId: input.driverId || null,
+        plannedStartTime: planning.plannedStartTime,
+        timePerDropMinutes: planning.timePerDropMinutes,
+        customerSlotMinutes: planning.customerSlotMinutes,
+        startAddress: planning.startAddress,
+        startLatitude: planning.startLatitude,
+        startLongitude: planning.startLongitude,
+        finishAddress: planning.finishAddress,
+        finishLatitude: planning.finishLatitude,
+        finishLongitude: planning.finishLongitude,
+        firstLockedStopId: endpointLocks.firstLockedOrderId ? stopIdByOrderId.get(endpointLocks.firstLockedOrderId) || null : null,
+        lastLockedStopId: endpointLocks.lastLockedOrderId ? stopIdByOrderId.get(endpointLocks.lastLockedOrderId) || null : null,
+        totalMileage: null,
+        totalDuration: null,
+        history: {
+          create: {
+            action: "Draft route updated",
+            details: `Planner saved ${input.orders.length} stop${input.orders.length === 1 ? "" : "s"} back to this draft.`,
+          },
+        },
+      },
+    });
+  });
+
+  return calculateEtaSlots(
+    route.id,
     planning.plannedStartTime,
     planning.timePerDropMinutes,
     planning.customerSlotMinutes,
@@ -547,6 +882,16 @@ export async function optimiseRoute(routeId: string) {
   const orderedStopKeys = optimised.waypoints
     .slice(1, -1)
     .map((waypoint) => extractRouteXLStopKey(waypoint.name));
+  const expectedStopKeys = optimisableStops.map((stop) => routeXLStopKey(stop.id));
+  const orderedStopKeySet = new Set(orderedStopKeys);
+
+  if (
+    orderedStopKeySet.size !== orderedStopKeys.length ||
+    orderedStopKeys.length !== expectedStopKeys.length ||
+    expectedStopKeys.some((stopKey) => !orderedStopKeySet.has(stopKey))
+  ) {
+    throw new Error("RouteXL returned duplicate or missing stops. Please try optimising again.");
+  }
 
   const unlockedOrderIndexes = unlockedStops
     .map((stop) => stop.orderIndex)

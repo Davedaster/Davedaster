@@ -411,7 +411,7 @@ function RouteCard({ route, drivers }: { route: RouteListItem; drivers: DriverLi
           <BlockStack gap="250">
             <DriverSelect route={route} drivers={drivers} />
             {isDraft ? (
-              <InlineStack gap="200" wrap><Button url={`/app/edit-route/${route.id}`}>Edit Route</Button><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
+              <InlineStack gap="200" wrap><Button url={`/app?draftRouteId=${route.id}`}>Edit Route</Button><PackingListButton route={route} /><Form method="post"><input type="hidden" name="intent" value="publish" /><input type="hidden" name="routeId" value={route.id} /><Button submit variant="primary" disabled={!route.driverId}>Publish route and notify</Button></Form><DeleteRouteForm route={route} intent="deleteDraft" label="Delete draft" confirmLabel="this draft route" /></InlineStack>
             ) : canDeleteRoute ? (
               <InlineStack gap="200" wrap blockAlign="center"><Button url={`/app/routes/${route.id}`}>Open route</Button><PackingListButton route={route} />{canRetryFulfilment ? <FulfilRouteForm route={route} /> : null}<DeleteRouteForm route={route} intent="deleteTest" label="Delete route" confirmLabel="this route" /></InlineStack>
             ) : (

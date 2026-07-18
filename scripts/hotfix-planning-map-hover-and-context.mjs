@@ -10,6 +10,12 @@ function replaceOnce(source, label, from, to) {
 }
 
 let routeMap = readFileSync(routeMapPath, "utf8");
+let planning = readFileSync(planningPath, "utf8");
+
+if (routeMap.includes("onMapContextAction") && routeMap.includes("onPointContextAction") && planning.includes("onMapContextAction")) {
+  console.log("Planning map hover and right-click endpoint hotfix already covered.");
+  process.exit(0);
+}
 
 routeMap = replaceOnce(
   routeMap,
@@ -233,8 +239,6 @@ routeMap = replaceOnce(
 );
 
 writeFileSync(routeMapPath, routeMap);
-
-let planning = readFileSync(planningPath, "utf8");
 
 planning = replaceOnce(
   planning,

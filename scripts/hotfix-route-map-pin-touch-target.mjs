@@ -3,6 +3,15 @@ import { readFileSync, writeFileSync } from "node:fs";
 const routeMapPath = "app/components/RouteMap.tsx";
 let source = readFileSync(routeMapPath, "utf8");
 
+if (source.includes("onMapContextAction") && source.includes("onPointContextAction")) {
+  if (!source.includes("pinTouchTargetLayerIdRef")) {
+    throw new Error("RouteMap context action API is present, but the pin touch-target layer is missing. Update RouteMap directly instead of applying the legacy hotfix.");
+  }
+
+  console.log("Route map pin touch-target hotfix already covered.");
+  process.exit(0);
+}
+
 function replaceOnce(label, from, to) {
   if (source.includes(to)) {
     return;
