@@ -25,6 +25,7 @@ const SMS_SECTION_PATTERN = new RegExp(
 export function formatSmsBody(value: string) {
   const formatted = (value || "")
     .replace(/\r\n?/g, "\n")
+    .replace(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun), (?=\d{1,2} )/g, "$1 ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{2,}/g, "\n")
     .trim()
