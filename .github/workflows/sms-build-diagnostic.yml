@@ -1,0 +1,37 @@
+name: SMS Build Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/format-all-sms-professionally
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install
+        run: npm install
+      - name: Capture build output
+        id: build
+        shell: bash
+        run: |
+          set +e
+          npm run build > sms-build.log 2>&1
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          cat sms-build.log
+          exit 0
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: sms-build-log
+          path: sms-build.log
+          if-no-files-found: error
+      - name: Fail after upload
+        if: steps.build.outputs.exit_code != '0'
+        run: exit 1
