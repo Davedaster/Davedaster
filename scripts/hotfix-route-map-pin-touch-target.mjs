@@ -3,12 +3,45 @@ import { readFileSync, writeFileSync } from "node:fs";
 const routeMapPath = "app/components/RouteMap.tsx";
 let source = readFileSync(routeMapPath, "utf8");
 
+const singleClickRegistration = `    map.on("click", pinTouchTargetLayerId, handlePinClick);`;
+const duplicateClickRegistration = `${singleClickRegistration}\n    map.on("click", pinsLayerId, handlePinClick);`;
+const singleClickCleanup = `      map.off("click", pinTouchTargetLayerId, handlePinClick);`;
+const duplicateClickCleanup = `${singleClickCleanup}\n      map.off("click", pinsLayerId, handlePinClick);`;
+
+function enforceSinglePinSelectionHandler() {
+  let changed = false;
+
+  if (source.includes(duplicateClickRegistration)) {
+    source = source.replace(duplicateClickRegistration, singleClickRegistration);
+    changed = true;
+  } else if (!source.includes(singleClickRegistration)) {
+    throw new Error("Route map pin touch-target layer is present, but its single click handler could not be verified.");
+  }
+
+  if (source.includes(duplicateClickCleanup)) {
+    source = source.replace(duplicateClickCleanup, singleClickCleanup);
+    changed = true;
+  } else if (!source.includes(singleClickCleanup)) {
+    throw new Error("Route map pin touch-target cleanup could not be verified.");
+  }
+
+  return changed;
+}
+
 if (source.includes("onMapContextAction") && source.includes("onPointContextAction")) {
   if (!source.includes("pinTouchTargetLayerIdRef")) {
     throw new Error("RouteMap context action API is present, but the pin touch-target layer is missing. Update RouteMap directly instead of applying the legacy hotfix.");
   }
 
-  console.log("Route map pin touch-target hotfix already covered.");
+  const changed = enforceSinglePinSelectionHandler();
+
+  if (changed) {
+    writeFileSync(routeMapPath, source);
+    console.log("Route map pin touch-target selection hotfix applied.");
+  } else {
+    console.log("Route map pin touch-target selection hotfix already covered.");
+  }
+
   process.exit(0);
 }
 
@@ -51,7 +84,7 @@ replaceOnce(
 replaceOnce(
   "register touch-target click",
   `    map.on("click", pinsLayerId, handlePinClick);\n    map.on("click", pinLabelLayerId, handlePinClick);`,
-  `    map.on("click", pinTouchTargetLayerId, handlePinClick);\n    map.on("click", pinsLayerId, handlePinClick);\n    map.on("click", pinLabelLayerId, handlePinClick);`,
+  singleClickRegistration,
 );
 
 replaceOnce(
@@ -63,7 +96,7 @@ replaceOnce(
 replaceOnce(
   "remove touch-target click",
   `      map.off("click", pinsLayerId, handlePinClick);\n      map.off("click", pinLabelLayerId, handlePinClick);`,
-  `      map.off("click", pinTouchTargetLayerId, handlePinClick);\n      map.off("click", pinsLayerId, handlePinClick);\n      map.off("click", pinLabelLayerId, handlePinClick);`,
+  singleClickCleanup,
 );
 
 replaceOnce(
