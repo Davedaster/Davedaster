@@ -17,8 +17,7 @@ import { getAppCredentials, hasRouteXLCredentials } from "../lib/appCredentials.
 import { getRoutePlanningDefaults } from "../lib/routeSettings.server";
 import { buildRouteXLLocation, optimiseLocations } from "../lib/routexl.server";
 import { authenticate } from "../shopify.server";
-import { assertOrdersAvailableForRoute } from "../lib/routeAllocations.server";
-import { calculateEtaSlots } from "../lib/routeDrafts.server";
+import { updateRouteDraft } from "../lib/routeDrafts.server";
 import { getDeliveryOrders, type DeliveryOrder } from "../lib/shopifyOrders.server";
 
 type Stop = { id: string; orderNumber: string; customerName: string; postcode: string; eta: string };
@@ -60,20 +59,28 @@ function routeStops(route: NonNullable<DraftRoute>) { return route.stops.flatMap
 async function selectedOrdersForAction(admin: Awaited<ReturnType<typeof authenticate.admin>>["admin"], ids: string[], route: NonNullable<DraftRoute>) { const shopifyOrders = await getDeliveryOrders(admin); const settings = await getRoutePlanningDefaults(); const byId = new Map((await addFulfilByDates(mergeOrders(shopifyOrders, draftOrders(route)), settings.fulfilmentWindowDays ?? 7, settings.useWorkingDaysOnly ?? true)).map((order) => [order.id, order])); return ids.map((id) => byId.get(id)).filter((order): order is DeliveryOrder => Boolean(order)); }
 
 async function replaceDraftRoute(input: { route: NonNullable<DraftRoute>; orders: DeliveryOrder[]; name: string; date: string; start: string; dropMinutes: number; slotMinutes: number; driverId: string | null; }) {
-  if (input.route.status !== "DRAFT") throw new Error("Only draft routes can be edited.");
-  await assertOrdersAvailableForRoute(input.orders.filter((order) => order.orderSource !== "manual").map((order) => order.id), input.route.id);
-  const groupIds = input.route.stops.map((stop) => stop.deliveryGroupId).filter((id): id is string => Boolean(id));
   const routeName = input.name.trim() || input.route.name;
   const routeDate = dateInput(input.date);
   const dropMinutes = Math.max(1, Math.round(input.dropMinutes || 10));
   const slotMinutes = Math.max(15, Math.round(input.slotMinutes || 60));
-  await prisma.$transaction(async (tx) => {
-    await tx.stop.deleteMany({ where: { routeId: input.route.id } });
-    if (groupIds.length) await tx.deliveryGroup.deleteMany({ where: { id: { in: groupIds } } });
-    await tx.route.update({ where: { id: input.route.id }, data: { name: routeName, date: parseDate(routeDate), driverId: input.driverId || null, plannedStartTime: input.start || "05:00", timePerDropMinutes: dropMinutes, customerSlotMinutes: slotMinutes, startAddress: input.route.startAddress || SHOP.address, startLatitude: input.route.startLatitude ?? SHOP.latitude, startLongitude: input.route.startLongitude ?? SHOP.longitude, finishAddress: input.route.finishAddress || SHOP.address, finishLatitude: input.route.finishLatitude ?? SHOP.latitude, finishLongitude: input.route.finishLongitude ?? SHOP.longitude, totalMileage: null, totalDuration: null, stops: { create: input.orders.map((order, index) => ({ orderIndex: index + 1, estimatedArrival: estimatedArrival(routeDate, input.start || "05:00", index * dropMinutes), deliveryGroup: { create: { address: order.formattedAddress || order.addressSummary, formattedAddress: order.formattedAddress, postcode: order.postcode, latitude: order.latitude, longitude: order.longitude, addressStatus: order.addressStatus, addressSource: order.orderSource === "manual" ? "manual" : order.hasManualOverride ? "manual" : "getaddress", addressConfidence: order.addressConfidence, manualAddress: order.manualAddress, useManualAddress: order.hasManualOverride || order.orderSource === "manual", orders: { create: { shopifyOrderId: order.id, shopifyOrderNumber: order.name, orderSource: order.orderSource || "shopify", customerName: order.customerName, customerEmail: order.email, customerPhone: order.phone, postcode: order.postcode, lineItemSummary: order.lineItemSummary } } } } })) }, history: { create: { action: "Draft route edited", details: `Edited on map planner with ${input.orders.length} stops.` } } } });
+  const updatedRoute = await updateRouteDraft({
+    routeId: input.route.id,
+    orders: input.orders,
+    routeName,
+    routeDate,
+    plannedStartTime: input.start || "05:00",
+    timePerDropMinutes: dropMinutes,
+    customerSlotMinutes: slotMinutes,
+    startAddress: input.route.startAddress || SHOP.address,
+    startLatitude: input.route.startLatitude ?? SHOP.latitude,
+    startLongitude: input.route.startLongitude ?? SHOP.longitude,
+    finishAddress: input.route.finishAddress || SHOP.address,
+    finishLatitude: input.route.finishLatitude ?? SHOP.latitude,
+    finishLongitude: input.route.finishLongitude ?? SHOP.longitude,
+    driverId: input.driverId,
   });
-  await calculateEtaSlots(input.route.id, input.start || "05:00", dropMinutes, slotMinutes);
-  return routeName;
+
+  return updatedRoute?.name || routeName;
 }
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {

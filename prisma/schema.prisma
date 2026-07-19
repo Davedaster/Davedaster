@@ -31,220 +31,222 @@ model Session {
 }
 
 model Driver {
-  id                String   @id @default(cuid())
-  name              String
-  photoUrl          String?
-  phoneNumber       String?
-  email             String?
-  vehicleName       String?
+  id                  String   @id @default(cuid())
+  name                String
+  photoUrl            String?
+  phoneNumber         String?
+  email               String?
+  vehicleName         String?
   vehicleRegistration String?
-  vehicleType       String?
-  fuelCardNumber    String?
-  fuelCardProvider  String?
-  startAddress      String?
-  endAddress        String?
-  isActive          Boolean  @default(true)
-  notes             String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  routes            Route[]
+  vehicleType         String?
+  fuelCardNumber      String?
+  fuelCardProvider    String?
+  startAddress        String?
+  endAddress          String?
+  isActive            Boolean  @default(true)
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  routes              Route[]
 }
 
 model Route {
-  id                String   @id @default(cuid())
-  name              String
-  date              DateTime
-  status            String   @default("DRAFT") // DRAFT, PUBLISHED, NOTIFICATIONS_SENT, OUT_FOR_DELIVERY, COMPLETED, CANCELLED
-  driverId          String?
-  driver            Driver?  @relation(fields: [driverId], references: [id])
-  driverAccessToken String?  @unique
+  id                         String         @id @default(cuid())
+  name                       String
+  date                       DateTime
+  status                     String         @default("DRAFT") // DRAFT, PUBLISHED, NOTIFICATIONS_SENT, OUT_FOR_DELIVERY, COMPLETED, CANCELLED
+  driverId                   String?
+  driver                     Driver?        @relation(fields: [driverId], references: [id])
+  driverAccessToken          String?        @unique
   driverAccessTokenCreatedAt DateTime?
-  driverRouteLinkSentAt DateTime?
-  startAddress      String?
-  startLatitude     Float?
-  startLongitude    Float?
-  finishAddress     String?
-  finishLatitude    Float?
-  finishLongitude   Float?
-  plannedStartTime  String   @default("05:00")
-  timePerDropMinutes Int     @default(10)
-  customerSlotMinutes Int    @default(60)
-  totalMileage      Float?
-  totalDuration     Int?     // in seconds or minutes
-  notificationsSent Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  stops             Stop[]
-  history           RouteHistory[]
-  returnTickets     ReturnTicket[]
+  driverRouteLinkSentAt      DateTime?
+  startAddress               String?
+  startLatitude              Float?
+  startLongitude             Float?
+  finishAddress              String?
+  finishLatitude             Float?
+  finishLongitude            Float?
+  firstLockedStopId          String?
+  lastLockedStopId           String?
+  plannedStartTime           String         @default("05:00")
+  timePerDropMinutes         Int            @default(10)
+  customerSlotMinutes        Int            @default(60)
+  totalMileage               Float?
+  totalDuration              Int? // in seconds or minutes
+  notificationsSent          Boolean        @default(false)
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  stops                      Stop[]
+  history                    RouteHistory[]
+  returnTickets              ReturnTicket[]
 }
 
 model Stop {
-  id                String   @id @default(cuid())
-  routeId           String
-  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  orderIndex        Int
-  isLocked          Boolean  @default(false)
-  estimatedArrival  DateTime?
-  actualArrival     DateTime?
-  status            String   @default("PENDING") // PENDING, ARRIVED, DELIVERED, FAILED
-  deliveryGroupId   String?
-  deliveryGroup     DeliveryGroup? @relation(fields: [deliveryGroupId], references: [id])
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  returnTickets     ReturnTicket[]
+  id               String         @id @default(cuid())
+  routeId          String
+  route            Route          @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  orderIndex       Int
+  isLocked         Boolean        @default(false)
+  estimatedArrival DateTime?
+  actualArrival    DateTime?
+  status           String         @default("PENDING") // PENDING, ARRIVED, DELIVERED, FAILED
+  deliveryGroupId  String?
+  deliveryGroup    DeliveryGroup? @relation(fields: [deliveryGroupId], references: [id])
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  returnTickets    ReturnTicket[]
 }
 
 model DeliveryGroup {
-  id                String   @id @default(cuid())
-  address           String
-  manualAddress     String?
-  useManualAddress  Boolean  @default(false)
-  postcode          String?
-  latitude          Float?
-  longitude         Float?
-  addressStatus     String   @default("NEEDS_LOCATION_CHECK") // READY, NEEDS_ADDRESS, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
-  addressSource     String   @default("none") // getaddress, manual, none
-  addressConfidence String   @default("LOW")
-  formattedAddress  String?
-  manualPinLatitude Float?
+  id                 String       @id @default(cuid())
+  address            String
+  manualAddress      String?
+  useManualAddress   Boolean      @default(false)
+  postcode           String?
+  latitude           Float?
+  longitude          Float?
+  addressStatus      String       @default("NEEDS_LOCATION_CHECK") // READY, NEEDS_ADDRESS, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
+  addressSource      String       @default("none") // getaddress, manual, none
+  addressConfidence  String       @default("LOW")
+  formattedAddress   String?
+  manualPinLatitude  Float?
   manualPinLongitude Float?
-  stops             Stop[]
-  orders            OrderStop[]
-  proofPhotoUrl     String?
-  proofPhotos       ProofPhoto[]
-  deliveryNote      String?
-  safePlaceNote     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  stops              Stop[]
+  orders             OrderStop[]
+  proofPhotoUrl      String?
+  proofPhotos        ProofPhoto[]
+  deliveryNote       String?
+  safePlaceNote      String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 }
 
 model ProofPhoto {
-  id                String   @id @default(cuid())
-  deliveryGroupId   String
-  deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
-  url               String
-  label             String?
-  createdAt         DateTime @default(now())
+  id              String        @id @default(cuid())
+  deliveryGroupId String
+  deliveryGroup   DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  url             String
+  label           String?
+  createdAt       DateTime      @default(now())
 }
 
 model OrderStop {
-  id                String   @id @default(cuid())
-  deliveryGroupId   String
-  deliveryGroup     DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
-  shopifyOrderId    String
+  id                 String        @id @default(cuid())
+  deliveryGroupId    String
+  deliveryGroup      DeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  shopifyOrderId     String
   shopifyOrderNumber String
-  orderSource       String   @default("shopify") // shopify, manual, return
-  customerName      String?
-  customerEmail     String?
-  customerPhone     String?
-  postcode          String?
-  lineItemSummary   String?
-  trackingCode      String?  @unique
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  orderSource        String        @default("shopify") // shopify, manual, return
+  customerName       String?
+  customerEmail      String?
+  customerPhone      String?
+  postcode           String?
+  lineItemSummary    String?
+  trackingCode       String?       @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 }
 
 model ReturnTicket {
-  id                String   @id @default(cuid())
-  reference         String   @unique
-  status            String   @default("OPEN") // OPEN, ASSIGNED, OUT_FOR_COLLECTION, COLLECTED, COULD_NOT_COLLECT, CANCELLED
-  routeId           String?
-  route             Route?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
-  stopId            String?
-  stop              Stop?    @relation(fields: [stopId], references: [id], onDelete: SetNull)
-  originalOrderId   String?
-  originalOrderCreatedAt DateTime?
-  returnRequestedAt DateTime @default(now())
-  orderNumber       String?
-  customerName      String
-  customerEmail     String?
-  customerPhone     String?
-  address           String
-  postcode          String?
-  latitude          Float?
-  longitude         Float?
-  notes             String?
-  searchText        String
-  collectionPhotoUrl String?
-  customerSignature String?
-  driverNote        String?
-  collectionProofToken String? @unique
+  id                           String             @id @default(cuid())
+  reference                    String             @unique
+  status                       String             @default("OPEN") // OPEN, ASSIGNED, OUT_FOR_COLLECTION, COLLECTED, COULD_NOT_COLLECT, CANCELLED
+  routeId                      String?
+  route                        Route?             @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  stopId                       String?
+  stop                         Stop?              @relation(fields: [stopId], references: [id], onDelete: SetNull)
+  originalOrderId              String?
+  originalOrderCreatedAt       DateTime?
+  returnRequestedAt            DateTime           @default(now())
+  orderNumber                  String?
+  customerName                 String
+  customerEmail                String?
+  customerPhone                String?
+  address                      String
+  postcode                     String?
+  latitude                     Float?
+  longitude                    Float?
+  notes                        String?
+  searchText                   String
+  collectionPhotoUrl           String?
+  customerSignature            String?
+  driverNote                   String?
+  collectionProofToken         String?            @unique
   collectionCompletedSmsSentAt DateTime?
-  collectedAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  lines             ReturnTicketLine[]
+  collectedAt                  DateTime?
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+  lines                        ReturnTicketLine[]
 }
 
 model ReturnTicketLine {
-  id                String   @id @default(cuid())
+  id                String       @id @default(cuid())
   returnTicketId    String
   returnTicket      ReturnTicket @relation(fields: [returnTicketId], references: [id], onDelete: Cascade)
   itemName          String
-  quantityExpected  Int      @default(1)
-  quantityCollected Int      @default(0)
-  isExtraItem       Boolean  @default(false)
+  quantityExpected  Int          @default(1)
+  quantityCollected Int          @default(0)
+  isExtraItem       Boolean      @default(false)
   conditionNote     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 }
 
 model AddressOverride {
-  id                 String   @id @default(cuid())
-  shopifyOrderId      String   @unique
-  shopifyOrderName    String?
-  manualAddress       String
-  postcode            String?
-  latitude            Float?
-  longitude           Float?
-  notes               String?
-  addressStatus       String   @default("READY") // READY, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id               String   @id @default(cuid())
+  shopifyOrderId   String   @unique
+  shopifyOrderName String?
+  manualAddress    String
+  postcode         String?
+  latitude         Float?
+  longitude        Float?
+  notes            String?
+  addressStatus    String   @default("READY") // READY, NEEDS_LOCATION_CHECK, MANUAL_PIN_SET
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model AreaFilter {
-  id                String   @id @default(cuid())
-  name              String   // Northern, Central, etc.
-  postcodePrefixes  String   // Comma separated list like "TR, PL"
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id               String   @id @default(cuid())
+  name             String // Northern, Central, etc.
+  postcodePrefixes String // Comma separated list like "TR, PL"
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model Setting {
-  id                String   @id @default(cuid())
-  key               String   @unique
-  value             String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model RouteHistory {
-  id                String   @id @default(cuid())
-  routeId           String
-  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  action            String   // Route created, Orders added, etc.
-  details           String?
-  createdAt         DateTime @default(now())
+  id        String   @id @default(cuid())
+  routeId   String
+  route     Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  action    String // Route created, Orders added, etc.
+  details   String?
+  createdAt DateTime @default(now())
 }
 
 model SmsDelivery {
-  id                String   @id @default(cuid())
-  twilioSid         String?  @unique
-  recipient         String
-  sender            String
-  bodyHash          String
-  bodyPreview       String
-  status            String   @default("CREATED")
-  errorCode         String?
-  errorMessage      String?
-  numSegments       Int?
-  duplicateKey      String   @unique
-  submittedAt       DateTime?
-  deliveredAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id           String    @id @default(cuid())
+  twilioSid    String?   @unique
+  recipient    String
+  sender       String
+  bodyHash     String
+  bodyPreview  String
+  status       String    @default("CREATED")
+  errorCode    String?
+  errorMessage String?
+  numSegments  Int?
+  duplicateKey String    @unique
+  submittedAt  DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([recipient, createdAt])
   @@index([status, createdAt])

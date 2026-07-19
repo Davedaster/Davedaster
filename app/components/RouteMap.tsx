@@ -21,6 +21,15 @@ type RouteEndpoint = {
   status: "START" | "FINISH";
 };
 
+type MapContextLocation = {
+  address: string;
+  latitude: number;
+  longitude: number;
+};
+
+type MapContextAction = "setStart" | "setFinish";
+type PointContextAction = "setFirstDrop" | "setLastDrop" | "clearFixedPosition";
+
 type RouteMapProps = {
   points: RouteMapPoint[];
   height?: number;
@@ -28,6 +37,8 @@ type RouteMapProps = {
   badge?: string;
   showRouteLine?: boolean;
   onSelectPoint?: (point: RouteMapPoint) => void;
+  onMapContextAction?: (action: MapContextAction, location: MapContextLocation) => void;
+  onPointContextAction?: (action: PointContextAction, point: RouteMapPoint) => void;
   apiKey?: string | null;
   routeStart?: RouteEndpoint | null;
   routeFinish?: RouteEndpoint | null;
@@ -36,6 +47,13 @@ type RouteMapProps = {
 type MappablePoint = RouteMapPoint & { latitude: number; longitude: number };
 type MappableEndpoint = RouteEndpoint & { id: string; latitude: number; longitude: number };
 type RouteCoordinatePoint = { latitude: number; longitude: number };
+type ContextMenuState = {
+  x: number;
+  y: number;
+  latitude: number;
+  longitude: number;
+  pointId: string | null;
+};
 type TomTomMapRef = any;
 type TomTomPopupRef = any;
 type TooltipTone = "default" | "success" | "warning" | "critical";
@@ -331,6 +349,8 @@ function buildFeatureCollection(points: MappablePoint[]) {
         id: point.id,
         label: cleanPinLabel(point, index + 1),
         colour: markerColour(point),
+        markerRadius: cleanPinLabel(point, index + 1).length > 3 ? 25 : 18,
+        labelSize: cleanPinLabel(point, index + 1).length > 3 ? 10 : 11,
         tooltip: tooltipHtml(point),
       },
       geometry: {
@@ -550,6 +570,25 @@ function tomTomGeocodeUrl(address: string, apiKey: string) {
   return `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(address)}.json?${params.toString()}`;
 }
 
+function tomTomReverseGeocodeUrl(latitude: number, longitude: number, apiKey: string) {
+  const params = new URLSearchParams({
+    key: apiKey,
+    radius: "80",
+  });
+
+  return `https://api.tomtom.com/search/2/reverseGeocode/${latitude},${longitude}.json?${params.toString()}`;
+}
+
+function coordinateAddressFallback(latitude: number, longitude: number) {
+  return `Map point ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+}
+
+function addressFromReverseGeocodePayload(payload: any) {
+  const address = payload?.addresses?.[0]?.address;
+
+  return address?.freeformAddress || address?.streetNameAndNumber || address?.municipality || "";
+}
+
 function coordinatesFromTomTomRoute(payload: any) {
   const legs = payload?.routes?.[0]?.legs || [];
   const coordinates: number[][] = [];
@@ -623,6 +662,8 @@ export function RouteMap({
   badge,
   showRouteLine = true,
   onSelectPoint,
+  onMapContextAction,
+  onPointContextAction,
   apiKey,
   routeStart,
   routeFinish,
@@ -637,6 +678,7 @@ export function RouteMap({
   const clustersLayerIdRef = useRef(`clusters-${Math.random().toString(36).slice(2)}`);
   const clusterCountLayerIdRef = useRef(`cluster-count-${Math.random().toString(36).slice(2)}`);
   const pinsLayerIdRef = useRef(`pins-${Math.random().toString(36).slice(2)}`);
+  const pinTouchTargetLayerIdRef = useRef(`pin-touch-targets-${Math.random().toString(36).slice(2)}`);
   const pinLabelLayerIdRef = useRef(`pin-labels-${Math.random().toString(36).slice(2)}`);
   const routeLayerIdRef = useRef(`route-layer-${Math.random().toString(36).slice(2)}`);
   const endpointPinsLayerIdRef = useRef(`route-endpoint-pins-${Math.random().toString(36).slice(2)}`);
@@ -646,6 +688,8 @@ export function RouteMap({
   const [roadRouteCoordinates, setRoadRouteCoordinates] = useState<number[][]>([]);
   const [resolvedStart, setResolvedStart] = useState<MappableEndpoint | null>(null);
   const [resolvedFinish, setResolvedFinish] = useState<MappableEndpoint | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [contextMenuLoading, setContextMenuLoading] = useState(false);
   const mappablePoints = useMemo(() => normalisedPoints(points), [points]);
   const selectedPoints = useMemo(() => selectedRoutePoints(mappablePoints), [mappablePoints]);
   const activeApiKey = apiKey || loadedApiKey;
@@ -656,6 +700,67 @@ export function RouteMap({
     ...(resolvedFinish ? [resolvedFinish] : []),
   ], [resolvedStart, resolvedFinish, selectedPoints]);
   const routePathKey = useMemo(() => routeRequestKey(routePathPoints), [routePathPoints]);
+
+  const resolveContextLocation = async (menu: ContextMenuState): Promise<MapContextLocation> => {
+    const fallback = coordinateAddressFallback(menu.latitude, menu.longitude);
+
+    if (!activeApiKey) {
+      return {
+        address: fallback,
+        latitude: menu.latitude,
+        longitude: menu.longitude,
+      };
+    }
+
+    try {
+      const response = await fetch(tomTomReverseGeocodeUrl(menu.latitude, menu.longitude, activeApiKey));
+
+      if (!response.ok) {
+        throw new Error(`Reverse geocode failed with status ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const address = addressFromReverseGeocodePayload(payload).trim();
+
+      return {
+        address: address || fallback,
+        latitude: menu.latitude,
+        longitude: menu.longitude,
+      };
+    } catch {
+      return {
+        address: fallback,
+        latitude: menu.latitude,
+        longitude: menu.longitude,
+      };
+    }
+  };
+
+  const handleMapContextAction = async (action: MapContextAction) => {
+    if (!contextMenu) {
+      return;
+    }
+
+    setContextMenuLoading(true);
+    const location = await resolveContextLocation(contextMenu);
+    setContextMenuLoading(false);
+    setContextMenu(null);
+    onMapContextAction?.(action, location);
+  };
+
+  const handlePointContextAction = (action: PointContextAction) => {
+    if (!contextMenu?.pointId) {
+      return;
+    }
+
+    const point = mappablePoints.find((candidate) => candidate.id === contextMenu.pointId);
+
+    setContextMenu(null);
+
+    if (point) {
+      onPointContextAction?.(action, point);
+    }
+  };
 
   useEffect(() => {
     if (apiKey) {
@@ -806,6 +911,7 @@ export function RouteMap({
     const clustersLayerId = clustersLayerIdRef.current;
     const clusterCountLayerId = clusterCountLayerIdRef.current;
     const pinsLayerId = pinsLayerIdRef.current;
+    const pinTouchTargetLayerId = pinTouchTargetLayerIdRef.current;
     const pinLabelLayerId = pinLabelLayerIdRef.current;
     const routeLayerId = routeLayerIdRef.current;
     const endpointPinsLayerId = endpointPinsLayerIdRef.current;
@@ -831,6 +937,7 @@ export function RouteMap({
     removeLayer(clustersLayerId);
     removeLayer(pinLabelLayerId);
     removeLayer(pinsLayerId);
+    removeLayer(pinTouchTargetLayerId);
     removeLayer(endpointLabelLayerId);
     removeLayer(endpointPinsLayerId);
     removeLayer(routeLayerId);
@@ -904,13 +1011,25 @@ export function RouteMap({
     });
 
     map.addLayer({
+      id: pinTouchTargetLayerId,
+      type: "circle",
+      source: sourceId,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-radius": 30,
+        "circle-color": "#000000",
+        "circle-opacity": 0.001,
+      },
+    });
+
+    map.addLayer({
       id: pinsLayerId,
       type: "circle",
       source: sourceId,
       filter: ["!", ["has", "point_count"]],
       paint: {
         "circle-color": ["get", "colour"],
-        "circle-radius": 18,
+        "circle-radius": ["get", "markerRadius"],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": 3,
         "circle-opacity": 0.98,
@@ -924,7 +1043,7 @@ export function RouteMap({
       filter: ["!", ["has", "point_count"]],
       layout: {
         "text-field": ["get", "label"],
-        "text-size": 11,
+        "text-size": ["get", "labelSize"],
         "text-allow-overlap": true,
       },
       paint: {
@@ -1000,6 +1119,23 @@ export function RouteMap({
       }
     };
 
+    const handleContextMenu = (event: any) => {
+      event.preventDefault?.();
+      event.originalEvent?.preventDefault?.();
+      popupRef.current?.remove();
+
+      const features = map.queryRenderedFeatures(event.point, { layers: [pinsLayerId, pinLabelLayerId, pinTouchTargetLayerId] });
+      const pointId = features[0]?.properties?.id || null;
+
+      setContextMenu({
+        x: event.point.x,
+        y: event.point.y,
+        latitude: event.lngLat.lat,
+        longitude: event.lngLat.lng,
+        pointId,
+      });
+    };
+
     const showPopupForFeature = async (feature: any) => {
       if (!feature) {
         return;
@@ -1018,7 +1154,10 @@ export function RouteMap({
         return true;
       }
 
-      return !window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches;
+      const canHover = window.matchMedia("(hover: hover), (any-hover: hover)").matches;
+      const hasFinePointer = window.matchMedia("(pointer: fine), (any-pointer: fine)").matches;
+
+      return canHover || hasFinePointer;
     };
 
     const showPopup = async (event: any) => {
@@ -1033,6 +1172,7 @@ export function RouteMap({
 
     const handleMapMovement = () => {
       hidePopup();
+      setContextMenu(null);
     };
 
     const handleClusterEnter = () => {
@@ -1044,9 +1184,13 @@ export function RouteMap({
     };
 
     map.on("click", clustersLayerId, handleClusterClick);
+    map.on("click", pinTouchTargetLayerId, handlePinClick);
     map.on("click", pinsLayerId, handlePinClick);
+    map.on("contextmenu", handleContextMenu);
     map.on("mouseenter", clustersLayerId, handleClusterEnter);
     map.on("mouseleave", clustersLayerId, handleClusterLeave);
+    map.on("mouseenter", pinTouchTargetLayerId, handleClusterEnter);
+    map.on("mouseleave", pinTouchTargetLayerId, handleClusterLeave);
     map.on("mouseenter", pinsLayerId, showPopup);
     map.on("mouseleave", pinsLayerId, hidePopup);
     map.on("mouseenter", endpointPinsLayerId, showPopup);
@@ -1071,9 +1215,13 @@ export function RouteMap({
 
     return () => {
       map.off("click", clustersLayerId, handleClusterClick);
+      map.off("click", pinTouchTargetLayerId, handlePinClick);
       map.off("click", pinsLayerId, handlePinClick);
+      map.off("contextmenu", handleContextMenu);
       map.off("mouseenter", clustersLayerId, handleClusterEnter);
       map.off("mouseleave", clustersLayerId, handleClusterLeave);
+      map.off("mouseenter", pinTouchTargetLayerId, handleClusterEnter);
+      map.off("mouseleave", pinTouchTargetLayerId, handleClusterLeave);
       map.off("mouseenter", pinsLayerId, showPopup);
       map.off("mouseleave", pinsLayerId, hidePopup);
       map.off("mouseenter", endpointPinsLayerId, showPopup);
@@ -1092,6 +1240,7 @@ export function RouteMap({
   }, []);
 
   const showTitleBadge = title.trim().length > 0 && title !== "Live planning map";
+  const contextPoint = contextMenu?.pointId ? mappablePoints.find((point) => point.id === contextMenu.pointId) : null;
 
   return (
     <div className="bpd-tomtom-map" style={{ display: "grid", gap: 10, overscrollBehavior: "contain" }}>
@@ -1118,6 +1267,38 @@ export function RouteMap({
           </div>
         </div>
 
+        {contextMenu ? (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1px solid #d0d5dd",
+              borderRadius: 8,
+              boxShadow: "0 12px 28px rgba(15,23,42,0.22)",
+              display: "grid",
+              gap: 4,
+              left: Math.min(contextMenu.x, Math.max(0, (mapElementRef.current?.clientWidth || 260) - 190)),
+              minWidth: 180,
+              padding: 6,
+              position: "absolute",
+              top: Math.min(contextMenu.y, Math.max(0, height - 150)),
+              zIndex: 8,
+            }}
+          >
+            {contextPoint ? (
+              <>
+                <button type="button" onClick={() => handlePointContextAction("setFirstDrop")} style={{ background: "transparent", border: 0, borderRadius: 6, color: "#323841", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 700, padding: "8px 10px", textAlign: "left" }}>Set first drop</button>
+                <button type="button" onClick={() => handlePointContextAction("setLastDrop")} style={{ background: "transparent", border: 0, borderRadius: 6, color: "#323841", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 700, padding: "8px 10px", textAlign: "left" }}>Set last drop</button>
+                <button type="button" onClick={() => handlePointContextAction("clearFixedPosition")} style={{ background: "transparent", border: 0, borderRadius: 6, color: "#323841", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 700, padding: "8px 10px", textAlign: "left" }}>Remove fixed position</button>
+              </>
+            ) : (
+              <>
+                <button type="button" disabled={contextMenuLoading} onClick={() => handleMapContextAction("setStart")} style={{ background: "transparent", border: 0, borderRadius: 6, color: "#323841", cursor: contextMenuLoading ? "wait" : "pointer", font: "inherit", fontSize: 13, fontWeight: 700, padding: "8px 10px", textAlign: "left" }}>Set route start</button>
+                <button type="button" disabled={contextMenuLoading} onClick={() => handleMapContextAction("setFinish")} style={{ background: "transparent", border: 0, borderRadius: 6, color: "#323841", cursor: contextMenuLoading ? "wait" : "pointer", font: "inherit", fontSize: 13, fontWeight: 700, padding: "8px 10px", textAlign: "left" }}>Set route finish</button>
+              </>
+            )}
+          </div>
+        ) : null}
+
         {!activeApiKey ? (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", padding: 24, textAlign: "center", color: "#323841" }}>
             <div style={{ background: "rgba(255,255,255,0.95)", borderRadius: 14, padding: 18, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
@@ -1135,4 +1316,4 @@ export function RouteMap({
   );
 }
 
-export type { RouteMapPoint, RouteEndpoint };
+export type { RouteMapPoint, RouteEndpoint, MapContextAction, MapContextLocation, PointContextAction };
