@@ -25,8 +25,12 @@ const files = [
         to: `  }, [etaPreviewFetcher.data, etaPreviewKey]);`,
       },
       {
-        from: `    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);`,
-        to: `    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);\n    formData.set("requestKey", etaPreviewKey);`,
+        from: `  const buildSaveFormData = () => {\n    const formData = new FormData();\n    formData.set("intent", "saveRoute");\n    formData.set("draftRouteId", draftRoute?.id || "");\n    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);\n    formData.set("requestKey", etaPreviewKey);\n    formData.set("driverId", selectedDriverId);`,
+        to: `  const buildSaveFormData = () => {\n    const formData = new FormData();\n    formData.set("intent", "saveRoute");\n    formData.set("draftRouteId", draftRoute?.id || "");\n    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);\n    formData.set("driverId", selectedDriverId);`,
+      },
+      {
+        from: `  const submitEtaPreview = () => {\n    if (!stops.length) {\n      return;\n    }\n\n    const formData = new FormData();\n    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);\n    formData.set("routeDate", routeDate);`,
+        to: `  const submitEtaPreview = () => {\n    if (!stops.length) {\n      return;\n    }\n\n    const formData = new FormData();\n    formData.set("selectedOrderIds", selectedOrderIds);\n    formData.set("manualOrdersJson", manualOrdersJson);\n    formData.set("requestKey", etaPreviewKey);\n    formData.set("routeDate", routeDate);`,
       },
     ],
   },
