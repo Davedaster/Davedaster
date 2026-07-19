@@ -161,6 +161,13 @@ replaceOnce(
 
 replaceOnce(
   "senders",
+  "recognise configurable help text",
+  `  if (!compliantBody.toLowerCase().includes(SMS_HELP_TEXT.toLowerCase())) {`,
+  `  if (!/(?:^|\\s)(?:help:|need help\\? call)\\s*/i.test(compliantBody)) {`,
+);
+
+replaceOnce(
+  "senders",
   "format all outgoing SMS",
   `  const messageBody = input.includeHelpText === false\n    ? (input.message.body || "").trim()\n    : withSmsHelpText(input.message.body);`,
   `  const messageBody = formatSmsBody(input.includeHelpText === false\n    ? (input.message.body || "").trim()\n    : withSmsHelpText(input.message.body));`,
@@ -182,9 +189,16 @@ replaceOnce(
 
 replaceOnce(
   "driver",
+  "add compact driver SMS date",
+  `function formatDate(value: Date | string) {\n  return new Intl.DateTimeFormat("en-GB", {\n    weekday: "long",\n    day: "2-digit",\n    month: "long",\n    year: "numeric",\n    timeZone: "Europe/London",\n  }).format(new Date(value));\n}`,
+  `function formatDate(value: Date | string) {\n  return new Intl.DateTimeFormat("en-GB", {\n    weekday: "long",\n    day: "2-digit",\n    month: "long",\n    year: "numeric",\n    timeZone: "Europe/London",\n  }).format(new Date(value));\n}\n\nfunction formatDriverSmsDate(value: Date | string) {\n  return new Intl.DateTimeFormat("en-GB", {\n    weekday: "short",\n    day: "numeric",\n    month: "short",\n    timeZone: "Europe/London",\n  }).format(new Date(value));\n}`,
+);
+
+replaceOnce(
+  "driver",
   "short driver route SMS",
   `  const smsBody = \`Bathroom Panels Direct: Driver route \${route.name} is ready for \${formatDate(route.date)}. Start \${formatTime(route.plannedStartTime)}. Open driver POD: \${routeUrl}. Need help? Call 01803 222784. Reply STOP to unsubscribe.\`;`,
-  `  const smsBody = \`Bathroom Panels Direct\\nDriver route ready\\n\${formatDate(route.date)}, start \${formatTime(route.plannedStartTime)}\\nOpen POD:\\n\${routeUrl}\`;`,
+  `  const smsBody = \`Bathroom Panels Direct\\nDriver route ready\\n\${formatDriverSmsDate(route.date)}, start \${formatTime(route.plannedStartTime)}\\nOpen POD:\\n\${routeUrl}\`;`,
 );
 
 replaceOnce(
