@@ -1,10 +1,10 @@
 const SMS_SECTION_MARKERS = [
-  "ETA:",
   "New ETA:",
+  "ETA:",
+  "Reason/details:",
+  "Details:",
   "Track:",
   "Proof:",
-  "Details:",
-  "Reason/details:",
   "Open POD:",
   "Please support our family business by leaving us a review:",
   "Help:",
@@ -17,19 +17,20 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const SMS_SECTION_PATTERN = new RegExp(
+  `\\s*(${SMS_SECTION_MARKERS.map(escapeRegExp).join("|")})`,
+  "gi",
+);
+
 export function formatSmsBody(value: string) {
-  let formatted = (value || "")
+  const formatted = (value || "")
     .replace(/\r\n?/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{2,}/g, "\n")
-    .trim();
-
-  for (const marker of SMS_SECTION_MARKERS) {
-    const pattern = new RegExp(`[ \\t]*(?:\\n[ \\t]*)?(${escapeRegExp(marker)})`, "gi");
-    formatted = formatted.replace(pattern, (_match, matchedMarker: string, offset: number) => (
+    .trim()
+    .replace(SMS_SECTION_PATTERN, (_match, matchedMarker: string, offset: number) => (
       offset === 0 ? matchedMarker : `\n${matchedMarker}`
     ));
-  }
 
   return formatted
     .replace(/[ \t]+\n/g, "\n")
