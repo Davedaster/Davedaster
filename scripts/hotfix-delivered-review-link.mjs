@@ -35,7 +35,7 @@ notificationTemplates = replaceOnce(
   notificationTemplates,
   "add delivered review helper",
   `export function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
-  `function addDeliveredReviewLink(body: string) {\n  if (body.includes(DELIVERY_REVIEW_URL)) {\n    return body;\n  }\n\n  const reviewText = \`Please support our family business by leaving us a review:\n\${DELIVERY_REVIEW_URL}\`;\n  const stopInstruction = "Reply STOP to unsubscribe.";\n\n  if (body.includes(stopInstruction)) {\n    return body.replace(stopInstruction, \`\${reviewText}\\n\\n\${stopInstruction}\`);\n  }\n\n  return \`\${body}\\n\\n\${reviewText}\`.trim();\n}\n\nexport function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
+  `function addDeliveredReviewLink(body: string) {\n  if (body.includes(DELIVERY_REVIEW_URL)) {\n    return body;\n  }\n\n  const reviewText = \`Please support our family business by leaving us a review:\n\${DELIVERY_REVIEW_URL}\`;\n  const helpInstruction = "Need help? Call";\n  const stopInstruction = "Reply STOP to unsubscribe.";\n\n  if (body.includes(helpInstruction)) {\n    return body.replace(helpInstruction, \`\${reviewText}\\n\\n\${helpInstruction}\`);\n  }\n\n  if (body.includes(stopInstruction)) {\n    return body.replace(stopInstruction, \`\${reviewText}\\n\\n\${stopInstruction}\`);\n  }\n\n  return \`\${body}\\n\\n\${reviewText}\`.trim();\n}\n\nexport function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
 );
 
 notificationTemplates = replaceOnce(
@@ -55,8 +55,8 @@ notificationSenders = replaceOnce(
 notificationSenders = replaceOnce(
   notificationSenders,
   "format every outgoing SMS",
-  `  return compliantBody;\n}`,
-  `  return formatSmsBody(compliantBody);\n}`,
+  `  const messageBody = input.includeHelpText === false\n    ? (input.message.body || "").trim()\n    : withSmsHelpText(input.message.body);`,
+  `  const messageBody = formatSmsBody(input.includeHelpText === false\n    ? (input.message.body || "").trim()\n    : withSmsHelpText(input.message.body));`,
 );
 
 writeFileSync(notificationTemplatesPath, notificationTemplates);
