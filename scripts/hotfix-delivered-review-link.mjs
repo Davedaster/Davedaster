@@ -204,8 +204,8 @@ replaceOnce(
 replaceOnce(
   "driver",
   "skip customer compliance injection for driver SMS",
-  `          message: {\n            body: smsBody,\n          },\n        });`,
-  `          message: {\n            body: smsBody,\n          },\n          includeHelpText: false,\n        });`,
+  `        message: {\n          body: smsBody,\n        },\n      });`,
+  `        message: {\n          body: smsBody,\n        },\n        includeHelpText: false,\n      });`,
 );
 
 replaceOnce(
