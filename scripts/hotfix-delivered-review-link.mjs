@@ -1,37 +1,64 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const notificationTemplatesPath = "app/lib/notificationTemplates.server.ts";
-let source = readFileSync(notificationTemplatesPath, "utf8");
+const notificationSendersPath = "app/lib/notificationSenders.server.ts";
+let notificationTemplates = readFileSync(notificationTemplatesPath, "utf8");
+let notificationSenders = readFileSync(notificationSendersPath, "utf8");
 
-function replaceOnce(label, from, to) {
+function replaceOnce(source, label, from, to) {
   if (source.includes(to)) {
-    return;
+    return source;
   }
 
   if (!source.includes(from)) {
-    throw new Error(`Could not apply delivered review link hotfix: ${label}`);
+    throw new Error(`Could not apply delivered review and SMS formatting hotfix: ${label}`);
   }
 
-  source = source.replace(from, to);
+  return source.replace(from, to);
 }
 
-replaceOnce(
+notificationTemplates = replaceOnce(
+  notificationTemplates,
+  "import SMS formatter into notification templates",
+  `import { formatEtaSlot } from "./etaSlots.server";`,
+  `import { formatEtaSlot } from "./etaSlots.server";\nimport { formatSmsBody } from "./smsFormatting";`,
+);
+
+notificationTemplates = replaceOnce(
+  notificationTemplates,
   "add review URL constant",
   `const COMPANY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/bathroom-panels-direct-logo-dark.png?v=1723113120";`,
   `const COMPANY_LOGO_URL = "https://cdn.shopify.com/s/files/1/0873/6250/2974/files/bathroom-panels-direct-logo-dark.png?v=1723113120";\nconst DELIVERY_REVIEW_URL = "https://review-bpd.s.gy/hHKdYF";`,
 );
 
-replaceOnce(
+notificationTemplates = replaceOnce(
+  notificationTemplates,
   "add delivered review helper",
   `export function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
-  `function addDeliveredReviewLink(body: string) {\n  if (body.includes(DELIVERY_REVIEW_URL)) {\n    return body;\n  }\n\n  const reviewText = \`Please leave us a review: \${DELIVERY_REVIEW_URL}.\`;\n  const stopInstruction = "Reply STOP to unsubscribe.";\n\n  if (body.includes(stopInstruction)) {\n    return body.replace(stopInstruction, \`\${reviewText} \${stopInstruction}\`);\n  }\n\n  return \`\${body} \${reviewText}\`.trim();\n}\n\nexport function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
+  `function addDeliveredReviewLink(body: string) {\n  if (body.includes(DELIVERY_REVIEW_URL)) {\n    return body;\n  }\n\n  const reviewText = \`Please support our family business by leaving us a review:\n\${DELIVERY_REVIEW_URL}\`;\n  const stopInstruction = "Reply STOP to unsubscribe.";\n\n  if (body.includes(stopInstruction)) {\n    return body.replace(stopInstruction, \`\${reviewText}\\n\\n\${stopInstruction}\`);\n  }\n\n  return \`\${body}\\n\\n\${reviewText}\`.trim();\n}\n\nexport function notificationTemplateSupportsEmail(id: string) {\n  return id !== "delayUpdate";\n}`,
 );
 
-replaceOnce(
-  "apply review link to delivered SMS only",
+notificationTemplates = replaceOnce(
+  notificationTemplates,
+  "apply review link and professional layout to customer SMS",
   `  const body = renderLiquid(selectedTemplate.smsBody, context, "text");\n  if (channel === "sms" || !notificationTemplateSupportsEmail(selectedTemplate.id)) return { body };\n  return { subject: renderLiquid(selectedTemplate.emailSubject, context, "text"), body, html: renderLiquid(selectedTemplate.emailHtml, context, "html") };`,
-  `  const body = renderLiquid(selectedTemplate.smsBody, context, "text");\n  const smsBody = channel === "sms" &&\n    selectedTemplate.id === "deliveryComplete" &&\n    input.serviceType !== "collection" &&\n    !input.leftInSafePlace\n    ? addDeliveredReviewLink(body)\n    : body;\n\n  if (channel === "sms" || !notificationTemplateSupportsEmail(selectedTemplate.id)) return { body: smsBody };\n  return { subject: renderLiquid(selectedTemplate.emailSubject, context, "text"), body, html: renderLiquid(selectedTemplate.emailHtml, context, "html") };`,
+  `  const body = renderLiquid(selectedTemplate.smsBody, context, "text");\n  const smsBody = formatSmsBody(channel === "sms" &&\n    selectedTemplate.id === "deliveryComplete" &&\n    input.serviceType !== "collection" &&\n    !input.leftInSafePlace\n    ? addDeliveredReviewLink(body)\n    : body);\n\n  if (channel === "sms" || !notificationTemplateSupportsEmail(selectedTemplate.id)) return { body: smsBody };\n  return { subject: renderLiquid(selectedTemplate.emailSubject, context, "text"), body, html: renderLiquid(selectedTemplate.emailHtml, context, "html") };`,
 );
 
-writeFileSync(notificationTemplatesPath, source);
-console.log("Delivered SMS review link hotfix applied.");
+notificationSenders = replaceOnce(
+  notificationSenders,
+  "import SMS formatter into sender",
+  `import type { NotificationMessage } from "./notificationTemplates.server";`,
+  `import type { NotificationMessage } from "./notificationTemplates.server";\nimport { formatSmsBody } from "./smsFormatting";`,
+);
+
+notificationSenders = replaceOnce(
+  notificationSenders,
+  "format every outgoing SMS",
+  `  return compliantBody;\n}`,
+  `  return formatSmsBody(compliantBody);\n}`,
+);
+
+writeFileSync(notificationTemplatesPath, notificationTemplates);
+writeFileSync(notificationSendersPath, notificationSenders);
+console.log("Delivered review wording and SMS paragraph formatting hotfix applied.");
